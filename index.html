@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PGB Distribution Chile SpA • Control Bodega</title>
+  <title>PGB Distribution Chile SpA • ERP Logística Bodega</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -11,10 +11,13 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>body { font-family: 'Inter', sans-serif; }</style>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .glass-card { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+  </style>
 </head>
-<body class="bg-[#090d16] text-slate-100 min-h-screen">
+<body class="bg-[#050811] text-slate-100 min-h-screen selection:bg-amber-500 selection:text-slate-950">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -37,7 +40,7 @@
 
     const UNIDADES = ["Unidad", "Caja", "Manga", "Fardo", "Unidad suelta", "Display", "Pack"];
     const MOTIVOS = [
-      { id: "Faltante", label: "Faltante en Ruta", desc: "Faltó entregar al cliente (Sobra en bodega)" },
+      { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)" },
       { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)" },
       { id: "Cruce", label: "Cruce de Producto", desc: "Se facturó un producto pero se envió otro físico" },
       { id: "Rechazo", label: "Rechazo Cliente", desc: "Cliente devuelve o no recibe mercadería" },
@@ -86,66 +89,39 @@
 
       useEffect(() => {
         auth.signInAnonymously().catch(() => {});
+        const unsubInc = db.collection("incidencias").onSnapshot((snap) => {
+          setConectado(true);
+          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setIncidencias(lista);
+        }, () => {});
 
-        const unsubInc = db.collection("incidencias")
-          .onSnapshot((snap) => {
-            setConectado(true);
-            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setIncidencias(lista);
-          }, () => {});
+        const unsubCierres = db.collection("cierres_semanales").onSnapshot((snap) => {
+          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          lista.sort((a, b) => new Date(b.fechaCierre) - new Date(a.fechaCierre));
+          setCierres(lista);
+        });
 
-        const unsubCierres = db.collection("cierres_semanales")
-          .onSnapshot((snap) => {
-            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            lista.sort((a, b) => new Date(b.fechaCierre) - new Date(a.fechaCierre));
-            setCierres(lista);
-          });
-
-        return () => {
-          unsubInc();
-          unsubCierres();
-        };
+        return () => { unsubInc(); unsubCierres(); };
       }, []);
 
       const limpiarFormulario = () => {
-        setFactura("");
-        setCliente("");
-        setProducto("");
-        setCantidad(1);
-        setUnidad(UNIDADES[0]);
-        setProductoCruce("");
-        setCantidadCruce(1);
-        setUnidadCruce(UNIDADES[0]);
-        setNotas("");
-        setEditandoId(null);
+        setFactura(""); setCliente(""); setProducto(""); setCantidad(1); setUnidad(UNIDADES[0]);
+        setProductoCruce(""); setCantidadCruce(1); setUnidadCruce(UNIDADES[0]); setNotas(""); setEditandoId(null);
       };
 
       const guardarIncidencia = async (e) => {
         e.preventDefault();
-        if (!factura.trim() || !producto.trim()) {
-          return alert("Completa el Nº de Factura y el Producto.");
-        }
-        if (motivo === "Cruce" && !productoCruce.trim()) {
-          return alert("En un Cruce indica el producto enviado por error.");
-        }
+        if (!factura.trim() || !producto.trim()) return alert("Completa el Nº de Factura y el Producto.");
+        if (motivo === "Cruce" && !productoCruce.trim()) return alert("Indica el producto enviado por error.");
 
         const datos = {
-          factura: factura.trim(),
-          cliente: cliente.trim(),
-          fecha,
-          ruta,
-          armador,
-          motivo,
-          producto: producto.trim().toUpperCase(),
-          cantidad: Number(cantidad),
-          unidad,
+          factura: factura.trim(), cliente: cliente.trim(), fecha, ruta, armador, motivo,
+          producto: producto.trim().toUpperCase(), cantidad: Number(cantidad), unidad,
           productoCruce: motivo === "Cruce" ? productoCruce.trim().toUpperCase() : null,
           cantidadCruce: motivo === "Cruce" ? Number(cantidadCruce) : null,
           unidadCruce: motivo === "Cruce" ? unidadCruce : null,
-          accionResolucion,
-          notas: notas.trim(),
-          timestamp: Date.now()
+          accionResolucion, notas: notas.trim(), timestamp: Date.now()
         };
 
         try {
@@ -158,31 +134,19 @@
           }
           limpiarFormulario();
           setVista("dashboard");
-        } catch (err) {
-          alert("Error al guardar: " + err.message);
-        }
+        } catch (err) { alert("Error al guardar: " + err.message); }
       };
 
       const cargarParaEditar = (item) => {
         setEditandoId(item.id);
-        setFactura(item.factura || "");
-        setCliente(item.cliente || "");
-        setFecha(item.fecha || hoy);
-        setRuta(item.ruta || RUTAS[0]);
-        setArmador(item.armador || ARMADORES[0]);
-        setMotivo(item.motivo || "Faltante");
-        setProducto(item.producto || "");
-        setCantidad(item.cantidad || 1);
-        setUnidad(item.unidad || UNIDADES[0]);
+        setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || hoy);
+        setRuta(item.ruta || RUTAS[0]); setArmador(item.armador || ARMADORES[0]); setMotivo(item.motivo || "Faltante");
+        setProducto(item.producto || ""); setCantidad(item.cantidad || 1); setUnidad(item.unidad || UNIDADES[0]);
         if (item.motivo === "Cruce") {
-          setProductoCruce(item.productoCruce || "");
-          setCantidadCruce(item.cantidadCruce || 1);
-          setUnidadCruce(item.unidadCruce || UNIDADES[0]);
+          setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(item.unidadCruce || UNIDADES[0]);
         }
-        setAccionResolucion(item.accionResolucion || ACCIONES[0]);
-        setNotas(item.notas || "");
-        setVista("nuevo");
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        setAccionResolucion(item.accionResolucion || ACCIONES[0]); setNotas(item.notas || "");
+        setVista("nuevo"); window.scrollTo({ top: 0, behavior: "smooth" });
       };
 
       const cambiarEstado = async (id, estadoActual) => {
@@ -190,9 +154,7 @@
       };
 
       const eliminarIncidencia = async (id) => {
-        if (confirm("¿Eliminar este registro?")) {
-          await db.collection("incidencias").doc(id).delete();
-        }
+        if (confirm("¿Deseas eliminar este registro?")) await db.collection("incidencias").doc(id).delete();
       };
 
       const cerrarSemana = async () => {
@@ -202,23 +164,18 @@
 
         try {
           await db.collection("cierres_semanales").add({
-            nombreSemana,
-            fechaCierre: new Date().toISOString(),
-            totalRegistros: incidencias.length,
-            registros: incidencias
+            nombreSemana, fechaCierre: new Date().toISOString(), totalRegistros: incidencias.length, registros: incidencias
           });
           const batch = db.batch();
           incidencias.forEach(inc => batch.delete(db.collection("incidencias").doc(inc.id)));
           await batch.commit();
-          alert("✅ Semana cerrada y archivada.");
+          alert("✅ Semana cerrada y archivada en Historial.");
           setVista("historial");
-        } catch (err) {
-          alert("Error: " + err.message);
-        }
+        } catch (err) { alert("Error: " + err.message); }
       };
 
       const copiarResumenWhatsApp = () => {
-        if (incidencias.length === 0) return alert("Sin incidencias.");
+        if (incidencias.length === 0) return alert("Sin incidencias para copiar.");
         let texto = `📦 *REPORTE BODEGA PGB DISTRIBUTION*\n📅 Fecha: ${hoy}\n━━━━━━━━━━━━━━\n`;
         incidencias.forEach((i, idx) => {
           const estado = i.resuelto ? "✅ RESUELTO" : "⏳ PENDIENTE";
@@ -230,26 +187,20 @@
           texto += `   • Armó: ${i.armador} | ${i.ruta}\n\n`;
         });
         navigator.clipboard.writeText(texto);
-        alert("📋 ¡Reporte copiado para WhatsApp!");
+        alert("📋 ¡Reporte copiado con éxito para WhatsApp!");
       };
 
-      const kpis = useMemo(() => {
-        return {
-          total: incidencias.length,
-          pendientes: incidencias.filter(i => !i.resuelto).length,
-          resueltas: incidencias.filter(i => i.resuelto).length,
-          cruces: incidencias.filter(i => i.motivo === "Cruce").length
-        };
-      }, [incidencias]);
+      const kpis = useMemo(() => ({
+        total: incidencias.length,
+        pendientes: incidencias.filter(i => !i.resuelto).length,
+        resueltas: incidencias.filter(i => i.resuelto).length,
+        cruces: incidencias.filter(i => i.motivo === "Cruce").length
+      }), [incidencias]);
 
       const incidenciasFiltradas = useMemo(() => {
         return incidencias.filter(item => {
-          const coincideTexto =
-            item.factura?.toLowerCase().includes(busqueda.toLowerCase()) ||
-            item.producto?.toLowerCase().includes(busqueda.toLowerCase()) ||
-            item.cliente?.toLowerCase().includes(busqueda.toLowerCase());
-          const coincideEstado =
-            filtroEstado === "todos" ? true : filtroEstado === "pendientes" ? !item.resuelto : item.resuelto;
+          const coincideTexto = item.factura?.toLowerCase().includes(busqueda.toLowerCase()) || item.producto?.toLowerCase().includes(busqueda.toLowerCase()) || item.cliente?.toLowerCase().includes(busqueda.toLowerCase());
+          const coincideEstado = filtroEstado === "todos" ? true : filtroEstado === "pendientes" ? !item.resuelto : item.resuelto;
           const coincideArmador = filtroArmador === "todos" ? true : item.armador === filtroArmador;
           const coincideRuta = filtroRuta === "todos" ? true : item.ruta === filtroRuta;
           return coincideTexto && coincideEstado && coincideArmador && coincideRuta;
@@ -265,7 +216,6 @@
           if (tipo === "FALTA_EN_BODEGA") mapa[clave].faltanteBodega += cant;
           if (!mapa[clave].facturas.includes(fact)) mapa[clave].facturas.push(fact);
         };
-
         incidencias.forEach(inc => {
           if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
           else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura);
@@ -278,203 +228,358 @@
       }, [incidencias]);
 
       return (
-        <div className="max-w-5xl mx-auto px-3 sm:px-6 pt-4 pb-24">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-5 shadow-2xl">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
+          {/* Header Ejecutivo */}
+          <div className="glass-card rounded-3xl p-6 sm:p-8 mb-6 shadow-2xl relative overflow-hidden">
+            <div className="absolute -right-10 -top-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2.5 w-2.5 rounded-full ${conectado ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                  <span className="text-xs font-bold text-slate-400">{conectado ? "CONECTADO A FIREBASE" : "CONECTANDO..."}</span>
+                <div className="flex items-center gap-2.5 mb-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    <span className={`h-2 w-2 rounded-full ${conectado ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`}></span>
+                    {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">PGB Distribution SpA</span>
                 </div>
-                <h1 className="text-2xl font-black text-white mt-1">PGB <span className="text-amber-400">DISTRIBUTION</span> CHILE</h1>
-                <p className="text-xs text-slate-400">Control de Bodega • Jefatura: Pedro y Bedanli</p>
+                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
+                  CONTROL DE <span className="text-amber-400">BODEGA</span>
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1">
+                  Supervisión General: <strong className="text-slate-200">Pedro y Bedanli</strong> • Santiago, Chile
+                </p>
               </div>
-              <div className="flex gap-2">
-                <button onClick={copiarResumenWhatsApp} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl">
-                  📲 WhatsApp
+
+              <div className="flex flex-wrap gap-2.5">
+                <button onClick={copiarResumenWhatsApp} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition">
+                  📲 Copiar a WhatsApp
                 </button>
-                <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-3.5 py-2.5 rounded-xl">
-                  ➕ Registrar
+                <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-3 rounded-2xl shadow-xl transition">
+                  ➕ Registrar Incidencia
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-800">
-              <div className="bg-slate-950 p-2.5 rounded-xl">
-                <span className="text-[10px] text-slate-400 uppercase">Total</span>
-                <p className="text-xl font-black text-white">{kpis.total}</p>
+            {/* Tarjetas KPI */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+              <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Registros Activos</span>
+                <p className="text-3xl font-black text-white mt-1">{kpis.total}</p>
               </div>
-              <div className="bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20">
-                <span className="text-[10px] text-amber-300 uppercase">Pendientes</span>
-                <p className="text-xl font-black text-amber-400">{kpis.pendientes}</p>
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
+                <span className="text-xs font-semibold text-amber-300 uppercase tracking-wider">⏳ Pendientes</span>
+                <p className="text-3xl font-black text-amber-400 mt-1">{kpis.pendientes}</p>
               </div>
-              <div className="bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-500/20">
-                <span className="text-[10px] text-emerald-300 uppercase">Resueltas</span>
-                <p className="text-xl font-black text-emerald-400">{kpis.resueltas}</p>
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">✅ Resueltas</span>
+                <p className="text-3xl font-black text-emerald-400 mt-1">{kpis.resueltas}</p>
               </div>
-              <div className="bg-purple-500/10 p-2.5 rounded-xl border border-purple-500/20">
-                <span className="text-[10px] text-purple-300 uppercase">Cruces</span>
-                <p className="text-xl font-black text-purple-400">{kpis.cruces}</p>
+              <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">🔄 Cruces de Stock</span>
+                <p className="text-3xl font-black text-purple-400 mt-1">{kpis.cruces}</p>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-1.5 bg-slate-900 p-1.5 rounded-2xl border border-slate-800 mb-4">
-            <button onClick={() => setVista("dashboard")} className={`py-2 rounded-xl text-xs font-extrabold ${vista === "dashboard" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}>Tablero</button>
-            <button onClick={() => setVista("nuevo")} className={`py-2 rounded-xl text-xs font-extrabold ${vista === "nuevo" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}>Anotar</button>
-            <button onClick={() => setVista("balance")} className={`py-2 rounded-xl text-xs font-extrabold ${vista === "balance" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}>Cuadratura</button>
-            <button onClick={() => setVista("historial")} className={`py-2 rounded-xl text-xs font-extrabold ${vista === "historial" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}>Cierres</button>
+          {/* Menú de Pestañas Pro */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 mb-6 shadow-md">
+            <button onClick={() => setVista("dashboard")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "dashboard" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+              📋 Tablero Activo ({incidencias.length})
+            </button>
+            <button onClick={() => setVista("nuevo")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "nuevo" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+              {editandoId ? "✏️ Editando Factura" : "➕ Nueva Incidencia"}
+            </button>
+            <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+              ⚖️ Cuadratura Bodega ({resumenInventario.length})
+            </button>
+            <button onClick={() => setVista("historial")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "historial" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+              📁 Archivo Semanal ({cierres.length})
+            </button>
           </div>
 
+          {/* VISTA 1: TABLERO */}
           {vista === "dashboard" && (
-            <div className="space-y-3">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
-                <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar factura o producto..." className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white outline-none" />
-                <div className="grid grid-cols-3 gap-2">
-                  <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white">
-                    <option value="todos">Estado: Todos</option>
-                    <option value="pendientes">Pendientes</option>
-                    <option value="resueltos">Resueltos</option>
-                  </select>
-                  <select value={filtroArmador} onChange={e => setFiltroArmador(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white">
-                    <option value="todos">Armador: Todos</option>
-                    {ARMADORES.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                  <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white">
-                    <option value="todos">Ruta: Todas</option>
-                    {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
+            <div className="space-y-4">
+              <div className="glass-card rounded-2xl p-4 shadow-lg space-y-3">
+                <div className="flex flex-col lg:flex-row gap-3">
+                  <div className="flex-1">
+                    <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº de Factura, producto o cliente..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                      <option value="todos">Estado: Todos</option>
+                      <option value="pendientes">⏳ Pendientes</option>
+                      <option value="resueltos">✅ Resueltos</option>
+                    </select>
+                    <select value={filtroArmador} onChange={e => setFiltroArmador(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                      <option value="todos">Armador: Todos</option>
+                      {ARMADORES.map(a => <option key={a} value={a}>Armó: {a}</option>)}
+                    </select>
+                    <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="col-span-2 sm:col-span-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                      <option value="todos">Ruta: Todas</option>
+                      {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-between items-center px-1">
-                <span className="text-xs text-slate-400">{incidenciasFiltradas.length} registros</span>
-                <button onClick={cerrarSemana} className="bg-rose-600/20 text-rose-400 border border-rose-500/30 text-xs font-bold px-3 py-1.5 rounded-xl">🔒 Cerrar Semana</button>
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Mostrando {incidenciasFiltradas.length} registros
+                </span>
+                <button onClick={cerrarSemana} className="bg-rose-600/20 hover:bg-rose-600 hover:text-white text-rose-400 border border-rose-500/30 text-xs font-bold px-4 py-2.5 rounded-xl transition">
+                  🔒 Cerrar y Archivar Semana
+                </button>
               </div>
 
               {incidenciasFiltradas.length === 0 ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-400 text-sm">
-                  No hay registros activos.
+                <div className="glass-card rounded-3xl p-12 text-center">
+                  <p className="text-4xl mb-3">📦</p>
+                  <p className="text-lg font-bold text-white">Sin incidencias registradas</p>
+                  <p className="text-xs text-slate-400 mt-1 mb-5">Todo marcha en orden en las entregas de hoy.</p>
+                  <button onClick={() => setVista("nuevo")} className="bg-amber-500 text-slate-950 font-black text-xs px-6 py-3 rounded-xl shadow-lg">
+                    ➕ Registrar Incidencia
+                  </button>
                 </div>
               ) : (
-                incidenciasFiltradas.map(item => (
-                  <div key={item.id} className={`p-4 rounded-2xl border ${item.resuelto ? "bg-slate-900/40 border-emerald-900/50 opacity-75" : "bg-slate-900 border-slate-800"}`}>
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="flex gap-2 items-center">
-                        <span className="bg-amber-500/20 text-amber-300 font-bold text-xs px-2.5 py-1 rounded-lg">#{item.factura}</span>
-                        <span className="text-xs font-extrabold text-white">{item.motivo}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {incidenciasFiltradas.map(item => (
+                    <div key={item.id} className={`glass-card rounded-2xl p-5 border transition shadow-lg flex flex-col justify-between ${item.resuelto ? "border-emerald-900/50 opacity-75" : "border-slate-800 hover:border-slate-700"}`}>
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="bg-amber-500/15 text-amber-300 border border-amber-500/30 font-black text-xs px-3 py-1 rounded-lg">
+                              FACT #{item.factura}
+                            </span>
+                            <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg border ${
+                              item.motivo === "Faltante" ? "bg-rose-500/15 text-rose-300 border-rose-500/30" :
+                              item.motivo === "Sobrante" ? "bg-sky-500/15 text-sky-300 border-sky-500/30" :
+                              item.motivo === "Cruce" ? "bg-purple-500/15 text-purple-300 border-purple-500/30" :
+                              "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                            }`}>
+                              {item.motivo.toUpperCase()}
+                            </span>
+                            {item.cliente && (
+                              <span className="text-xs font-semibold text-slate-300 bg-slate-800/80 px-2.5 py-1 rounded-lg">
+                                🏪 {item.cliente}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-slate-400 font-medium">{item.fecha}</span>
+                        </div>
+
+                        <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 mb-3">
+                          <span className="text-[11px] font-bold uppercase text-slate-400 block mb-0.5">
+                            {item.motivo === "Cruce" ? "Producto en Factura (Sobra en bodega):" : "Producto Afectado:"}
+                          </span>
+                          <p className="text-base font-black text-white">
+                            {item.cantidad} {item.unidad} — <span className="text-amber-300">{item.producto}</span>
+                          </p>
+
+                          {item.motivo === "Cruce" && item.productoCruce && (
+                            <div className="mt-2.5 pt-2.5 border-t border-rose-900/40">
+                              <span className="text-[11px] font-bold uppercase text-rose-400 block mb-0.5">
+                                🔄 Enviado por error (Falta en bodega):
+                              </span>
+                              <p className="text-sm font-black text-rose-300">
+                                {item.cantidadCruce} {item.unidadCruce} — {item.productoCruce}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-slate-300 mb-3 px-1">
+                          <span>👷 Armó: <strong className="text-white">{item.armador}</strong></span>
+                          <span>🚚 {item.ruta}</span>
+                        </div>
+
+                        {item.notas && (
+                          <p className="text-xs text-slate-300 bg-slate-950/40 px-3 py-2 rounded-lg italic mb-3 border-l-2 border-amber-500">
+                            "{item.notas}"
+                          </p>
+                        )}
                       </div>
-                      <span className="text-xs text-slate-400">{item.armador} • {item.ruta}</span>
-                    </div>
-                    <p className="text-sm font-bold text-white mb-1">{item.cantidad} {item.unidad} — {item.producto}</p>
-                    {item.motivo === "Cruce" && item.productoCruce && (
-                      <p className="text-xs text-rose-300 mb-2">🔄 Cruzado con: {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>
-                    )}
-                    {item.notas && <p className="text-xs text-slate-400 italic mb-2">"{item.notas}"</p>}
-                    <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-xs">
-                      <span className="text-amber-300">📌 {item.accionResolucion}</span>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => cambiarEstado(item.id, item.resuelto)} className={`px-2.5 py-1 rounded-lg font-bold ${item.resuelto ? "bg-emerald-600 text-white" : "bg-slate-800 text-amber-300"}`}>
-                          {item.resuelto ? "✓ Resuelto" : "Pendiente"}
-                        </button>
-                        <button onClick={() => cargarParaEditar(item)} className="px-2.5 py-1 bg-slate-800 text-sky-300 rounded-lg">Editar</button>
-                        <button onClick={() => eliminarIncidencia(item.id)} className="px-2.5 py-1 bg-slate-800 text-rose-400 rounded-lg">🗑️</button>
+
+                      <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-amber-400">
+                          📌 {item.accionResolucion}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => cambiarEstado(item.id, item.resuelto)} className={`px-3 py-1.5 rounded-xl font-bold transition ${item.resuelto ? "bg-emerald-600 text-white" : "bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500 hover:text-slate-950"}`}>
+                            {item.resuelto ? "✅ Resuelto" : "⏳ Pendiente"}
+                          </button>
+                          <button onClick={() => cargarParaEditar(item)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold rounded-xl">
+                            ✏️ Editar
+                          </button>
+                          <button onClick={() => eliminarIncidencia(item.id)} className="px-3 py-1.5 bg-slate-800 hover:bg-rose-950 text-rose-400 font-semibold rounded-xl">
+                            🗑️
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           )}
 
+          {/* VISTA 2: FORMULARIO */}
           {vista === "nuevo" && (
-            <form onSubmit={guardarIncidencia} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
-              <h2 className="text-base font-black text-white">{editandoId ? "✏️ Editar Incidencia" : "➕ Nueva Incidencia"}</h2>
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={guardarIncidencia} className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 max-w-3xl mx-auto">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">Factura *</label>
-                  <input type="text" value={factura} onChange={e => setFactura(e.target.value)} placeholder="Ej: 45892" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" required />
+                  <h2 className="text-xl font-black text-white">
+                    {editandoId ? "✏️ Editar Incidencia" : "➕ Registrar Nueva Incidencia"}
+                  </h2>
+                  <p className="text-xs text-slate-400">Sincronización en tiempo real para todo el equipo.</p>
+                </div>
+                <button type="button" onClick={() => { limpiarFormulario(); setVista("dashboard"); }} className="text-xs font-bold text-slate-400 hover:text-white bg-slate-800 px-3.5 py-2 rounded-xl">
+                  ✕ Cancelar
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Nº Factura *</label>
+                  <input type="text" value={factura} onChange={e => setFactura(e.target.value)} placeholder="Ej: 45892" className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none" required />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">Fecha</label>
-                  <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" />
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Cliente / Local</label>
+                  <input type="text" value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Ej: Minimarket Don Pedro" className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Fecha</label>
+                  <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">Ruta</label>
-                  <select value={ruta} onChange={e => setRuta(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white">
+                  <label className="text-xs font-bold text-slate-300 block mb-1">🚚 Ruta / Chofer</label>
+                  <select value={ruta} onChange={e => setRuta(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-semibold text-white">
                     {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-300 block mb-1">Armador</label>
-                  <select value={armador} onChange={e => setArmador(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white">
-                    {ARMADORES.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-slate-300 block mb-1">Motivo</label>
-                <select value={motivo} onChange={e => setMotivo(e.target.value)} className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3 py-2 text-sm font-bold text-amber-300">
-                  {MOTIVOS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                </select>
-              </div>
-              <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-3">
-                <p className="text-xs font-bold text-emerald-400">{motivo === "Cruce" ? "1️⃣ Producto en Factura" : "📦 Producto"}</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <input type="text" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Nombre..." className="col-span-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" required />
-                  <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} placeholder="Cant" className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white" required />
-                </div>
-                <select value={unidad} onChange={e => setUnidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white">
-                  {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              {motivo === "Cruce" && (
-                <div className="bg-rose-950/30 p-3 rounded-2xl border border-rose-800 space-y-3">
-                  <p className="text-xs font-bold text-rose-300">2️⃣ Producto enviado por error</p>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">👷 Armador de Bodega</label>
                   <div className="grid grid-cols-3 gap-2">
-                    <input type="text" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Producto..." className="col-span-2 bg-slate-900 border border-rose-700 rounded-xl px-3 py-2 text-sm text-white" required />
-                    <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} placeholder="Cant" className="bg-slate-900 border border-rose-700 rounded-xl px-3 py-2 text-sm text-white" required />
+                    {ARMADORES.map(a => (
+                      <button type="button" key={a} onClick={() => setArmador(a)} className={`py-3 rounded-xl text-xs font-black border transition ${armador === a ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"}`}>
+                        {a}
+                      </button>
+                    ))}
                   </div>
-                  <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-rose-700 rounded-xl px-3 py-2 text-sm text-white">
-                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-2">⚠️ Tipo de Incidencia</label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {MOTIVOS.map(m => (
+                    <button type="button" key={m.id} onClick={() => setMotivo(m.id)} className={`p-3 rounded-xl border text-left transition ${motivo === m.id ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow" : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"}`}>
+                      <div className="text-xs font-black">{m.label}</div>
+                      <div className="text-[10px] opacity-75 mt-0.5 leading-tight">{m.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
+                <p className="text-xs font-extrabold text-emerald-400 uppercase">
+                  {motivo === "Cruce" ? "1️⃣ Producto en Factura (Sobra en bodega)" : "📦 Detalle del Producto"}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] text-slate-400 block mb-1">Nombre del Producto *</label>
+                    <input type="text" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Ej: Coca-Cola 1.5L" className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Cantidad *</label>
+                    <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Unidad</label>
+                    <select value={unidad} onChange={e => setUnidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-amber-300">
+                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {motivo === "Cruce" && (
+                <div className="bg-rose-950/30 p-4 rounded-2xl border border-rose-800/60 space-y-3">
+                  <p className="text-xs font-extrabold text-rose-300 uppercase">
+                    2️⃣ Producto enviado físicamente por error (Falta en bodega)
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] text-rose-300/80 block mb-1">Producto enviado *</label>
+                      <input type="text" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Ej: Sprite 1.5L" className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-rose-300/80 block mb-1">Cantidad *</label>
+                      <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-rose-300/80 block mb-1">Unidad</label>
+                      <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-rose-300">
+                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <select value={accionResolucion} onChange={e => setAccionResolucion(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-                  {ACCIONES.map(ac => <option key={ac} value={ac}>{ac}</option>)}
-                </select>
-                <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Notas..." className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">📌 Acción a Tomar</label>
+                  <select value={accionResolucion} onChange={e => setAccionResolucion(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white">
+                    {ACCIONES.map(ac => <option key={ac} value={ac}>{ac}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">💬 Notas Opcionales</label>
+                  <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Cliente avisa por WhatsApp..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white" />
+                </div>
               </div>
-              <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-sm">
-                Guardar Registro
+
+              <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-xl transition">
+                {editandoId ? "💾 Guardar Cambios" : "✅ Guardar e Iniciar Sincronización"}
               </button>
             </form>
           )}
 
+          {/* VISTA 3: CUADRATURA */}
           {vista === "balance" && (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5">
-              <h2 className="text-base font-black text-amber-400 mb-3">⚖️ Cuadratura de Bodega</h2>
+            <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
+              <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
+                Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente en estanterías según las incidencias de ruta.
+              </p>
+
               {resumenInventario.length === 0 ? (
-                <p className="text-xs text-slate-400">Sin desfases registrados.</p>
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-10 text-center text-sm text-slate-400">
+                  Sin desfases de inventario registrados esta semana. ¡Todo cuadrado!
+                </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-950 text-slate-400 uppercase">
+                  <table className="w-full text-left text-xs sm:text-sm">
+                    <thead className="bg-slate-950 text-slate-400 uppercase text-[11px]">
                       <tr>
-                        <th className="p-2.5">Producto</th>
-                        <th className="p-2.5 text-emerald-400">Sobra (+)</th>
-                        <th className="p-2.5 text-rose-400">Falta (-)</th>
+                        <th className="p-4 rounded-l-xl">Producto</th>
+                        <th className="p-4">Unidad</th>
+                        <th className="p-4 text-emerald-400">Sobra en Bodega (+)</th>
+                        <th className="p-4 text-rose-400">Falta en Bodega (-)</th>
+                        <th className="p-4 rounded-r-xl">Facturas</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
                       {resumenInventario.map((item, idx) => (
-                        <tr key={idx}>
-                          <td className="p-2.5 font-bold text-white">{item.producto} ({item.unidad})</td>
-                          <td className="p-2.5 font-black text-emerald-400">{item.sobranteBodega > 0 ? `+${item.sobranteBodega}` : "—"}</td>
-                          <td className="p-2.5 font-black text-rose-400">{item.faltanteBodega > 0 ? `-${item.faltanteBodega}` : "—"}</td>
+                        <tr key={idx} className="hover:bg-slate-950/40">
+                          <td className="p-4 font-black text-white">{item.producto}</td>
+                          <td className="p-4 text-slate-300 font-semibold">{item.unidad}</td>
+                          <td className="p-4 font-black text-emerald-400 text-base">{item.sobranteBodega > 0 ? `+${item.sobranteBodega}` : "—"}</td>
+                          <td className="p-4 font-black text-rose-400 text-base">{item.faltanteBodega > 0 ? `-${item.faltanteBodega}` : "—"}</td>
+                          <td className="p-4 text-xs text-amber-300 font-semibold">#{item.facturas.join(", #")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -484,16 +589,43 @@
             </div>
           )}
 
+          {/* VISTA 4: HISTORIAL */}
           {vista === "historial" && (
-            <div className="space-y-3">
-              <h2 className="text-base font-black text-amber-400">📁 Historial de Cierres</h2>
+            <div className="space-y-4 max-w-3xl mx-auto">
+              <div className="glass-card rounded-2xl p-5">
+                <h2 className="text-lg font-black text-amber-400">📁 Historial de Cierres Semanales</h2>
+                <p className="text-xs text-slate-400 mt-1">Registros archivados de semanas anteriores.</p>
+              </div>
+
               {cierres.length === 0 ? (
-                <p className="text-xs text-slate-400 bg-slate-900 p-4 rounded-2xl border border-slate-800">Sin semanas archivadas.</p>
+                <div className="glass-card rounded-2xl p-8 text-center text-sm text-slate-400">
+                  Aún no se han archivado semanas cerradas.
+                </div>
               ) : (
                 cierres.map(c => (
-                  <div key={c.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                    <h3 className="font-bold text-white text-sm">{c.nombreSemana}</h3>
-                    <p className="text-xs text-slate-400">{c.totalRegistros} registros</p>
+                  <div key={c.id} className="glass-card rounded-2xl p-5">
+                    <div onClick={() => setCierreExpandido(cierreExpandido === c.id ? null : c.id)} className="flex justify-between items-center cursor-pointer">
+                      <div>
+                        <h3 className="font-black text-white text-base">📦 {c.nombreSemana}</h3>
+                        <p className="text-xs text-slate-400">Cerrado el {new Date(c.fechaCierre).toLocaleString("es-CL")}</p>
+                      </div>
+                      <span className="text-xs font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-xl">
+                        {c.totalRegistros} registros {cierreExpandido === c.id ? "▲" : "▼"}
+                      </span>
+                    </div>
+
+                    {cierreExpandido === c.id && c.registros && (
+                      <div className="mt-4 pt-3 border-t border-slate-800 space-y-2">
+                        {c.registros.map((r, i) => (
+                          <div key={i} className="bg-slate-950 p-3 rounded-xl text-xs flex justify-between items-center">
+                            <div>
+                              <span className="font-bold text-amber-400">Fact #{r.factura}</span> • <span className="font-bold text-white">{r.motivo}</span>: {r.cantidad} {r.unidad} de {r.producto}
+                            </div>
+                            <div className="text-slate-400">Armó: {r.armador}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
