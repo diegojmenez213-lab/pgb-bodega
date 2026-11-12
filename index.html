@@ -48,8 +48,6 @@
     ];
     const ARMADORES = ["Diego", "Nico", "Edwin"];
     const RUTAS = ["Ruta 1 (Juan / Julio)", "Ruta 2 (Carlos / Horacio)", "Retiro Bodega / Otra"];
-    
-    // Lista restringida de encargados administrativos y de bodega
     const USUARIOS_SISTEMA = ["Edwin", "Nico", "Diego", "Bedanli", "Pedro", "Gabriel"];
 
     const ACCIONES_DISPONIBLES = [
@@ -204,9 +202,11 @@
         } catch (err) { alert("Error: " + err.message); }
       };
 
+      // Función con poda automática: si hay más de 10 registros del mismo producto, borra los excedentes y deja los últimos 6
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsable) => {
         try {
-          await db.collection("historial_inventario").add({
+          const colRef = db.collection("historial_inventario");
+          await colRef.add({
             producto: productoNombre,
             unidad: unidadMedida,
             factura: facturaNum,
@@ -214,8 +214,23 @@
             fechaHora: new Date().toLocaleString("es-CL"),
             timestamp: Date.now()
           });
+
+          // Buscar todos los registros de este producto específico ordenados del más nuevo al más antiguo
+          const snapshot = await colRef.where("producto", "==", productoNombre).get();
+          const registrosProducto = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          registrosProducto.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+          // Si supera los 10 registros, elimina los más antiguos y deja solo los últimos 6
+          if (registrosProducto.length > 10) {
+            const excess = registrosProducto.slice(6); // Mantener solo los primeros 6, eliminar el resto
+            const batch = db.batch();
+            excess.forEach(item => {
+              batch.delete(colRef.doc(item.id));
+            });
+            await batch.commit();
+          }
         } catch (err) {
-          console.error("Error al registrar historial de inventario:", err);
+          console.error("Error al gestionar historial de inventario:", err);
         }
       };
 
@@ -235,7 +250,6 @@
           fechaHora: !estadoActual ? ahora : ""
         };
 
-        // Si se marca la acción de inventario como completada, se guarda en el historial acumulativo por producto
         if (!estadoActual && accionNombre.includes("Inventario")) {
           await registrarEnHistorialInventario(incidenciaActual.producto, incidenciaActual.unidad, incidenciaActual.factura, usuarioActual.trim());
           if (incidenciaActual.productoCruce) {
@@ -805,11 +819,11 @@
                 )}
               </div>
 
-              {/* Historial Acumulativo de Correcciones de Inventario por Producto */}
+              {/* Historial Acumulativo con Poda Automática (Máx 10 por producto, reduce a los 6 más recientes) */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-lg font-black text-amber-400 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
                 <p className="text-xs text-slate-400 mb-5">
-                  Registro cronológico por producto cada vez que se marca la corrección en bodega. Permite saber qué fecha se actualizó por última vez.
+                  Registro cronológico por producto. Al superar los 10 registros de un mismo artículo, el sistema limpia los más antiguos y conserva automáticamente los últimos 6.
                 </p>
 
                 {historialInventario.length === 0 ? (
