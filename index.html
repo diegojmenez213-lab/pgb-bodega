@@ -61,6 +61,7 @@
     function App() {
       const [incidencias, setIncidencias] = useState([]);
       const [cierres, setCierres] = useState([]);
+      const [catalogoProductos, setCatalogoProductos] = useState([]);
       const [vista, setVista] = useState("dashboard");
       const [conectado, setConectado] = useState(false);
       const [editandoId, setEditandoId] = useState(null);
@@ -93,6 +94,8 @@
 
       useEffect(() => {
         auth.signInAnonymously().catch(() => {});
+        
+        // Sincronizar Incidencias
         const unsubInc = db.collection("incidencias").onSnapshot((snap) => {
           setConectado(true);
           const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -100,13 +103,21 @@
           setIncidencias(lista);
         }, () => {});
 
+        // Sincronizar Cierres
         const unsubCierres = db.collection("cierres_semanales").onSnapshot((snap) => {
           const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           lista.sort((a, b) => new Date(b.fechaCierre) - new Date(a.fechaCierre));
           setCierres(lista);
         });
 
-        return () => { unsubInc(); unsubCierres(); };
+        // Sincronizar Catálogo Inteligente de Productos
+        const unsubCat = db.collection("catalogo_productos").onSnapshot((snap) => {
+          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+          setCatalogoProductos(lista);
+        });
+
+        return () => { unsubInc(); unsubCierres(); unsubCat(); };
       }, []);
 
       const limpiarFormulario = () => {
@@ -115,9 +126,33 @@
         setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
       };
 
+      const registrarProductoEnCatalogo = async (nombreProd) => {
+        if (!nombreProd || !nombreProd.trim()) return;
+        const nombreMayus = nombreProd.trim().toUpperCase();
+        const existe = catalogoProductos.some(p => p.nombre === nombreMayus);
+        if (!existe) {
+          try {
+            await db.collection("catalogo_productos").add({ nombre: nombreMayus });
+          } catch (err) {
+            console.error("Error al guardar en catálogo:", err);
+          }
+        }
+      };
+
+      const eliminarProductoCatalogo = async (id, e) => {
+        e.stopPropagation();
+        if (confirm("¿Seguro que deseas eliminar este producto del catálogo inteligente?")) {
+          try {
+            await db.collection("catalogo_productos").doc(id).delete();
+          } catch (err) {
+            alert("Error al eliminar: " + err.message);
+          }
+        }
+      };
+
       const toggleAccion = (acc) => {
         if (accionesSeleccionadas.includes(acc)) {
-          if (accionesSeleccionadas.length === 1) return; // Mantener al menos 1
+          if (accionesSeleccionadas.length === 1) return;
           setAccionesSeleccionadas(accionesSeleccionadas.filter(a => a !== acc));
         } else {
           setAccionesSeleccionadas([...accionesSeleccionadas, acc]);
@@ -128,6 +163,12 @@
         e.preventDefault();
         if (!factura.trim() || !producto.trim()) return alert("Completa el Nº de Factura y el Producto.");
         if (motivo === "Cruce" && !productoCruce.trim()) return alert("Indica el producto enviado por error.");
+
+        // Guardar automáticamente en el catálogo inteligente
+        await registrarProductoEnCatalogo(producto);
+        if (motivo === "Cruce" && productoCruce) {
+          await registrarProductoEnCatalogo(productoCruce);
+        }
 
         const datos = {
           factura: factura.trim(),
@@ -523,14 +564,29 @@
                 </div>
               </div>
 
+              {/* Producto 1 con Autocompletado del Catálogo */}
               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-                <p className="text-xs font-extrabold text-emerald-400 uppercase">
-                  {motivo === "Cruce" ? "1️⃣ Producto en Factura (Sobra en bodega)" : "📦 Detalle del Producto"}
-                </p>
+                <div className="flex justify-between items-center">
+                  <p className="text-xs font-extrabold text-emerald-400 uppercase">
+                    {motivo === "Cruce" ? "1️⃣ Producto en Factura (Sobra en bodega)" : "📦 Detalle del Producto"}
+                  </p>
+                  <span className="text-[10px] text-slate-400">💡 Se autocompleta con productos ya guardados</span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-2 relative">
                     <label className="text-[11px] text-slate-400 block mb-1">Nombre del Producto *</label>
-                    <input type="text" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Ej: Azúcar Rubia 1kg" className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                    <input 
+                      type="text" 
+                      list="lista-catalogo"
+                      value={producto} 
+                      onChange={e => setProducto(e.target.value)} 
+                      placeholder="Escribe o selecciona producto..." 
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white" 
+                      required 
+                    />
+                    <datalist id="lista-catalogo">
+                      {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
+                    </datalist>
                   </div>
                   <div>
                     <label className="text-[11px] text-slate-400 block mb-1">Cantidad *</label>
@@ -545,15 +601,24 @@
                 </div>
               </div>
 
+              {/* Producto 2 (Cruces) con Autocompletado */}
               {motivo === "Cruce" && (
                 <div className="bg-rose-950/30 p-4 rounded-2xl border border-rose-800/60 space-y-3">
                   <p className="text-xs font-extrabold text-rose-300 uppercase">
                     2️⃣ Producto enviado físicamente por error (Falta en bodega)
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                    <div className="sm:col-span-2">
+                    <div className="sm:col-span-2 relative">
                       <label className="text-[11px] text-rose-300/80 block mb-1">Producto enviado *</label>
-                      <input type="text" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Ej: Azúcar Blanca 1kg" className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                      <input 
+                        type="text" 
+                        list="lista-catalogo"
+                        value={productoCruce} 
+                        onChange={e => setProductoCruce(e.target.value)} 
+                        placeholder="Producto enviado..." 
+                        className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm text-white" 
+                        required 
+                      />
                     </div>
                     <div>
                       <label className="text-[11px] text-rose-300/80 block mb-1">Cantidad *</label>
@@ -568,6 +633,37 @@
                   </div>
                 </div>
               )}
+
+              {/* Gestor de Catálogo Inteligente (Para borrar faltas de ortografía) */}
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                <details className="group">
+                  <summary className="text-xs font-bold text-amber-400 cursor-pointer flex items-center justify-between">
+                    <span>📚 Administrar Catálogo Inteligente de Productos ({catalogoProductos.length} guardados)</span>
+                    <span className="text-[10px] bg-slate-900 px-2 py-1 rounded-lg text-slate-300 group-open:rotate-180 transition">▼ Ver lista</span>
+                  </summary>
+                  <p className="text-[11px] text-slate-400 mt-2 mb-3">
+                    Aquí puedes ver los nombres guardados y eliminar cualquiera que tenga un error ortográfico para que no vuelva a aparecer en el autocompletado:
+                  </p>
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                    {catalogoProductos.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">Aún no hay productos en el catálogo automático.</p>
+                    ) : (
+                      catalogoProductos.map(cp => (
+                        <div key={cp.id} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-xl text-xs">
+                          <span className="font-semibold text-white">{cp.nombre}</span>
+                          <button 
+                            type="button" 
+                            onClick={(e) => eliminarProductoCatalogo(cp.id, e)} 
+                            className="text-rose-400 hover:text-rose-300 text-[11px] font-bold bg-rose-950/50 px-2 py-0.5 rounded-lg border border-rose-900/50"
+                          >
+                            🗑️ Borrar error
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </details>
+              </div>
 
               {/* Selector Múltiple de Acciones */}
               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
