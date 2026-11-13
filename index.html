@@ -49,6 +49,7 @@
       { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)" },
       { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)" },
       { id: "Cruce", label: "Cruce de Producto", desc: "Se facturó un producto pero se envió otro físico" },
+      { id: "AceptadoPorCliente", label: "Aceptado por Cliente", desc: "Cliente acepta producto cruzado/alternativo" },
       { id: "Rechazo", label: "Rechazo Cliente", desc: "Cliente devuelve o no recibe mercadería" },
       { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado" }
     ];
@@ -59,7 +60,8 @@
     const ACCIONES_DISPONIBLES = [
       "Ajustar Inventario en Bodega",
       "Enviar / Reponer Producto al Cliente",
-      "Nota de Crédito / Descuento Factura",
+      "Descuento en Factura / Cuenta Corriente",
+      "Nota de Crédito (Tributaria)",
       "Chofer Retorna Producto a Bodega"
     ];
 
@@ -202,13 +204,16 @@
       const guardarIncidencia = async (e) => {
         e.preventDefault();
         if (!factura.trim() || !producto.trim()) return alert("Completa el Nº de Factura y el Producto.");
-        if (motivo === "Cruce" && !productoCruce.trim()) return alert("Indica el producto enviado por error.");
+        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && !productoCruce.trim()) return alert("Indica el producto alternativo o enviado por error.");
 
         await registrarProductoEnCatalogo(producto);
-        if (motivo === "Cruce" && productoCruce) await registrarProductoEnCatalogo(productoCruce);
+        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && productoCruce) await registrarProductoEnCatalogo(productoCruce);
 
-        await registrarConteoPendiente(producto.trim().toUpperCase(), unidad, Number(cantidad), factura.trim());
-        if (motivo === "Cruce" && productoCruce) {
+        // Si es aceptado por el cliente y vale lo mismo, no genera cruce de inventario clásico, pero sí se registra
+        if (motivo !== "AceptadoPorCliente") {
+          await registrarConteoPendiente(producto.trim().toUpperCase(), unidad, Number(cantidad), factura.trim());
+        }
+        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && productoCruce) {
           await registrarConteoPendiente(productoCruce.trim().toUpperCase(), unidadCruce, Number(cantidadCruce), factura.trim());
         }
 
@@ -228,9 +233,9 @@
           producto: producto.trim().toUpperCase(),
           cantidad: Number(cantidad),
           unidad,
-          productoCruce: motivo === "Cruce" ? productoCruce.trim().toUpperCase() : null,
-          cantidadCruce: motivo === "Cruce" ? Number(cantidadCruce) : null,
-          unidadCruce: motivo === "Cruce" ? unidadCruce : null,
+          productoCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? productoCruce.trim().toUpperCase() : null,
+          cantidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? Number(cantidadCruce) : null,
+          unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
           acciones: accionesSeleccionadas,
           checksAcciones: checksIniciales,
           notas: notas.trim(),
@@ -306,7 +311,6 @@
             responsableAjuste: nuevoEstado ? resp.trim() : ""
           });
 
-          // Si se marca como ajustado, registrar automáticamente en el Historial Acumulativo de Inventario
           if (nuevoEstado && itemConteo) {
             await registrarEnHistorialInventario(itemConteo.producto, itemConteo.unidad, itemConteo.factura, resp.trim());
           }
@@ -317,10 +321,6 @@
         if (confirm("¿Eliminar este ítem de conteo?")) {
           try { await db.collection("conteo_pendiente").doc(id).delete(); } catch (err) { alert(err.message); }
         }
-      };
-
-      const imprimirHojaConteo = () => {
-        window.print();
       };
 
       const imprimirReporteGeneral = () => {
@@ -387,7 +387,7 @@
         setRuta(item.ruta || RUTAS[0]); setArmador(item.armador || ARMADORES[0]);
         setRegistradoPor(item.registradoPor || "Diego"); setMotivo(item.motivo || "Faltante");
         setProducto(item.producto || ""); setCantidad(item.cantidad || 1); setUnidad(item.unidad || UNIDADES[0]);
-        if (item.motivo === "Cruce") {
+        if (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") {
           setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(item.unidadCruce || UNIDADES[0]);
         }
         setAccionesSeleccionadas(item.acciones || [item.accionResolucion || ACCIONES_DISPONIBLES[0]]);
@@ -436,8 +436,8 @@
           const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
           texto += `*${idx + 1}. Fact #${i.factura}* (${i.motivo}) - ${estado}\n`;
           texto += `   • Prod: ${i.cantidad} ${i.unidad} de ${i.producto}\n`;
-          if (i.motivo === "Cruce" && i.productoCruce) {
-            texto += `   • Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
+          if ((i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente") && i.productoCruce) {
+            texto += `   • Alt/Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
           }
           texto += `   • Armó: ${i.armador} | Registró: ${i.registradoPor || 'N/A'}\n`;
           texto += `   • Acciones: ${acs}\n\n`;
@@ -450,7 +450,7 @@
         total: incidencias.length,
         pendientes: incidencias.filter(i => !i.resuelto).length,
         resueltas: incidencias.filter(i => i.resuelto).length,
-        cruces: incidencias.filter(i => i.motivo === "Cruce").length
+        cruces: incidencias.filter(i => i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente").length
       }), [incidencias]);
 
       const incidenciasFiltradas = useMemo(() => {
@@ -479,6 +479,7 @@
             sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
             if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura);
           }
+          // Si es "AceptadoPorCliente", el cliente se queda con el alternativo y paga aparte/igual, no altera stock de bodega sobrante del original facturado.
         });
         return Object.values(mapa);
       }, [incidencias]);
@@ -504,8 +505,8 @@
                   <div key={item.id} className="border border-gray-400 p-3 rounded">
                     <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Motivo:</strong> {item.motivo.toUpperCase()} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
                     <p><strong>Cliente:</strong> {item.cliente || "N/A"} | <strong>Ruta:</strong> {item.ruta} | <strong>Armó:</strong> {item.armador} | <strong>Registró:</strong> {item.registradoPor || "N/A"}</p>
-                    <p><strong>Producto Afectado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
-                    {item.motivo === "Cruce" && <p><strong>Producto Enviado por Error:</strong> {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>}
+                    <p><strong>Producto Facturado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                    {(item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") && <p><strong>Producto Alternativo / Enviado:</strong> {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>}
                     <p><strong>Acciones / Estatus:</strong> {item.acciones ? item.acciones.join(" + ") : "N/A"}</p>
                   </div>
                 ))}
@@ -638,7 +639,7 @@
                 <p className="text-3xl font-black text-emerald-400 mt-1">{kpis.resueltas}</p>
               </div>
               <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">🔄 Cruces de Stock</span>
+                <span className="text-xs font-semibold text-purple-300 uppercase tracking-wider">🔄 Cruces / Cambios</span>
                 <p className="text-3xl font-black text-purple-400 mt-1">{kpis.cruces}</p>
               </div>
             </div>
@@ -723,9 +724,10 @@
                                 item.motivo === "Faltante" ? "bg-rose-500/15 text-rose-300 border-rose-500/30" :
                                 item.motivo === "Sobrante" ? "bg-sky-500/15 text-sky-300 border-sky-500/30" :
                                 item.motivo === "Cruce" ? "bg-purple-500/15 text-purple-300 border-purple-500/30" :
+                                item.motivo === "AceptadoPorCliente" ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" :
                                 "bg-amber-500/15 text-amber-300 border-amber-500/30"
                               }`}>
-                                {item.motivo.toUpperCase()}
+                                {item.motivo === "AceptadoPorCliente" ? "ACEPTADO X CLIENTE" : item.motivo.toUpperCase()}
                               </span>
                               {item.cliente && (
                                 <span className="text-xs font-semibold text-slate-300 bg-slate-800/80 px-2.5 py-1 rounded-lg">
@@ -738,18 +740,18 @@
 
                           <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 mb-3">
                             <span className="text-[11px] font-bold uppercase text-slate-400 block mb-0.5">
-                              {item.motivo === "Cruce" ? "Producto en Factura (Sobra en bodega):" : "Producto Afectado:"}
+                              {item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente" ? "Producto Facturado:" : "Producto Afectado:"}
                             </span>
                             <p className="text-base font-black text-white">
                               {item.cantidad} {item.unidad} — <span className="text-amber-300">{item.producto}</span>
                             </p>
 
-                            {item.motivo === "Cruce" && item.productoCruce && (
-                              <div className="mt-2.5 pt-2.5 border-t border-rose-900/40">
-                                <span className="text-[11px] font-bold uppercase text-rose-400 block mb-0.5">
-                                  🔄 Enviado por error (Falta en bodega):
+                            {(item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") && item.productoCruce && (
+                              <div className="mt-2.5 pt-2.5 border-t border-purple-900/40">
+                                <span className="text-[11px] font-bold uppercase text-purple-400 block mb-0.5">
+                                  {item.motivo === "AceptadoPorCliente" ? "✅ Producto Alternativo Aceptado (Mismo valor):" : "🔄 Enviado por error (Falta en bodega):"}
                                 </span>
-                                <p className="text-sm font-black text-rose-300">
+                                <p className="text-sm font-black text-purple-300">
                                   {item.cantidadCruce} {item.unidadCruce} — {item.productoCruce}
                                 </p>
                               </div>
@@ -890,7 +892,7 @@
 
               <div>
                 <label className="text-xs font-bold text-slate-300 block mb-2">⚠️ Tipo de Incidencia</label>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {MOTIVOS.map(m => (
                     <button type="button" key={m.id} onClick={() => setMotivo(m.id)} className={`p-3 rounded-xl border text-left transition ${motivo === m.id ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow" : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"}`}>
                       <div className="text-xs font-black">{m.label}</div>
@@ -903,7 +905,7 @@
               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
                 <div className="flex justify-between items-center">
                   <p className="text-xs font-extrabold text-emerald-400 uppercase">
-                    {motivo === "Cruce" ? "1️⃣ Producto en Factura (Sobra en bodega)" : "📦 Detalle del Producto"}
+                    {(motivo === "Cruce" || motivo === "AceptadoPorCliente") ? "1️⃣ Producto que decía la Factura" : "📦 Detalle del Producto"}
                   </p>
                   <span className="text-[10px] text-slate-400">💡 Autocompletado inteligente</span>
                 </div>
@@ -928,23 +930,23 @@
                 </div>
               </div>
 
-              {motivo === "Cruce" && (
-                <div className="bg-rose-950/30 p-4 rounded-2xl border border-rose-800/60 space-y-3">
-                  <p className="text-xs font-extrabold text-rose-300 uppercase">
-                    2️⃣ Producto enviado físicamente por error (Falta en bodega)
+              {(motivo === "Cruce" || motivo === "AceptadoPorCliente") && (
+                <div className="bg-purple-950/30 p-4 rounded-2xl border border-purple-800/60 space-y-3">
+                  <p className="text-xs font-extrabold text-purple-300 uppercase">
+                    {motivo === "AceptadoPorCliente" ? "2️⃣ Producto Alternativo que el Cliente Aceptó" : "2️⃣ Producto enviado físicamente por error"}
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="sm:col-span-2 relative">
-                      <label className="text-[11px] text-rose-300/80 block mb-1">Producto enviado *</label>
-                      <input type="text" list="lista-catalogo" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Producto enviado..." className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                      <label className="text-[11px] text-purple-300/80 block mb-1">Producto entregado *</label>
+                      <input type="text" list="lista-catalogo" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Producto alternativo..." className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm text-white" required />
                     </div>
                     <div>
-                      <label className="text-[11px] text-rose-300/80 block mb-1">Cantidad *</label>
-                      <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
+                      <label className="text-[11px] text-purple-300/80 block mb-1">Cantidad *</label>
+                      <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
                     </div>
                     <div>
-                      <label className="text-[11px] text-rose-300/80 block mb-1">Unidad</label>
-                      <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-rose-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-rose-300">
+                      <label className="text-[11px] text-purple-300/80 block mb-1">Unidad</label>
+                      <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-purple-300">
                         {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </div>
