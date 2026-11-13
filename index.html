@@ -209,7 +209,6 @@
         await registrarProductoEnCatalogo(producto);
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && productoCruce) await registrarProductoEnCatalogo(productoCruce);
 
-        // Si es aceptado por el cliente y vale lo mismo, no genera cruce de inventario clásico, pero sí se registra
         if (motivo !== "AceptadoPorCliente") {
           await registrarConteoPendiente(producto.trim().toUpperCase(), unidad, Number(cantidad), factura.trim());
         }
@@ -323,6 +322,10 @@
         }
       };
 
+      const imprimirHojaConteo = () => {
+        window.print();
+      };
+
       const imprimirReporteGeneral = () => {
         setModoImpresionReporte('general');
         setTimeout(() => {
@@ -374,7 +377,7 @@
             checksAcciones: checks,
             resuelto: todasListas ? true : incidenciaActual.resuelto
           });
-        } catch (err) { alert("Error: " + err.message); }
+        } catch (err) { alert("Error al actualizar check: " + err.message); }
       };
 
       const toggleExpandirTarjeta = (id) => {
@@ -479,7 +482,6 @@
             sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
             if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura);
           }
-          // Si es "AceptadoPorCliente", el cliente se queda con el alternativo y paga aparte/igual, no altera stock de bodega sobrante del original facturado.
         });
         return Object.values(mapa);
       }, [incidencias]);
