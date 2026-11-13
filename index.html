@@ -146,7 +146,6 @@
         }
       };
 
-      // Función para eliminar un registro individual del historial de inventario
       const eliminarRegistroHistorialInv = async (id) => {
         if (confirm("¿Deseas eliminar este registro del historial de inventario?")) {
           try {
@@ -827,11 +826,10 @@
                 )}
               </div>
 
-              {/* Historial con botón de borrar individual */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-lg font-black text-amber-400 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
                 <p className="text-xs text-slate-400 mb-5">
-                  Registro cronológico por producto. Puedes eliminar cualquier registro de prueba o error individualmente con el botón de basura.
+                  Registro cronológico por producto. Al superar los 10 registros de un mismo artículo, el sistema limpia los más antiguos y conserva automáticamente los últimos 6.
                 </p>
 
                 {historialInventario.length === 0 ? (
