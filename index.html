@@ -73,6 +73,7 @@
       const [conteoPendiente, setConteoPendiente] = useState([]);
       const [seleccionadosInventario, setSeleccionadosInventario] = useState({});
       const [modoImpresionReporte, setModoImpresionReporte] = useState(null);
+      const [facturaImprimirIndividual, setFacturaImprimirIndividual] = useState(null);
 
       const [vista, setVista] = useState("dashboard");
       const [conectado, setConectado] = useState(false);
@@ -237,6 +238,7 @@
           unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
           acciones: accionesSeleccionadas,
           checksAcciones: checksIniciales,
+          retornoBodegaInfo: null, // Inicialmente sin procesar retorno de chofer
           notas: notas.trim(),
           timestamp: Date.now()
         };
@@ -245,6 +247,7 @@
           if (editandoId) {
             delete datos.timestamp;
             delete datos.checksAcciones;
+            delete datos.retornoBodegaInfo;
             await db.collection("incidencias").doc(editandoId).update(datos);
           } else {
             datos.resuelto = false;
@@ -278,6 +281,53 @@
             await batch.commit();
           }
         } catch (err) { console.error(err); }
+      };
+
+      const procesarRecepcionRetorno = async (incidencia) => {
+        const resp = prompt(`Confirma tu nombre para recibir el retorno en bodega:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Edwin");
+        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
+          return;
+        }
+
+        const llegoCompleto = confirm("¿El producto de retorno llegó completo y en perfecto estado a bodega?\n\nAceptar = Sí, completo.\nCancelar = No, hubo un problema (pérdida, rotura o entrega errónea).");
+
+        let infoRetorno = {
+          recibido: true,
+          completo: llegoCompleto,
+          motivoFalta: "",
+          cantidadFaltante: 0,
+          detalleRotura: "",
+          recibidoPor: resp.trim(),
+          fechaHoraRecibo: new Date().toLocaleString("es-CL")
+        };
+
+        if (!llegoCompleto) {
+          const motivoIdx = prompt("Selecciona el motivo por el cual no llegó completo:\n1. Se perdió en el camino\n2. Entregado por error a otro cliente\n3. Se partió o rompió en el trayecto\n\n(Escribe 1, 2 o 3):");
+          if (motivoIdx === "1") infoRetorno.motivoFalta = "Se perdió en el camino";
+          else if (motivoIdx === "2") infoRetorno.motivoFalta = "Entregado por error a otro cliente";
+          else if (motivoIdx === "3") infoRetorno.motivoFalta = "Se partió / rompió en el trayecto";
+          else {
+            alert("Opción no válida. Operación cancelada.");
+            return;
+          }
+
+          const cantFalta = prompt(`¿Cuántas unidades faltaron o se dañaron? (Total esperado: ${incidencia.cantidad}):`, "1");
+          if (!cantFalta || isNaN(cantFalta)) return;
+          infoRetorno.cantidadFaltante = Number(cantFalta);
+
+          const detalle = prompt("Escribe el detalle (ej. unidades sueltas de la caja/bulto, estado de los restos):", "3 unidades sueltas del bulto");
+          infoRetorno.detalleRotura = detalle || "";
+        }
+
+        try {
+          await db.collection("incidencias").doc(incidencia.id).update({
+            retornoBodegaInfo: infoRetorno
+          });
+          alert("✅ Recepción de retorno registrada con éxito.");
+        } catch (err) {
+          alert("Error al guardar: " + err.message);
+        }
       };
 
       const toggleCheckConteoFisico = async (id, estadoActual) => {
@@ -328,6 +378,7 @@
 
       const imprimirReporteGeneral = () => {
         setModoImpresionReporte('general');
+        setFacturaImprimirIndividual(null);
         setTimeout(() => {
           window.print();
           setModoImpresionReporte(null);
@@ -338,9 +389,20 @@
         const seleccionados = historialInventario.filter(h => seleccionadosInventario[h.id]);
         if (seleccionados.length === 0) return alert("Selecciona al menos un ítem del historial de inventario con el check para generar el reporte.");
         setModoImpresionReporte('inventario');
+        setFacturaImprimirIndividual(null);
         setTimeout(() => {
           window.print();
           setModoImpresionReporte(null);
+        }, 200);
+      };
+
+      const imprimirReporteIndividualFactura = (item) => {
+        setModoImpresionReporte('individual');
+        setFacturaImprimirIndividual(item);
+        setTimeout(() => {
+          window.print();
+          setModoImpresionReporte(null);
+          setFacturaImprimirIndividual(null);
         }, 200);
       };
 
@@ -489,7 +551,7 @@
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
           
-          {/* DOCUMENTO OCULTO PARA IMPRESIÓN: REPORTE GENERAL DE INCIDENCIAS */}
+          {/* REPORTE GENERAL DE INCIDENCIAS */}
           {modoImpresionReporte === 'general' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -520,7 +582,7 @@
             </div>
           )}
 
-          {/* DOCUMENTO OCULTO PARA IMPRESIÓN: REPORTE PERSONALIZADO DE INVENTARIO */}
+          {/* REPORTE PERSONALIZADO DE INVENTARIO */}
           {modoImpresionReporte === 'inventario' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -558,7 +620,50 @@
             </div>
           )}
 
-          {/* DOCUMENTO OCULTO PARA IMPRESIÓN: HOJA DE CONTEO FÍSICO */}
+          {/* REPORTE INDIVIDUAL DE FACTURA CON RETORNO */}
+          {modoImpresionReporte === 'individual' && facturaImprimirIndividual && (
+            <div className="print-only bg-white text-black p-8">
+              <div className="text-center border-b pb-4 mb-4">
+                <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
+                <h2 className="text-sm font-semibold">REPORTE DE RECEPCIÓN DE RETORNO EN BODEGA</h2>
+                <p className="text-xs text-gray-600 mt-1">Factura #{facturaImprimirIndividual.factura} | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+              </div>
+
+              <div className="mb-6 space-y-2 text-xs border p-4 rounded bg-gray-50">
+                <p><strong>Cliente / Local:</strong> {facturaImprimirIndividual.cliente || "N/A"}</p>
+                <p><strong>Ruta:</strong> {facturaImprimirIndividual.ruta} | <strong>Armó:</strong> {facturaImprimirIndividual.armador}</p>
+                <p><strong>Motivo de Incidencia:</strong> {facturaImprimirIndividual.motivo.toUpperCase()}</p>
+                <p><strong>Producto Esperado de Retorno:</strong> {facturaImprimirIndividual.cantidad} {facturaImprimirIndividual.unidad} de {facturaImprimirIndividual.producto}</p>
+              </div>
+
+              <div className="mb-6 border p-4 rounded text-xs">
+                <h3 className="font-bold uppercase mb-2">Estado de Recepción en Bodega:</h3>
+                {facturaImprimirIndividual.retornoBodegaInfo ? (
+                  <div className="space-y-1.5">
+                    <p><strong>Estado:</strong> {facturaImprimirIndividual.retornoBodegaInfo.completo ? "Llegó Completo y Sano" : "Con Discrepancia / Problema en Trayecto"}</p>
+                    {!facturaImprimirIndividual.retornoBodegaInfo.completo && (
+                      <>
+                        <p><strong>Motivo:</strong> {facturaImprimirIndividual.retornoBodegaInfo.motivoFalta}</p>
+                        <p><strong>Cantidad Afectada:</strong> {facturaImprimirIndividual.retornoBodegaInfo.cantidadFaltante} unidades</p>
+                        <p><strong>Detalle / Condición:</strong> {facturaImprimirIndividual.retornoBodegaInfo.detalleRotura}</p>
+                      </>
+                    )}
+                    <p><strong>Recibido por:</strong> {facturaImprimirIndividual.retornoBodegaInfo.recibidoPor}</p>
+                    <p><strong>Fecha y Hora de Recepción:</strong> {facturaImprimirIndividual.retornoBodegaInfo.fechaHoraRecibo}</p>
+                  </div>
+                ) : (
+                  <p className="italic text-gray-500">Pendiente de recepción física en bodega.</p>
+                )}
+              </div>
+
+              <div className="mt-16 pt-8 border-t text-xs flex justify-between">
+                <p>Firma Bodega / Recepción: _______________________</p>
+                <p>Firma Supervisión (Pedro / Bedanli): _______________________</p>
+              </div>
+            </div>
+          )}
+
+          {/* HOJA DE CONTEO FÍSICO (LISTA CÍCLICA) */}
           <div className="print-only bg-white text-black p-8">
             <div className="text-center border-b pb-4 mb-4">
               <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
@@ -713,6 +818,7 @@
                     const abierto = tarjetasAbiertas[item.id] || false;
                     const accionesLista = item.acciones || [item.accionResolucion || "Ajustar Inventario en Bodega"];
                     const checksMap = item.checksAcciones || {};
+                    const incluyeRetorno = accionesLista.includes("Chofer Retorna Producto a Bodega");
 
                     return (
                       <div key={item.id} className={`glass-card rounded-2xl p-5 border transition shadow-lg flex flex-col justify-between ${item.resuelto ? "border-emerald-900/50 opacity-85" : "border-slate-800 hover:border-slate-700"}`}>
@@ -759,6 +865,47 @@
                               </div>
                             )}
                           </div>
+
+                          {/* BLOQUE ESPECIAL DE RETORNO DE CHOFER A BODEGA */}
+                          {incluyeRetorno && (
+                            <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold text-sky-300 uppercase">
+                                  🚚 Control de Retorno a Bodega
+                                </span>
+                                <button
+                                  onClick={() => imprimirReporteIndividualFactura(item)}
+                                  className="bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition"
+                                >
+                                  🖨️ Reporte Factura
+                                </button>
+                              </div>
+
+                              {item.retornoBodegaInfo ? (
+                                <div className="text-xs bg-slate-900 p-2.5 rounded-lg border border-sky-900/50 space-y-1">
+                                  <p className="font-bold text-emerald-400">
+                                    ✓ Recibido por: {item.retornoBodegaInfo.recibidoPor} ({item.retornoBodegaInfo.fechaHoraRecibo})
+                                  </p>
+                                  {item.retornoBodegaInfo.completo ? (
+                                    <p className="text-slate-300">Estado: <strong className="text-white">Llegó completo y en buen estado</strong></p>
+                                  ) : (
+                                    <div className="text-rose-300 space-y-0.5 mt-1 pt-1 border-t border-rose-900/40">
+                                      <p>⚠️ <strong>Incidencia en retorno:</strong> {item.retornoBodegaInfo.motivoFalta}</p>
+                                      <p>• Cantidad afectada: {item.retornoBodegaInfo.cantidadFaltante} unds</p>
+                                      <p>• Detalle: {item.retornoBodegaInfo.detalleRotura}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => procesarRecepcionRetorno(item)}
+                                  className="w-full bg-sky-600 hover:bg-sky-500 text-slate-950 font-black text-xs py-2 rounded-xl shadow transition text-white"
+                                >
+                                  📥 Recibido en Bodega (Procesar Retorno)
+                                </button>
+                              )}
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 mb-3 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
                             <span>👷 Armó: <strong className="text-white">{item.armador}</strong></span>
@@ -1014,7 +1161,7 @@
             </form>
           )}
 
-          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL CON SELECCIÓN DE REPORTE) */}
+          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL) */}
           {vista === "balance" && (
             <div className="space-y-6 no-print">
               
