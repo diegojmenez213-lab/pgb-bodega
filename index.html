@@ -15,6 +15,11 @@
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
     .glass-card { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    @media print {
+      body { background: white !important; color: black !important; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+    }
   </style>
 </head>
 <body class="bg-[#050811] text-slate-100 min-h-screen selection:bg-amber-500 selection:text-slate-950">
@@ -62,6 +67,7 @@
       const [cierres, setCierres] = useState([]);
       const [catalogoProductos, setCatalogoProductos] = useState([]);
       const [historialInventario, setHistorialInventario] = useState([]);
+      const [conteoPendiente, setConteoPendiente] = useState([]);
       const [vista, setVista] = useState("dashboard");
       const [conectado, setConectado] = useState(false);
       const [editandoId, setEditandoId] = useState(null);
@@ -121,7 +127,12 @@
           setHistorialInventario(lista);
         });
 
-        return () => { unsubInc(); unsubCierres(); unsubCat(); unsubHistInv(); };
+        const unsubConteo = db.collection("conteo_pendiente").onSnapshot((snap) => {
+          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setConteoPendiente(lista);
+        });
+
+        return () => { unsubInc(); unsubCierres(); unsubCat(); unsubHistInv(); unsubConteo(); };
       }, []);
 
       const limpiarFormulario = () => {
@@ -139,6 +150,28 @@
         }
       };
 
+      const registrarConteoPendiente = async (prod, uni, cant, fact) => {
+        try {
+          // Verificar si ya existe en conteo pendiente
+          const existe = conteoPendiente.some(cp => cp.producto === prod && cp.unidad === uni);
+          if (!existe) {
+            await db.collection("conteo_pendiente").add({
+              producto: prod,
+              unidad: uni,
+              cantidad: cant,
+              factura: fact,
+              conteoFisicoHecho: false,
+              ajusteSistemaHecho: false,
+              responsableConteo: "",
+              responsableAjuste: "",
+              timestamp: Date.now()
+            });
+          }
+        } catch (err) {
+          console.error("Error al registrar conteo pendiente:", err);
+        }
+      };
+
       const eliminarProductoCatalogo = async (id, e) => {
         e.stopPropagation();
         if (confirm("¿Eliminar este producto del catálogo?")) {
@@ -148,11 +181,7 @@
 
       const eliminarRegistroHistorialInv = async (id) => {
         if (confirm("¿Deseas eliminar este registro del historial de inventario?")) {
-          try {
-            await db.collection("historial_inventario").doc(id).delete();
-          } catch (err) {
-            alert("Error al eliminar: " + err.message);
-          }
+          try { await db.collection("historial_inventario").doc(id).delete(); } catch (err) { alert(err.message); }
         }
       };
 
@@ -172,6 +201,12 @@
 
         await registrarProductoEnCatalogo(producto);
         if (motivo === "Cruce" && productoCruce) await registrarProductoEnCatalogo(productoCruce);
+
+        // Añadir automáticamente a la lista de conteo cíclico pendiente
+        await registrarConteoPendiente(producto.trim().toUpperCase(), unidad, Number(cantidad), factura.trim());
+        if (motivo === "Cruce" && productoCruce) {
+          await registrarConteoPendiente(productoCruce.trim().toUpperCase(), unidadCruce, Number(cantidadCruce), factura.trim());
+        }
 
         const checksIniciales = {};
         accionesSeleccionadas.forEach(ac => {
@@ -212,6 +247,38 @@
         } catch (err) { alert("Error: " + err.message); }
       };
 
+      const toggleCheckConteoFisico = async (id, estadoActual) => {
+        const resp = prompt("Nombre de quien realizó el conteo físico (Edwin, Diego, etc.):");
+        if (!resp || !resp.trim()) return;
+        try {
+          await db.collection("conteo_pendiente").doc(id).update({
+            conteoFisicoHecho: !estadoActual,
+            responsableConteo: !estadoActual ? resp.trim() : ""
+          });
+        } catch (err) { alert(err.message); }
+      };
+
+      const toggleCheckAjusteSistema = async (id, estadoActual) => {
+        const resp = prompt("Nombre de jefatura que ajustó en sistema (Bedanli / Pedro):");
+        if (!resp || !resp.trim()) return;
+        try {
+          await db.collection("conteo_pendiente").doc(id).update({
+            ajusteSistemaHecho: !estadoActual,
+            responsableAjuste: !estadoActual ? resp.trim() : ""
+          });
+        } catch (err) { alert(err.message); }
+      };
+
+      const eliminarItemConteoPendiente = async (id) => {
+        if (confirm("¿Eliminar este ítem de conteo?")) {
+          try { await db.collection("conteo_pendiente").doc(id).delete(); } catch (err) { alert(err.message); }
+        }
+      };
+
+      const imprimirHojaConteo = () => {
+        window.print();
+      };
+
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsable) => {
         try {
           const colRef = db.collection("historial_inventario");
@@ -231,14 +298,10 @@
           if (registrosProducto.length > 10) {
             const excess = registrosProducto.slice(6);
             const batch = db.batch();
-            excess.forEach(item => {
-              batch.delete(colRef.doc(item.id));
-            });
+            excess.forEach(item => batch.delete(colRef.doc(item.id)));
             await batch.commit();
           }
-        } catch (err) {
-          console.error("Error al gestionar historial de inventario:", err);
-        }
+        } catch (err) { console.error(err); }
       };
 
       const toggleCheckAccion = async (id, accionNombre, estadoActual) => {
@@ -271,7 +334,7 @@
             checksAcciones: checks,
             resuelto: todasListas ? true : incidenciaActual.resuelto
           });
-        } catch (err) { alert("Error al actualizar check: " + err.message); }
+        } catch (err) { alert("Error: " + err.message); }
       };
 
       const toggleExpandirTarjeta = (id) => {
@@ -309,30 +372,37 @@
           await db.collection("cierres_semanales").add({
             nombreSemana, fechaCierre: new Date().toISOString(), totalRegistros: incidencias.length, registros: incidencias
           });
+          
           const batch = db.batch();
           incidencias.forEach(inc => batch.delete(db.collection("incidencias").doc(inc.id)));
+
+          // Persistencia inteligente en conteo pendiente: eliminar solo los ítems con doble check completo
+          conteoPendiente.forEach(cp => {
+            if (cp.conteoFisicoHecho && cp.ajusteSistemaHecho) {
+              batch.delete(db.collection("conteo_pendiente").doc(cp.id));
+            }
+          });
+
           await batch.commit();
-          alert("✅ Semana cerrada y archivada en Historial.");
+          alert("✅ Semana cerrada. Los pendientes sin doble check se retuvieron automáticamente.");
           setVista("historial");
         } catch (err) { alert("Error: " + err.message); }
       };
 
       const copiarResumenWhatsApp = () => {
         if (incidencias.length === 0) return alert("Sin incidencias para copiar.");
-        let texto = `📦 *REPORTE BODEGA PGB DISTRIBUTION*\n📅 Fecha: ${hoy}\n━━━━━━━━━━━━━━\n`;
+        let texto = `*REPORTE BODEGA PGB DISTRIBUTION*\nFecha: ${hoy}\n---------------------------------\n`;
         incidencias.forEach((i, idx) => {
-          const estado = i.resuelto ? "✅ RESUELTO" : "⏳ PENDIENTE";
-          const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
-          texto += `*${idx + 1}. Fact #${i.factura}* (${i.motivo}) - ${estado}\n`;
+          const estado = i.resuelto ? "RESUELTO" : "PENDIENTE";
+          texto += `${idx + 1}. Fact #${i.factura} (${i.motivo}) - ${estado}\n`;
           texto += `   • Prod: ${i.cantidad} ${i.unidad} de ${i.producto}\n`;
           if (i.motivo === "Cruce" && i.productoCruce) {
             texto += `   • Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
           }
-          texto += `   • Armó: ${i.armador} | Registró: ${i.registradoPor || 'N/A'}\n`;
-          texto += `   • Acciones: ${acs}\n\n`;
+          texto += `   • Armó: ${i.armador} | Registró: ${i.registradoPor || 'N/A'}\n\n`;
         });
         navigator.clipboard.writeText(texto);
-        alert("📋 ¡Reporte copiado para WhatsApp!");
+        alert("¡Reporte copiado para WhatsApp!");
       };
 
       const kpis = useMemo(() => ({
@@ -374,7 +444,8 @@
 
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
-          <div className="glass-card rounded-3xl p-6 sm:p-8 mb-6 shadow-2xl relative overflow-hidden">
+          {/* HEADER GENERAL */}
+          <div className="glass-card rounded-3xl p-6 sm:p-8 mb-6 shadow-2xl relative overflow-hidden no-print">
             <div className="absolute -right-10 -top-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
               <div>
@@ -383,7 +454,7 @@
                     <span className={`h-2 w-2 rounded-full ${conectado ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`}></span>
                     {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
                   </span>
-                  <span className="text-xs text-slate-400 font-medium">PGB Distribution SpA</span>
+                  <span className="text-xs text-slate-400 font-medium">PGB Distribution Chile SpA</span>
                 </div>
                 <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
                   CONTROL DE <span className="text-amber-400">BODEGA</span>
@@ -423,7 +494,8 @@
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 mb-6 shadow-md">
+          {/* MENÚ DE NAVEGACIÓN */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 mb-6 shadow-md no-print">
             <button onClick={() => setVista("dashboard")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "dashboard" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               📋 Tablero Activo ({incidencias.length})
             </button>
@@ -438,8 +510,9 @@
             </button>
           </div>
 
+          {/* VISTA DASHBOARD */}
           {vista === "dashboard" && (
-            <div className="space-y-4">
+            <div className="space-y-4 no-print">
               <div className="glass-card rounded-2xl p-4 shadow-lg space-y-3">
                 <div className="flex flex-col lg:flex-row gap-3">
                   <div className="flex-1">
@@ -608,8 +681,9 @@
             </div>
           )}
 
+          {/* VISTA NUEVO / EDITAR */}
           {vista === "nuevo" && (
-            <form onSubmit={guardarIncidencia} className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 max-w-3xl mx-auto">
+            <form onSubmit={guardarIncidencia} className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 max-w-3xl mx-auto no-print">
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
                   <h2 className="text-xl font-black text-white">
@@ -786,9 +860,120 @@
             </form>
           )}
 
+          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL) */}
           {vista === "balance" && (
             <div className="space-y-6">
+              {/* HOJA DE CONTEO FÍSICO PENDIENTE (LISTA EN COLUMNA PARA IMPRIMIR) */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5 no-print">
+                  <div>
+                    <h2 className="text-xl font-black text-amber-400">📋 Lista de Conteo Cíclico por Incidencias</h2>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                      Productos pendientes de conteo físico en estantería (Doble confirmación: Bodega + Sistema).
+                    </p>
+                  </div>
+                  <button
+                    onClick={imprimirHojaConteo}
+                    className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                  >
+                    🖨️ Imprimir Hoja de Conteo PDF
+                  </button>
+                </div>
+
+                {/* BLOQUE EXCLUSIVO PARA IMPRESIÓN (ESTILO DOCUMENTO FORMAL EN COLUMNA) */}
+                <div className="hidden print-only mb-6 p-4 bg-white text-black rounded-lg">
+                  <div className="text-center border-b pb-4 mb-4">
+                    <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
+                    <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
+                    <p className="text-[11px] text-gray-600">Fecha de Emisión: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
+                  </div>
+                  <table className="w-full text-left text-xs border-collapse border border-gray-400">
+                    <thead>
+                      <tr className="bg-gray-200">
+                        <th className="border border-gray-400 p-2">Producto / Descripción</th>
+                        <th className="border border-gray-400 p-2">Unidad</th>
+                        <th className="border border-gray-400 p-2">Fact. Ref</th>
+                        <th className="border border-gray-400 p-2">Stock Real (Anotar a mano)</th>
+                        <th className="border border-gray-400 p-2">Conteo Bodega</th>
+                        <th className="border border-gray-400 p-2">Ajuste Sistema</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {conteoPendiente.map((cp, idx) => (
+                        <tr key={idx}>
+                          <td className="border border-gray-400 p-2 font-bold">{cp.producto}</td>
+                          <td className="border border-gray-400 p-2">{cp.unidad}</td>
+                          <td className="border border-gray-400 p-2">#{cp.factura}</td>
+                          <td className="border border-gray-400 p-2">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
+                          <td className="border border-gray-400 p-2">[ {cp.conteoFisicoHecho ? 'X' : ' '} ] {cp.responsableConteo}</td>
+                          <td className="border border-gray-400 p-2">[ {cp.ajusteSistemaHecho ? 'X' : ' '} ] {cp.responsableAjuste}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="mt-8 pt-4 border-t text-xs">
+                    <p>Firma de Encargado de Bodega: _____________________________________</p>
+                  </div>
+                </div>
+
+                {/* TABLA DIGITAL INTERACTIVA */}
+                {conteoPendiente.length === 0 ? (
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400 no-print">
+                    No hay productos pendientes de conteo cíclico. Todo al día.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto no-print">
+                    <table className="w-full text-left text-xs sm:text-sm">
+                      <thead className="bg-slate-950 text-slate-400 uppercase text-[11px]">
+                        <tr>
+                          <th className="p-3 rounded-l-xl">Producto</th>
+                          <th className="p-3">Unidad</th>
+                          <th className="p-3">Factura</th>
+                          <th className="p-3 text-center">1. Conteo Físico Bodega</th>
+                          <th className="p-3 text-center">2. Ajuste en Sistema</th>
+                          <th className="p-3 rounded-r-xl text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {conteoPendiente.map((cp) => (
+                          <tr key={cp.id} className="hover:bg-slate-950/40">
+                            <td className="p-3 font-black text-white">{cp.producto}</td>
+                            <td className="p-3 text-slate-300">{cp.unidad}</td>
+                            <td className="p-3 text-amber-300 font-bold">#{cp.factura}</td>
+                            <td className="p-3 text-center">
+                              <button
+                                onClick={() => toggleCheckConteoFisico(cp.id, cp.conteoFisicoHecho)}
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${cp.conteoFisicoHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
+                              >
+                                {cp.conteoFisicoHecho ? `✓ Hecho (${cp.responsableConteo})` : "[ ] Marcar Conteo Físico"}
+                              </button>
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                onClick={() => toggleCheckAjusteSistema(cp.id, cp.ajusteSistemaHecho)}
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
+                              >
+                                {cp.ajusteSistemaHecho ? `✓ Ajustado (${cp.responsableAjuste})` : "[ ] Marcar Sistema"}
+                              </button>
+                            </td>
+                            <td className="p-3 text-right">
+                              <button
+                                onClick={() => eliminarItemConteoPendiente(cp.id)}
+                                className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-1.5 rounded-xl text-xs font-bold transition"
+                              >
+                                🗑️
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* CUADRATURA AUTOMÁTICA */}
+              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl no-print">
                 <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
                   Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente en estanterías según las incidencias de ruta.
@@ -826,10 +1011,11 @@
                 )}
               </div>
 
-              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
+              {/* HISTORIAL ACUMULATIVO */}
+              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl no-print">
                 <h2 className="text-lg font-black text-amber-400 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
                 <p className="text-xs text-slate-400 mb-5">
-                  Registro cronológico por producto. Al superar los 10 registros de un mismo artículo, el sistema limpia los más antiguos y conserva automáticamente los últimos 6.
+                  Registro cronológico por producto (Máx 10 por artículo, poda automática a los 6 más recientes).
                 </p>
 
                 {historialInventario.length === 0 ? (
@@ -866,8 +1052,9 @@
             </div>
           )}
 
+          {/* VISTA HISTORIAL SEMANAL */}
           {vista === "historial" && (
-            <div className="space-y-4 max-w-3xl mx-auto">
+            <div className="space-y-4 max-w-3xl mx-auto no-print">
               <div className="glass-card rounded-2xl p-5">
                 <h2 className="text-lg font-black text-amber-400">📁 Historial de Cierres Semanales</h2>
                 <p className="text-xs text-slate-400 mt-1">Registros archivados de semanas anteriores.</p>
