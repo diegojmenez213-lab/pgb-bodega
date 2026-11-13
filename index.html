@@ -15,6 +15,7 @@
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
     .glass-card { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .print-only { display: none; }
     @media print {
       body { background: white !important; color: black !important; }
       .no-print { display: none !important; }
@@ -250,58 +251,6 @@
         } catch (err) { alert("Error: " + err.message); }
       };
 
-      const toggleCheckConteoFisico = async (id, estadoActual) => {
-        const resp = prompt(`Selecciona tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Diego");
-        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
-          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
-          return;
-        }
-        try {
-          await db.collection("conteo_pendiente").doc(id).update({
-            conteoFisicoHecho: !estadoActual,
-            responsableConteo: !estadoActual ? resp.trim() : ""
-          });
-        } catch (err) { alert(err.message); }
-      };
-
-      const toggleCheckAjusteSistema = async (id, estadoActual) => {
-        const resp = prompt(`Confirma tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Bedanli");
-        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
-          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
-          return;
-        }
-        try {
-          await db.collection("conteo_pendiente").doc(id).update({
-            ajusteSistemaHecho: !estadoActual,
-            responsableAjuste: !estadoActual ? resp.trim() : ""
-          });
-        } catch (err) { alert(err.message); }
-      };
-
-      const eliminarItemConteoPendiente = async (id) => {
-        if (confirm("¿Eliminar este ítem de conteo?")) {
-          try { await db.collection("conteo_pendiente").doc(id).delete(); } catch (err) { alert(err.message); }
-        }
-      };
-
-      const imprimirReporteGeneral = () => {
-        setModoImpresionReporte('general');
-        setTimeout(() => {
-          window.print();
-          setModoImpresionReporte(null);
-        }, 200);
-      };
-
-      const imprimirReporteInventarioSeleccionado = () => {
-        const seleccionados = historialInventario.filter(h => seleccionadosInventario[h.id]);
-        if (seleccionados.length === 0) return alert("Selecciona al menos un ítem del historial de inventario con el check para generar el reporte.");
-        setModoImpresionReporte('inventario');
-        setTimeout(() => {
-          window.print();
-          setModoImpresionReporte(null);
-        }, 200);
-      };
-
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsable) => {
         try {
           const colRef = db.collection("historial_inventario");
@@ -325,6 +274,71 @@
             await batch.commit();
           }
         } catch (err) { console.error(err); }
+      };
+
+      const toggleCheckConteoFisico = async (id, estadoActual) => {
+        const resp = prompt(`Selecciona tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Diego");
+        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
+          return;
+        }
+        try {
+          await db.collection("conteo_pendiente").doc(id).update({
+            conteoFisicoHecho: !estadoActual,
+            responsableConteo: !estadoActual ? resp.trim() : ""
+          });
+        } catch (err) { alert(err.message); }
+      };
+
+      const toggleCheckAjusteSistema = async (id, estadoActual) => {
+        const resp = prompt(`Confirma tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Bedanli");
+        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
+          return;
+        }
+
+        const itemConteo = conteoPendiente.find(cp => cp.id === id);
+        const nuevoEstado = !estadoActual;
+
+        try {
+          await db.collection("conteo_pendiente").doc(id).update({
+            ajusteSistemaHecho: nuevoEstado,
+            responsableAjuste: nuevoEstado ? resp.trim() : ""
+          });
+
+          // Si se marca como ajustado, registrar automáticamente en el Historial Acumulativo de Inventario
+          if (nuevoEstado && itemConteo) {
+            await registrarEnHistorialInventario(itemConteo.producto, itemConteo.unidad, itemConteo.factura, resp.trim());
+          }
+        } catch (err) { alert(err.message); }
+      };
+
+      const eliminarItemConteoPendiente = async (id) => {
+        if (confirm("¿Eliminar este ítem de conteo?")) {
+          try { await db.collection("conteo_pendiente").doc(id).delete(); } catch (err) { alert(err.message); }
+        }
+      };
+
+      const imprimirHojaConteo = () => {
+        window.print();
+      };
+
+      const imprimirReporteGeneral = () => {
+        setModoImpresionReporte('general');
+        setTimeout(() => {
+          window.print();
+          setModoImpresionReporte(null);
+        }, 200);
+      };
+
+      const imprimirReporteInventarioSeleccionado = () => {
+        const seleccionados = historialInventario.filter(h => seleccionadosInventario[h.id]);
+        if (seleccionados.length === 0) return alert("Selecciona al menos un ítem del historial de inventario con el check para generar el reporte.");
+        setModoImpresionReporte('inventario');
+        setTimeout(() => {
+          window.print();
+          setModoImpresionReporte(null);
+        }, 200);
       };
 
       const toggleCheckAccion = async (id, accionNombre, estadoActual) => {
@@ -540,6 +554,42 @@
               </div>
             </div>
           )}
+
+          {/* DOCUMENTO OCULTO PARA IMPRESIÓN: HOJA DE CONTEO FÍSICO */}
+          <div className="print-only bg-white text-black p-8">
+            <div className="text-center border-b pb-4 mb-4">
+              <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
+              <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
+              <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
+            </div>
+            <table className="w-full text-left text-xs border-collapse border border-gray-400 mt-4">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="border border-gray-400 p-2">Producto / Descripción</th>
+                  <th className="border border-gray-400 p-2">Unidad</th>
+                  <th className="border border-gray-400 p-2">Fact. Ref</th>
+                  <th className="border border-gray-400 p-2">Stock Real (Anotar a mano)</th>
+                  <th className="border border-gray-400 p-2">Conteo Bodega</th>
+                  <th className="border border-gray-400 p-2">Ajuste Sistema</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conteoPendiente.map((cp, idx) => (
+                  <tr key={idx}>
+                    <td className="border border-gray-400 p-2 font-bold">{cp.producto}</td>
+                    <td className="border border-gray-400 p-2">{cp.unidad}</td>
+                    <td className="border border-gray-400 p-2">#{cp.factura}</td>
+                    <td className="border border-gray-400 p-2">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
+                    <td className="border border-gray-400 p-2">[ {cp.conteoFisicoHecho ? 'X' : ' '} ] {cp.responsableConteo}</td>
+                    <td className="border border-gray-400 p-2">[ {cp.ajusteSistemaHecho ? 'X' : ' '} ] {cp.responsableAjuste}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-12 pt-4 border-t text-xs">
+              <p>Firma de Encargado de Bodega: _____________________________________</p>
+            </div>
+          </div>
 
           {/* HEADER GENERAL */}
           <div className="glass-card rounded-3xl p-6 sm:p-8 mb-6 shadow-2xl relative overflow-hidden no-print">
@@ -974,47 +1024,11 @@
                     </p>
                   </div>
                   <button
-                    onClick={() => window.print()}
+                    onClick={imprimirHojaConteo}
                     className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
                   >
                     🖨️ Imprimir Hoja de Conteo en Columnas
                   </button>
-                </div>
-
-                {/* BLOQUE IMPRESIÓN CONTEO */}
-                <div className="hidden print-only mb-6 p-4 bg-white text-black rounded-lg">
-                  <div className="text-center border-b pb-4 mb-4">
-                    <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
-                    <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
-                    <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
-                  </div>
-                  <table className="w-full text-left text-xs border-collapse border border-gray-400">
-                    <thead>
-                      <tr className="bg-gray-200">
-                        <th className="border border-gray-400 p-2">Producto / Descripción</th>
-                        <th className="border border-gray-400 p-2">Unidad</th>
-                        <th className="border border-gray-400 p-2">Fact. Ref</th>
-                        <th className="border border-gray-400 p-2">Stock Real (Anotar a mano)</th>
-                        <th className="border border-gray-400 p-2">Conteo Bodega</th>
-                        <th className="border border-gray-400 p-2">Ajuste Sistema</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {conteoPendiente.map((cp, idx) => (
-                        <tr key={idx}>
-                          <td className="border border-gray-400 p-2 font-bold">{cp.producto}</td>
-                          <td className="border border-gray-400 p-2">{cp.unidad}</td>
-                          <td className="border border-gray-400 p-2">#{cp.factura}</td>
-                          <td className="border border-gray-400 p-2">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
-                          <td className="border border-gray-400 p-2">[ {cp.conteoFisicoHecho ? 'X' : ' '} ] {cp.responsableConteo}</td>
-                          <td className="border border-gray-400 p-2">[ {cp.ajusteSistemaHecho ? 'X' : ' '} ] {cp.responsableAjuste}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="mt-8 pt-4 border-t text-xs">
-                    <p>Firma de Encargado de Bodega: _____________________________________</p>
-                  </div>
                 </div>
 
                 {conteoPendiente.length === 0 ? (
