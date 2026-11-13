@@ -251,8 +251,11 @@
       };
 
       const toggleCheckConteoFisico = async (id, estadoActual) => {
-        const resp = prompt("Nombre de quien realizó el conteo físico (Edwin, Diego, etc.):");
-        if (!resp || !resp.trim()) return;
+        const resp = prompt(`Selecciona tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Diego");
+        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
+          return;
+        }
         try {
           await db.collection("conteo_pendiente").doc(id).update({
             conteoFisicoHecho: !estadoActual,
@@ -262,8 +265,11 @@
       };
 
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
-        const resp = prompt("Nombre de jefatura que ajustó en sistema (Bedanli / Pedro):");
-        if (!resp || !resp.trim()) return;
+        const resp = prompt(`Confirma tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Bedanli");
+        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
+          return;
+        }
         try {
           await db.collection("conteo_pendiente").doc(id).update({
             ajusteSistemaHecho: !estadoActual,
@@ -322,8 +328,11 @@
       };
 
       const toggleCheckAccion = async (id, accionNombre, estadoActual) => {
-        const usuarioActual = prompt("Confirma tu nombre (Edwin, Nico, Diego, Bedanli, Pedro, Gabriel):");
-        if (!usuarioActual || !usuarioActual.trim()) return;
+        const usuarioActual = prompt(`Selecciona tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Diego");
+        if (!usuarioActual || !USUARIOS_SISTEMA.includes(usuarioActual.trim())) {
+          if (usuarioActual) alert("Nombre no válido. Debe ser uno del equipo.");
+          return;
+        }
 
         const incidenciaActual = incidencias.find(i => i.id === id);
         if (!incidenciaActual) return;
