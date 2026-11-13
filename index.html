@@ -293,9 +293,10 @@
 
       const abrirFormRetorno = (item) => {
         setRecibiendoRetornoId(item.id);
-        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 1, detalle: "" }];
+        let rutaDefaultResp = item.ruta?.includes("Ruta 2") ? "Carlos" : "Juan";
+        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: rutaDefaultResp, cantFalta: 1, detalle: "" }];
         if (item.productoCruce) {
-          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 1, detalle: "" });
+          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: rutaDefaultResp, cantFalta: 1, detalle: "" });
         }
         if (item.retornoBodegaInfo && item.retornoBodegaInfo.itemsDetalle) {
           setRetornoFormState({
@@ -320,7 +321,14 @@
         items.forEach(it => {
           if (!it.recibido) {
             todoCompleto = false;
-            discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${it.motivoFalta} (Detalle: ${it.detalle || 'N/A'})`);
+            let responsableDanio = it.responsableRuta || (item.ruta?.includes("Ruta 2") ? "Carlos" : "Juan");
+            let motivoTexto = it.motivoFalta;
+            if (motivoTexto.includes("rompió")) {
+              motivoTexto += ` (Responsable afectado/daño: ${responsableDanio})`;
+            } else if (motivoTexto.includes("fábrica")) {
+              motivoTexto += ` (Reclamar a Proveedor / Origen)`;
+            }
+            discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${motivoTexto} (Detalle: ${it.detalle || 'N/A'})`);
           } else {
             discrepancias.push(`Recibido conforme: ${it.cantidad} ${it.unidad} de ${it.nombre}`);
           }
@@ -335,12 +343,25 @@
           fechaHoraRecibo: new Date().toLocaleString("es-CL")
         };
 
+        // Marcar automáticamente la acción "Chofer Retorna Producto a Bodega" como completada
+        const checks = item.checksAcciones || {};
+        const ahoraStr = new Date().toLocaleString("es-CL");
+        checks["Chofer Retorna Producto a Bodega"] = {
+          completado: true,
+          por: resp,
+          fechaHora: ahoraStr
+        };
+
+        const todasListas = (item.acciones || []).every(ac => checks[ac] && checks[ac].completado);
+
         try {
           await db.collection("incidencias").doc(item.id).update({
-            retornoBodegaInfo: infoRetorno
+            retornoBodegaInfo: infoRetorno,
+            checksAcciones: checks,
+            resuelto: todasListas ? true : item.resuelto
           });
           setRecibiendoRetornoId(null);
-          alert("✅ Recepción de retorno registrada correctamente.");
+          alert("✅ Recepción de retorno registrada y acción marcada automáticamente.");
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
@@ -640,7 +661,6 @@
                 <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
               </div>
 
-              {/* Agrupar seleccionados por ruta */}
               {(() => {
                 const seleccionados = incidencias.filter(i => seleccionadosRetornosPDF[i.id]);
                 const gruposRuta = {};
@@ -925,7 +945,7 @@
                             )}
                           </div>
 
-                          {/* CONTROL DE RETORNO A BODEGA (CHECKLIST INTERACTIVO) */}
+                          {/* CONTROL DE RETORNO A BODEGA (CHECKLIST INTERACTIVO CON DAÑO DE FÁBRICA / RUTA) */}
                           {incluyeRetorno && (
                             <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-3">
                               <div className="flex items-center justify-between">
@@ -993,11 +1013,54 @@
                                               }}
                                               className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
                                             >
-                                              <option value="Se partió / rompió en el trayecto">Se partió / rompió en el trayecto</option>
+                                              <option value="Se partió / rompió en el trayecto">Se partió / rompió en el trayecto (Golpe furgón/carretilla)</option>
+                                              <option value="Dañado de fábrica (Mal sellado / Defecto origen)">Dañado de fábrica (Mal sellado / Defecto origen)</option>
                                               <option value="Se perdió en el camino">Se perdió en el camino</option>
                                               <option value="Entregado por error a otro cliente">Entregado por error a otro cliente</option>
                                             </select>
                                           </div>
+
+                                          {/* Selector de responsable exacto de la ruta solo si se rompió/golpeó en trayecto */}
+                                          {it.motivoFalta === "Se partió / rompió en el trayecto" && (
+                                            <div>
+                                              <label className="text-[10px] text-rose-300 block mb-0.5 font-bold text-amber-300">👤 ¿Quién de la ruta causó el daño/rotura?</label>
+                                              <select
+                                                value={it.responsableRuta || (item.ruta?.includes("Ruta 2") ? "Carlos" : "Juan")}
+                                                onChange={(e) => {
+                                                  const updated = [...retornoFormState.items];
+                                                  updated[iIdx].responsableRuta = e.target.value;
+                                                  setRetornoFormState({ ...retornoFormState, items: updated });
+                                                }}
+                                                className="w-full bg-slate-900 border border-amber-600 rounded-lg px-2 py-1.5 text-xs text-white font-bold"
+                                              >
+                                                {item.ruta?.includes("Ruta 2") ? (
+                                                  <>
+                                                    <option value="Carlos">Carlos</option>
+                                                    <option value="Horacio">Horacio</option>
+                                                  </>
+                                                ) : item.ruta?.includes("Ruta 1") ? (
+                                                  <>
+                                                    <option value="Juan">Juan</option>
+                                                    <option value="Julio">Julio</option>
+                                                  </>
+                                                ) : (
+                                                  <>
+                                                    <option value="Juan">Juan</option>
+                                                    <option value="Julio">Julio</option>
+                                                    <option value="Carlos">Carlos</option>
+                                                    <option value="Horacio">Horacio</option>
+                                                  </>
+                                                )}
+                                              </select>
+                                            </div>
+                                          )}
+
+                                          {it.motivoFalta.includes("Dañado de fábrica") && (
+                                            <div className="bg-amber-950/40 p-2 rounded border border-amber-800 text-[10px] text-amber-300">
+                                              💡 Registrado como Defecto de Origen (Aplica Reclamo a Proveedor).
+                                            </div>
+                                          )}
+
                                           <div className="grid grid-cols-2 gap-2">
                                             <div>
                                               <label className="text-[10px] text-rose-300 block mb-0.5">Cantidad falt/dañada:</label>
