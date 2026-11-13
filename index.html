@@ -68,6 +68,9 @@
       const [catalogoProductos, setCatalogoProductos] = useState([]);
       const [historialInventario, setHistorialInventario] = useState([]);
       const [conteoPendiente, setConteoPendiente] = useState([]);
+      const [seleccionadosInventario, setSeleccionadosInventario] = useState({});
+      const [modoImpresionReporte, setModoImpresionReporte] = useState(null);
+
       const [vista, setVista] = useState("dashboard");
       const [conectado, setConectado] = useState(false);
       const [editandoId, setEditandoId] = useState(null);
@@ -152,7 +155,6 @@
 
       const registrarConteoPendiente = async (prod, uni, cant, fact) => {
         try {
-          // Verificar si ya existe en conteo pendiente
           const existe = conteoPendiente.some(cp => cp.producto === prod && cp.unidad === uni);
           if (!existe) {
             await db.collection("conteo_pendiente").add({
@@ -167,9 +169,7 @@
               timestamp: Date.now()
             });
           }
-        } catch (err) {
-          console.error("Error al registrar conteo pendiente:", err);
-        }
+        } catch (err) {}
       };
 
       const eliminarProductoCatalogo = async (id, e) => {
@@ -183,6 +183,10 @@
         if (confirm("¿Deseas eliminar este registro del historial de inventario?")) {
           try { await db.collection("historial_inventario").doc(id).delete(); } catch (err) { alert(err.message); }
         }
+      };
+
+      const toggleSeleccionInventario = (id) => {
+        setSeleccionadosInventario(prev => ({ ...prev, [id]: !prev[id] }));
       };
 
       const toggleAccionForm = (acc) => {
@@ -202,7 +206,6 @@
         await registrarProductoEnCatalogo(producto);
         if (motivo === "Cruce" && productoCruce) await registrarProductoEnCatalogo(productoCruce);
 
-        // Añadir automáticamente a la lista de conteo cíclico pendiente
         await registrarConteoPendiente(producto.trim().toUpperCase(), unidad, Number(cantidad), factura.trim());
         if (motivo === "Cruce" && productoCruce) {
           await registrarConteoPendiente(productoCruce.trim().toUpperCase(), unidadCruce, Number(cantidadCruce), factura.trim());
@@ -275,8 +278,22 @@
         }
       };
 
-      const imprimirHojaConteo = () => {
-        window.print();
+      const imprimirReporteGeneral = () => {
+        setModoImpresionReporte('general');
+        setTimeout(() => {
+          window.print();
+          setModoImpresionReporte(null);
+        }, 200);
+      };
+
+      const imprimirReporteInventarioSeleccionado = () => {
+        const seleccionados = historialInventario.filter(h => seleccionadosInventario[h.id]);
+        if (seleccionados.length === 0) return alert("Selecciona al menos un ítem del historial de inventario con el check para generar el reporte.");
+        setModoImpresionReporte('inventario');
+        setTimeout(() => {
+          window.print();
+          setModoImpresionReporte(null);
+        }, 200);
       };
 
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsable) => {
@@ -376,7 +393,6 @@
           const batch = db.batch();
           incidencias.forEach(inc => batch.delete(db.collection("incidencias").doc(inc.id)));
 
-          // Persistencia inteligente en conteo pendiente: eliminar solo los ítems con doble check completo
           conteoPendiente.forEach(cp => {
             if (cp.conteoFisicoHecho && cp.ajusteSistemaHecho) {
               batch.delete(db.collection("conteo_pendiente").doc(cp.id));
@@ -391,18 +407,20 @@
 
       const copiarResumenWhatsApp = () => {
         if (incidencias.length === 0) return alert("Sin incidencias para copiar.");
-        let texto = `*REPORTE BODEGA PGB DISTRIBUTION*\nFecha: ${hoy}\n---------------------------------\n`;
+        let texto = `📦 *REPORTE BODEGA PGB DISTRIBUTION*\n📅 Fecha: ${hoy}\n━━━━━━━━━━━━━━\n`;
         incidencias.forEach((i, idx) => {
-          const estado = i.resuelto ? "RESUELTO" : "PENDIENTE";
-          texto += `${idx + 1}. Fact #${i.factura} (${i.motivo}) - ${estado}\n`;
+          const estado = i.resuelto ? "✅ RESUELTO" : "⏳ PENDIENTE";
+          const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
+          texto += `*${idx + 1}. Fact #${i.factura}* (${i.motivo}) - ${estado}\n`;
           texto += `   • Prod: ${i.cantidad} ${i.unidad} de ${i.producto}\n`;
           if (i.motivo === "Cruce" && i.productoCruce) {
             texto += `   • Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
           }
-          texto += `   • Armó: ${i.armador} | Registró: ${i.registradoPor || 'N/A'}\n\n`;
+          texto += `   • Armó: ${i.armador} | Registró: ${i.registradoPor || 'N/A'}\n`;
+          texto += `   • Acciones: ${acs}\n\n`;
         });
         navigator.clipboard.writeText(texto);
-        alert("¡Reporte copiado para WhatsApp!");
+        alert("📋 ¡Reporte copiado para WhatsApp!");
       };
 
       const kpis = useMemo(() => ({
@@ -444,6 +462,76 @@
 
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
+          
+          {/* DOCUMENTO OCULTO PARA IMPRESIÓN: REPORTE GENERAL DE INCIDENCIAS */}
+          {modoImpresionReporte === 'general' && (
+            <div className="print-only bg-white text-black p-8">
+              <div className="text-center border-b pb-4 mb-6">
+                <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
+                <h2 className="text-sm font-semibold">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA Y RUTAS</h2>
+                <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+              </div>
+
+              <div className="mb-6 bg-gray-100 p-4 rounded text-xs">
+                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltos: {kpis.resueltas}</p>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                {incidencias.map((item, idx) => (
+                  <div key={item.id} className="border border-gray-400 p-3 rounded">
+                    <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Motivo:</strong> {item.motivo.toUpperCase()} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
+                    <p><strong>Cliente:</strong> {item.cliente || "N/A"} | <strong>Ruta:</strong> {item.ruta} | <strong>Armó:</strong> {item.armador} | <strong>Registró:</strong> {item.registradoPor || "N/A"}</p>
+                    <p><strong>Producto Afectado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                    {item.motivo === "Cruce" && <p><strong>Producto Enviado por Error:</strong> {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>}
+                    <p><strong>Acciones / Estatus:</strong> {item.acciones ? item.acciones.join(" + ") : "N/A"}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-12 pt-8 border-t text-xs">
+                <p>Firma de Supervisión / Administración (Pedro / Bedanli): _____________________________________</p>
+              </div>
+            </div>
+          )}
+
+          {/* DOCUMENTO OCULTO PARA IMPRESIÓN: REPORTE PERSONALIZADO DE INVENTARIO */}
+          {modoImpresionReporte === 'inventario' && (
+            <div className="print-only bg-white text-black p-8">
+              <div className="text-center border-b pb-4 mb-6">
+                <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
+                <h2 className="text-sm font-semibold">REPORTE OFICIAL DE CORRECCIÓN Y AUDITORÍA DE INVENTARIO</h2>
+                <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+              </div>
+
+              <table className="w-full text-left text-xs border-collapse border border-gray-400">
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border border-gray-400 p-2">Producto</th>
+                    <th className="border border-gray-400 p-2">Unidad</th>
+                    <th className="border border-gray-400 p-2">Factura Ref</th>
+                    <th className="border border-gray-400 p-2">Corregido Por</th>
+                    <th className="border border-gray-400 p-2">Fecha y Hora</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historialInventario.filter(h => seleccionadosInventario[h.id]).map((h, idx) => (
+                    <tr key={idx}>
+                      <td className="border border-gray-400 p-2 font-bold">{h.producto}</td>
+                      <td className="border border-gray-400 p-2">{h.unidad}</td>
+                      <td className="border border-gray-400 p-2">#{h.factura}</td>
+                      <td className="border border-gray-400 p-2">{h.corregidoPor}</td>
+                      <td className="border border-gray-400 p-2">{h.fechaHora}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="mt-12 pt-8 border-t text-xs">
+                <p>Firma de Supervisión / Administración (Pedro / Bedanli): _____________________________________</p>
+              </div>
+            </div>
+          )}
+
           {/* HEADER GENERAL */}
           <div className="glass-card rounded-3xl p-6 sm:p-8 mb-6 shadow-2xl relative overflow-hidden no-print">
             <div className="absolute -right-10 -top-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -467,6 +555,9 @@
               <div className="flex flex-wrap gap-2.5">
                 <button onClick={copiarResumenWhatsApp} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition">
                   📲 Copiar a WhatsApp
+                </button>
+                <button onClick={imprimirReporteGeneral} className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition">
+                  🖨️ Imprimir Reporte General PDF
                 </button>
                 <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-3 rounded-2xl shadow-xl transition">
                   ➕ Registrar Incidencia
@@ -860,12 +951,13 @@
             </form>
           )}
 
-          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL) */}
+          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL CON SELECCIÓN DE REPORTE) */}
           {vista === "balance" && (
-            <div className="space-y-6">
-              {/* HOJA DE CONTEO FÍSICO PENDIENTE (LISTA EN COLUMNA PARA IMPRIMIR) */}
+            <div className="space-y-6 no-print">
+              
+              {/* HOJA DE CONTEO FÍSICO PENDIENTE */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5 no-print">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                   <div>
                     <h2 className="text-xl font-black text-amber-400">📋 Lista de Conteo Cíclico por Incidencias</h2>
                     <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
@@ -873,19 +965,19 @@
                     </p>
                   </div>
                   <button
-                    onClick={imprimirHojaConteo}
+                    onClick={() => window.print()}
                     className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
                   >
-                    🖨️ Imprimir Hoja de Conteo PDF
+                    🖨️ Imprimir Hoja de Conteo en Columnas
                   </button>
                 </div>
 
-                {/* BLOQUE EXCLUSIVO PARA IMPRESIÓN (ESTILO DOCUMENTO FORMAL EN COLUMNA) */}
+                {/* BLOQUE IMPRESIÓN CONTEO */}
                 <div className="hidden print-only mb-6 p-4 bg-white text-black rounded-lg">
                   <div className="text-center border-b pb-4 mb-4">
                     <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
                     <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
-                    <p className="text-[11px] text-gray-600">Fecha de Emisión: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
+                    <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
                   </div>
                   <table className="w-full text-left text-xs border-collapse border border-gray-400">
                     <thead>
@@ -916,13 +1008,12 @@
                   </div>
                 </div>
 
-                {/* TABLA DIGITAL INTERACTIVA */}
                 {conteoPendiente.length === 0 ? (
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400 no-print">
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400">
                     No hay productos pendientes de conteo cíclico. Todo al día.
                   </div>
                 ) : (
-                  <div className="overflow-x-auto no-print">
+                  <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs sm:text-sm">
                       <thead className="bg-slate-950 text-slate-400 uppercase text-[11px]">
                         <tr>
@@ -973,7 +1064,7 @@
               </div>
 
               {/* CUADRATURA AUTOMÁTICA */}
-              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl no-print">
+              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
                   Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente en estanterías según las incidencias de ruta.
@@ -1011,12 +1102,22 @@
                 )}
               </div>
 
-              {/* HISTORIAL ACUMULATIVO */}
-              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl no-print">
-                <h2 className="text-lg font-black text-amber-400 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
-                <p className="text-xs text-slate-400 mb-5">
-                  Registro cronológico por producto (Máx 10 por artículo, poda automática a los 6 más recientes).
-                </p>
+              {/* HISTORIAL ACUMULATIVO CON SELECCIÓN DE REPORTE PDF */}
+              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+                  <div>
+                    <h2 className="text-lg font-black text-amber-400 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
+                    <p className="text-xs text-slate-400">
+                      Marca con un check los ítems que deseas incluir en el reporte formal y genera el PDF impreso.
+                    </p>
+                  </div>
+                  <button
+                    onClick={imprimirReporteInventarioSeleccionado}
+                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                  >
+                    📄 Imprimir Reporte PDF de Ítems Seleccionados
+                  </button>
+                </div>
 
                 {historialInventario.length === 0 ? (
                   <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400">
@@ -1024,28 +1125,39 @@
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {historialInventario.map((h, i) => (
-                      <div key={h.id || i} className="bg-slate-950 border border-slate-800/80 p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <div>
-                          <span className="font-black text-white text-sm">{h.producto}</span>
-                          <span className="text-slate-400 ml-2">({h.unidad})</span>
-                          <span className="bg-slate-900 text-amber-300 px-2 py-0.5 rounded-md ml-2 font-bold">Fact #{h.factura}</span>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
-                            <span className="text-emerald-400 font-bold">Actualizado por {h.corregidoPor}</span>
-                            <span className="text-slate-400 block text-[11px]">{h.fechaHora}</span>
+                    {historialInventario.map((h, i) => {
+                      const seleccionado = seleccionadosInventario[h.id] || false;
+                      return (
+                        <div key={h.id || i} className={`border p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs transition ${seleccionado ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-950 border-slate-800/80'}`}>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={seleccionado}
+                              onChange={() => toggleSeleccionInventario(h.id)}
+                              className="w-4 h-4 accent-amber-500 cursor-pointer"
+                            />
+                            <div>
+                              <span className="font-black text-white text-sm">{h.producto}</span>
+                              <span className="text-slate-400 ml-2">({h.unidad})</span>
+                              <span className="bg-slate-900 text-amber-300 px-2 py-0.5 rounded-md ml-2 font-bold">Fact #{h.factura}</span>
+                            </div>
                           </div>
-                          <button
-                            onClick={() => eliminarRegistroHistorialInv(h.id)}
-                            className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-1.5 rounded-xl text-xs font-bold transition"
-                            title="Eliminar este registro"
-                          >
-                            🗑️ Eliminar
-                          </button>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <span className="text-emerald-400 font-bold">Actualizado por {h.corregidoPor}</span>
+                              <span className="text-slate-400 block text-[11px]">{h.fechaHora}</span>
+                            </div>
+                            <button
+                              onClick={() => eliminarRegistroHistorialInv(h.id)}
+                              className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-1.5 rounded-xl text-xs font-bold transition"
+                              title="Eliminar este registro"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1082,7 +1194,7 @@
                         {c.registros.map((r, i) => (
                           <div key={i} className="bg-slate-950 p-3 rounded-xl text-xs flex justify-between items-center">
                             <div>
-                              <span className="font-bold text-amber-400">Fact #{r.factura}</span> • <span className="font-bold text-white">{r.motivo}</span>: {r.cantidad} {r.unidad} de {r.producto}
+                              <span className="font-bold text-amber-400">Fact #${r.factura}</span> • <span className="font-bold text-white">{r.motivo}</span>: {r.cantidad} {r.unidad} de {r.producto}
                             </div>
                             <div className="text-slate-400">Armó: {r.armador} | Registró: {r.registradoPor}</div>
                           </div>
