@@ -81,7 +81,6 @@
       const [recibiendoRetornoId, setRecibiendoRetornoId] = useState(null);
       const [retornoFormState, setRetornoFormState] = useState({});
 
-      // Estados formulario incidente bodega interno
       const [prodBodega, setProdBodega] = useState("");
       const [cantBodega, setCantBodega] = useState(1);
       const [uniBodega, setUniBodega] = useState(UNIDADES[0]);
@@ -282,7 +281,6 @@
         } catch (err) { alert("Error: " + err.message); }
       };
 
-      // Historial de inventario con regla de poda (al pasar de 10, baja a 5 + 1 nuevo = 6)
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsable, detalleExtra = "") => {
         try {
           const colRef = db.collection("historial_inventario");
@@ -301,7 +299,7 @@
           registrosProducto.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
           if (registrosProducto.length > 10) {
-            const excess = registrosProducto.slice(5); // Deja 5 y el nuevo entra sumando 6 en total
+            const excess = registrosProducto.slice(5);
             const batch = db.batch();
             excess.forEach(item => batch.delete(colRef.doc(item.id)));
             await batch.commit();
@@ -309,7 +307,6 @@
         } catch (err) { console.error(err); }
       };
 
-      // Guardar Incidente de Bodega Interno
       const guardarIncidenteBodega = async (e) => {
         e.preventDefault();
         if (!prodBodega.trim()) return alert("Ingresa el nombre del producto.");
@@ -340,7 +337,6 @@
         }
       };
 
-      // Jefatura ajusta incidente de bodega (descuenta, marca ajustado y alimenta historial)
       const ajustarIncidenteBodega = async (inc) => {
         const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar inventario:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
@@ -355,7 +351,6 @@
             fechaHoraAjuste: new Date().toLocaleString("es-CL")
           });
 
-          // Registrar en el Historial Acumulativo de Correcciones de Inventario con detalle explícito
           const detalleHistorial = `Incidente Bodega: ${inc.motivo} — Implicado/Responsable: ${inc.responsable}`;
           await registrarEnHistorialInventario(inc.producto, inc.unidad, "BODEGA-INT", resp.trim(), detalleHistorial);
 
@@ -373,10 +368,9 @@
 
       const abrirFormRetorno = (item) => {
         setRecibiendoRetornoId(item.id);
-        let rutaDefaultResp = item.ruta?.includes("Ruta 2") ? "Carlos" : "Juan";
-        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: rutaDefaultResp, cantFalta: 1, detalle: "" }];
+        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: "Ninguno (Golpe accidental en furgón)", danioTotal: false, cantFalta: 1, detalle: "" }];
         if (item.productoCruce) {
-          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: rutaDefaultResp, cantFalta: 1, detalle: "" });
+          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: "Ninguno (Golpe accidental en furgón)", danioTotal: false, cantFalta: 1, detalle: "" });
         }
         if (item.retornoBodegaInfo && item.retornoBodegaInfo.itemsDetalle) {
           setRetornoFormState({
@@ -401,10 +395,10 @@
         items.forEach(it => {
           if (!it.recibido) {
             todoCompleto = false;
-            let responsableDanio = it.responsableRuta || (item.ruta?.includes("Ruta 2") ? "Carlos" : "Juan");
+            let responsableDanio = it.responsableRuta || "Ninguno";
             let motivoTexto = it.motivoFalta;
             if (motivoTexto.includes("rompió")) {
-              motivoTexto += ` (Responsable afectado/daño: ${responsableDanio})`;
+              motivoTexto += ` (Responsable/Causa: ${responsableDanio})`;
             } else if (motivoTexto.includes("fábrica")) {
               motivoTexto += ` (Reclamar a Proveedor / Origen)`;
             }
@@ -590,7 +584,6 @@
         if (!nombreSemana) return;
 
         try {
-          // Archivar incidencias y incidentes de bodega ajustados
           await db.collection("cierres_semanales").add({
             nombreSemana,
             fechaCierre: new Date().toISOString(),
@@ -672,7 +665,6 @@
             if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura);
           }
         });
-        // Incluir incidentes de bodega ajustados en la cuadratura como faltante interno
         incidentesBodega.forEach(ib => {
           if (ib.ajustado) {
             sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT");
@@ -1010,7 +1002,6 @@
                   </button>
                 </div>
 
-                {/* Formulario rápido para registrar incidente interno */}
                 <form onSubmit={guardarIncidenteBodega} className="bg-slate-950 p-4 sm:p-6 rounded-2xl border border-slate-800 space-y-4 mb-6">
                   <h3 className="text-sm font-black text-amber-300 uppercase tracking-wider">➕ Registrar Nuevo Incidente en Bodega</h3>
                   
@@ -1062,7 +1053,6 @@
                   </button>
                 </form>
 
-                {/* Listado de Incidentes de Bodega */}
                 <div className="space-y-3">
                   <h3 className="text-sm font-black text-slate-300 uppercase tracking-wider">📋 Historial de Incidentes en Bodega</h3>
                   {incidentesBodega.length === 0 ? (
@@ -1211,7 +1201,7 @@
                             )}
                           </div>
 
-                          {/* CONTROL DE RETORNO A BODEGA (CHECKLIST INTERACTIVO) */}
+                          {/* CONTROL DE RETORNO A BODEGA (CHECKLIST INTERACTIVO MEJORADO) */}
                           {incluyeRetorno && (
                             <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-3">
                               <div className="flex items-center justify-between">
@@ -1286,12 +1276,12 @@
                                             </select>
                                           </div>
 
-                                          {/* Selector de responsable exacto de la ruta solo si se rompió/golpeó en trayecto */}
+                                          {/* Selector de responsable de ruta con opción 'Ninguno (Golpe accidental)' */}
                                           {it.motivoFalta === "Se partió / rompió en el trayecto" && (
                                             <div>
                                               <label className="text-[10px] text-rose-300 block mb-0.5 font-bold text-amber-300">👤 ¿Quién de la ruta causó el daño/rotura?</label>
                                               <select
-                                                value={it.responsableRuta || (item.ruta?.includes("Ruta 2") ? "Carlos" : "Juan")}
+                                                value={it.responsableRuta || "Ninguno (Golpe accidental en furgón)"}
                                                 onChange={(e) => {
                                                   const updated = [...retornoFormState.items];
                                                   updated[iIdx].responsableRuta = e.target.value;
@@ -1299,6 +1289,7 @@
                                                 }}
                                                 className="w-full bg-slate-900 border border-amber-600 rounded-lg px-2 py-1.5 text-xs text-white font-bold"
                                               >
+                                                <option value="Ninguno (Golpe accidental en furgón)">Ninguno (Golpe accidental en furgón)</option>
                                                 {item.ruta?.includes("Ruta 2") ? (
                                                   <>
                                                     <option value="Carlos">Carlos</option>
@@ -1327,35 +1318,60 @@
                                             </div>
                                           )}
 
-                                          <div className="grid grid-cols-2 gap-2">
-                                            <div>
-                                              <label className="text-[10px] text-rose-300 block mb-0.5">Cantidad falt/dañada:</label>
+                                          {/* Selector rápido de Daño Total / Caja Completa */}
+                                          <div className="bg-slate-950 p-2 rounded border border-slate-800 space-y-2">
+                                            <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-amber-300">
                                               <input
-                                                type="number"
-                                                min="1"
-                                                max={it.cantidad}
-                                                value={it.cantFalta || 1}
+                                                type="checkbox"
+                                                checked={it.danioTotal || false}
                                                 onChange={(e) => {
                                                   const updated = [...retornoFormState.items];
-                                                  updated[iIdx].cantFalta = Number(e.target.value);
+                                                  updated[iIdx].danioTotal = e.target.checked;
+                                                  if (e.target.checked) {
+                                                    updated[iIdx].cantFalta = it.cantidad;
+                                                    updated[iIdx].detalle = `${it.cantidad} ${it.unidad} completa/s dañada/s`;
+                                                  } else {
+                                                    updated[iIdx].cantFalta = 1;
+                                                    updated[iIdx].detalle = "";
+                                                  }
                                                   setRetornoFormState({ ...retornoFormState, items: updated });
                                                 }}
-                                                className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white font-bold"
+                                                className="w-3.5 h-3.5 accent-amber-500"
                                               />
-                                            </div>
-                                            <div>
-                                              <label className="text-[10px] text-rose-300 block mb-0.5">Detalle (ej: sueltas de caja):</label>
-                                              <input
-                                                type="text"
-                                                value={it.detalle || ""}
-                                                placeholder="Ej: 3 unds sueltas de caja"
-                                                onChange={(e) => {
-                                                  const updated = [...retornoFormState.items];
-                                                  updated[iIdx].detalle = e.target.value;
-                                                  setRetornoFormState({ ...retornoFormState, items: updated });
-                                                }}
-                                                className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
-                                              />
+                                              <span>📦 Daño Total ({it.cantidad} {it.unidad} completa/s)</span>
+                                            </label>
+
+                                            <div className="grid grid-cols-2 gap-2 pt-1">
+                                              <div>
+                                                <label className="text-[10px] text-rose-300 block mb-0.5">Cantidad falt/dañada:</label>
+                                                <input
+                                                  type="number"
+                                                  min="1"
+                                                  max={it.cantidad}
+                                                  value={it.cantFalta || 1}
+                                                  disabled={it.danioTotal}
+                                                  onChange={(e) => {
+                                                    const updated = [...retornoFormState.items];
+                                                    updated[iIdx].cantFalta = Number(e.target.value);
+                                                    setRetornoFormState({ ...retornoFormState, items: updated });
+                                                  }}
+                                                  className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white font-bold disabled:opacity-50"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="text-[10px] text-rose-300 block mb-0.5">Detalle (ej: sueltas de caja):</label>
+                                                <input
+                                                  type="text"
+                                                  value={it.detalle || ""}
+                                                  placeholder="Ej: 3 unds sueltas de caja"
+                                                  onChange={(e) => {
+                                                    const updated = [...retornoFormState.items];
+                                                    updated[iIdx].detalle = e.target.value;
+                                                    setRetornoFormState({ ...retornoFormState, items: updated });
+                                                  }}
+                                                  className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                                                />
+                                              </div>
                                             </div>
                                           </div>
                                         </div>
