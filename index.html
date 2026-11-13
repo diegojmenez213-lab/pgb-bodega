@@ -72,10 +72,10 @@
       const [historialInventario, setHistorialInventario] = useState([]);
       const [conteoPendiente, setConteoPendiente] = useState([]);
       const [seleccionadosInventario, setSeleccionadosInventario] = useState({});
+      const [seleccionadosRetornosPDF, setSeleccionadosRetornosPDF] = useState({});
       const [modoImpresionReporte, setModoImpresionReporte] = useState(null);
       const [facturaImprimirIndividual, setFacturaImprimirIndividual] = useState(null);
 
-      // Estado para controlar qué tarjeta está desplegando el formulario de recepción de retorno
       const [recibiendoRetornoId, setRecibiendoRetornoId] = useState(null);
       const [retornoFormState, setRetornoFormState] = useState({});
 
@@ -197,6 +197,10 @@
         setSeleccionadosInventario(prev => ({ ...prev, [id]: !prev[id] }));
       };
 
+      const toggleSeleccionRetornoPDF = (id) => {
+        setSeleccionadosRetornosPDF(prev => ({ ...prev, [id]: !prev[id] }));
+      };
+
       const toggleAccionForm = (acc) => {
         if (accionesSeleccionadas.includes(acc)) {
           if (accionesSeleccionadas.length === 1) return;
@@ -287,18 +291,23 @@
         } catch (err) { console.error(err); }
       };
 
-      // Inicializar formulario de checklist cuando abren la recepción
       const abrirFormRetorno = (item) => {
         setRecibiendoRetornoId(item.id);
-        // Construir items esperados
-        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 0, detalle: "" }];
+        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 1, detalle: "" }];
         if (item.productoCruce) {
-          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 0, detalle: "" });
+          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 1, detalle: "" });
         }
-        setRetornoFormState({
-          responsable: "Edwin",
-          items: listaItems
-        });
+        if (item.retornoBodegaInfo && item.retornoBodegaInfo.itemsDetalle) {
+          setRetornoFormState({
+            responsable: item.retornoBodegaInfo.recibidoPor || "Edwin",
+            items: item.retornoBodegaInfo.itemsDetalle
+          });
+        } else {
+          setRetornoFormState({
+            responsable: "Edwin",
+            items: listaItems
+          });
+        }
       };
 
       const guardarRecepcionRetornoDirecto = async (item) => {
@@ -311,7 +320,9 @@
         items.forEach(it => {
           if (!it.recibido) {
             todoCompleto = false;
-            discrepancias.push(`${it.cantidad - (it.cantFalta || 0)} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${it.motivoFalta} (${it.cantFalta || 0} afect/falt, Detalle: ${it.detalle || 'N/A'})`);
+            discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${it.motivoFalta} (Detalle: ${it.detalle || 'N/A'})`);
+          } else {
+            discrepancias.push(`Recibido conforme: ${it.cantidad} ${it.unidad} de ${it.nombre}`);
           }
         });
 
@@ -397,6 +408,13 @@
         setModoImpresionReporte('individual');
         setFacturaImprimirIndividual(item);
         setTimeout(() => { window.print(); setModoImpresionReporte(null); setFacturaImprimirIndividual(null); }, 200);
+      };
+
+      const imprimirReporteRetornosSeleccionados = () => {
+        const seleccionados = incidencias.filter(i => seleccionadosRetornosPDF[i.id]);
+        if (seleccionados.length === 0) return alert("Selecciona al menos un retorno de bodega con el check para generar el reporte consolidado por ruta.");
+        setModoImpresionReporte('retornos_consolidado');
+        setTimeout(() => { window.print(); setModoImpresionReporte(null); }, 200);
       };
 
       const toggleCheckAccion = async (id, accionNombre, estadoActual) => {
@@ -609,6 +627,59 @@
 
               <div className="mt-12 pt-8 border-t text-xs">
                 <p>Firma de Supervisión / Administración (Pedro / Bedanli): _____________________________________</p>
+              </div>
+            </div>
+          )}
+
+          {/* REPORTE CONSOLIDADO DE RETORNOS AGRUPADO POR RUTA */}
+          {modoImpresionReporte === 'retornos_consolidado' && (
+            <div className="print-only bg-white text-black p-8">
+              <div className="text-center border-b pb-4 mb-6">
+                <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
+                <h2 className="text-sm font-semibold">REPORTE CONSOLIDADO DE RETORNOS A BODEGA (AGRUPADO POR RUTA)</h2>
+                <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+              </div>
+
+              {/* Agrupar seleccionados por ruta */}
+              {(() => {
+                const seleccionados = incidencias.filter(i => seleccionadosRetornosPDF[i.id]);
+                const gruposRuta = {};
+                seleccionados.forEach(item => {
+                  const r = item.ruta || "Otras Rutas";
+                  if (!gruposRuta[r]) gruposRuta[r] = [];
+                  gruposRuta[r].push(item);
+                });
+
+                return Object.entries(gruposRuta).map(([rutaNombre, itemsRuta], gIdx) => (
+                  <div key={gIdx} className="mb-8">
+                    <h3 className="text-sm font-bold bg-gray-200 p-2 rounded mb-3 border border-gray-400">
+                      🚚 {rutaNombre.toUpperCase()} ({itemsRuta.length} Facturas con Retorno)
+                    </h3>
+                    <div className="space-y-4">
+                      {itemsRuta.map((item, iIdx) => (
+                        <div key={item.id} className="border border-gray-400 p-3 rounded text-xs space-y-1">
+                          <p><strong>{iIdx + 1}. Factura #{item.factura}</strong> — <strong>Cliente:</strong> {item.cliente || "N/A"}</p>
+                          <p><strong>Armó:</strong> {item.armador} | <strong>Motivo:</strong> {item.motivo.toUpperCase()}</p>
+                          <p><strong>Producto Esperado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                          {item.retornoBodegaInfo ? (
+                            <div className="mt-2 pt-2 border-t border-gray-300 bg-gray-50 p-2 rounded">
+                              <p><strong>Recepción Bodega:</strong> {item.retornoBodegaInfo.completo ? "Llegó Completo y Sano" : "Con Discrepancia / Problema"}</p>
+                              <p><strong>Detalle:</strong> {item.retornoBodegaInfo.discrepanciasTexto}</p>
+                              <p><strong>Recibido por:</strong> {item.retornoBodegaInfo.recibidoPor} ({item.retornoBodegaInfo.fechaHoraRecibo})</p>
+                            </div>
+                          ) : (
+                            <p className="text-gray-500 italic">Pendiente de recepción en bodega.</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ));
+              })()}
+
+              <div className="mt-12 pt-8 border-t text-xs flex justify-between">
+                <p>Firma Bodega / Recepción: _______________________</p>
+                <p>Firma Supervisión (Pedro / Bedanli): _______________________</p>
               </div>
             </div>
           )}
@@ -854,7 +925,7 @@
                             )}
                           </div>
 
-                          {/* BLOQUE DE RETORNO DE CHOFER A BODEGA (CON CHECKLIST INTERACTIVO) */}
+                          {/* CONTROL DE RETORNO A BODEGA (CHECKLIST INTERACTIVO) */}
                           {incluyeRetorno && (
                             <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-3">
                               <div className="flex items-center justify-between">
@@ -912,7 +983,7 @@
                                       {!it.recibido && (
                                         <div className="pl-6 space-y-2 pt-2 border-t border-rose-900/40">
                                           <div>
-                                            <label className="text-[10px] text-rose-300 block mb-0.5">¿Por qué motivo no llegó completo?</label>
+                                            <label className="text-[10px] text-rose-300 block mb-0.5">¿Qué pasó con este producto?</label>
                                             <select
                                               value={it.motivoFalta}
                                               onChange={(e) => {
@@ -929,10 +1000,11 @@
                                           </div>
                                           <div className="grid grid-cols-2 gap-2">
                                             <div>
-                                              <label className="text-[10px] text-rose-300 block mb-0.5">Unidades falt/dañadas:</label>
+                                              <label className="text-[10px] text-rose-300 block mb-0.5">Cantidad falt/dañada:</label>
                                               <input
                                                 type="number"
                                                 min="1"
+                                                max={it.cantidad}
                                                 value={it.cantFalta || 1}
                                                 onChange={(e) => {
                                                   const updated = [...retornoFormState.items];
@@ -1253,7 +1325,7 @@
             </form>
           )}
 
-          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL) */}
+          {/* VISTA BALANCE (CUADRATURA + LISTA DE CONTEO PENDIENTE + HISTORIAL + GESTIÓN RETORNOS PDF) */}
           {vista === "balance" && (
             <div className="space-y-6 no-print">
               
@@ -1325,6 +1397,65 @@
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </div>
+
+              {/* SECCIÓN: REPORTES CONSOLIDADOS DE RETORNOS POR RUTA */}
+              <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+                  <div>
+                    <h2 className="text-xl font-black text-amber-400">🚚 Reporte Consolidado de Retornos a Bodega por Ruta</h2>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                      Selecciona las facturas con retorno y genera un reporte PDF agrupado por chofer / ruta (ej. Juan vs Carlos).
+                    </p>
+                  </div>
+                  <button
+                    onClick={imprimirReporteRetornosSeleccionados}
+                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                  >
+                    📄 Imprimir PDF Retornos Seleccionados
+                  </button>
+                </div>
+
+                {incidencias.filter(i => (i.acciones || []).includes("Chofer Retorna Producto a Bodega")).length === 0 ? (
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400">
+                    No hay incidencias registradas con acción de retorno a bodega.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {incidencias.filter(i => (i.acciones || []).includes("Chofer Retorna Producto a Bodega")).map((item) => {
+                      const seleccionado = seleccionadosRetornosPDF[item.id] || false;
+                      const procesado = !!item.retornoBodegaInfo;
+                      return (
+                        <div key={item.id} className={`border p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs transition ${seleccionado ? 'bg-sky-500/10 border-sky-500/40' : 'bg-slate-950 border-slate-800/80'}`}>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={seleccionado}
+                              onChange={() => toggleSeleccionRetornoPDF(item.id)}
+                              className="w-4 h-4 accent-sky-500 cursor-pointer"
+                            />
+                            <div>
+                              <span className="font-black text-white text-sm">Fact #{item.factura}</span>
+                              <span className="text-slate-300 ml-2">({item.ruta})</span>
+                              <span className="bg-slate-900 text-amber-300 px-2 py-0.5 rounded-md ml-2 font-bold">{item.cantidad} {item.unidad} — {item.producto}</span>
+                            </div>
+                          </div>
+                          <div>
+                            {procesado ? (
+                              <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded-lg font-bold">
+                                ✓ Recibido ({item.retornoBodegaInfo.recibidoPor})
+                              </span>
+                            ) : (
+                              <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2.5 py-1 rounded-lg font-bold">
+                                ⏳ Pendiente en bodega
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
