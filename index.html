@@ -75,6 +75,10 @@
       const [modoImpresionReporte, setModoImpresionReporte] = useState(null);
       const [facturaImprimirIndividual, setFacturaImprimirIndividual] = useState(null);
 
+      // Estado para controlar qué tarjeta está desplegando el formulario de recepción de retorno
+      const [recibiendoRetornoId, setRecibiendoRetornoId] = useState(null);
+      const [retornoFormState, setRetornoFormState] = useState({});
+
       const [vista, setVista] = useState("dashboard");
       const [conectado, setConectado] = useState(false);
       const [editandoId, setEditandoId] = useState(null);
@@ -238,7 +242,7 @@
           unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
           acciones: accionesSeleccionadas,
           checksAcciones: checksIniciales,
-          retornoBodegaInfo: null, // Inicialmente sin procesar retorno de chofer
+          retornoBodegaInfo: null,
           notas: notas.trim(),
           timestamp: Date.now()
         };
@@ -283,48 +287,49 @@
         } catch (err) { console.error(err); }
       };
 
-      const procesarRecepcionRetorno = async (incidencia) => {
-        const resp = prompt(`Confirma tu nombre para recibir el retorno en bodega:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Edwin");
-        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
-          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
-          return;
+      // Inicializar formulario de checklist cuando abren la recepción
+      const abrirFormRetorno = (item) => {
+        setRecibiendoRetornoId(item.id);
+        // Construir items esperados
+        let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 0, detalle: "" }];
+        if (item.productoCruce) {
+          listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", cantFalta: 0, detalle: "" });
         }
+        setRetornoFormState({
+          responsable: "Edwin",
+          items: listaItems
+        });
+      };
 
-        const llegoCompleto = confirm("¿El producto de retorno llegó completo y en perfecto estado a bodega?\n\nAceptar = Sí, completo.\nCancelar = No, hubo un problema (pérdida, rotura o entrega errónea).");
+      const guardarRecepcionRetornoDirecto = async (item) => {
+        const resp = retornoFormState.responsable || "Edwin";
+        const items = retornoFormState.items || [];
 
-        let infoRetorno = {
+        let discrepancias = [];
+        let todoCompleto = true;
+
+        items.forEach(it => {
+          if (!it.recibido) {
+            todoCompleto = false;
+            discrepancias.push(`${it.cantidad - (it.cantFalta || 0)} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${it.motivoFalta} (${it.cantFalta || 0} afect/falt, Detalle: ${it.detalle || 'N/A'})`);
+          }
+        });
+
+        const infoRetorno = {
           recibido: true,
-          completo: llegoCompleto,
-          motivoFalta: "",
-          cantidadFaltante: 0,
-          detalleRotura: "",
-          recibidoPor: resp.trim(),
+          completo: todoCompleto,
+          discrepanciasTexto: discrepancias.join(" | "),
+          itemsDetalle: items,
+          recibidoPor: resp,
           fechaHoraRecibo: new Date().toLocaleString("es-CL")
         };
 
-        if (!llegoCompleto) {
-          const motivoIdx = prompt("Selecciona el motivo por el cual no llegó completo:\n1. Se perdió en el camino\n2. Entregado por error a otro cliente\n3. Se partió o rompió en el trayecto\n\n(Escribe 1, 2 o 3):");
-          if (motivoIdx === "1") infoRetorno.motivoFalta = "Se perdió en el camino";
-          else if (motivoIdx === "2") infoRetorno.motivoFalta = "Entregado por error a otro cliente";
-          else if (motivoIdx === "3") infoRetorno.motivoFalta = "Se partió / rompió en el trayecto";
-          else {
-            alert("Opción no válida. Operación cancelada.");
-            return;
-          }
-
-          const cantFalta = prompt(`¿Cuántas unidades faltaron o se dañaron? (Total esperado: ${incidencia.cantidad}):`, "1");
-          if (!cantFalta || isNaN(cantFalta)) return;
-          infoRetorno.cantidadFaltante = Number(cantFalta);
-
-          const detalle = prompt("Escribe el detalle (ej. unidades sueltas de la caja/bulto, estado de los restos):", "3 unidades sueltas del bulto");
-          infoRetorno.detalleRotura = detalle || "";
-        }
-
         try {
-          await db.collection("incidencias").doc(incidencia.id).update({
+          await db.collection("incidencias").doc(item.id).update({
             retornoBodegaInfo: infoRetorno
           });
-          alert("✅ Recepción de retorno registrada con éxito.");
+          setRecibiendoRetornoId(null);
+          alert("✅ Recepción de retorno registrada correctamente.");
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
@@ -372,17 +377,12 @@
         }
       };
 
-      const imprimirHojaConteo = () => {
-        window.print();
-      };
+      const imprimirHojaConteo = () => { window.print(); };
 
       const imprimirReporteGeneral = () => {
         setModoImpresionReporte('general');
         setFacturaImprimirIndividual(null);
-        setTimeout(() => {
-          window.print();
-          setModoImpresionReporte(null);
-        }, 200);
+        setTimeout(() => { window.print(); setModoImpresionReporte(null); }, 200);
       };
 
       const imprimirReporteInventarioSeleccionado = () => {
@@ -390,20 +390,13 @@
         if (seleccionados.length === 0) return alert("Selecciona al menos un ítem del historial de inventario con el check para generar el reporte.");
         setModoImpresionReporte('inventario');
         setFacturaImprimirIndividual(null);
-        setTimeout(() => {
-          window.print();
-          setModoImpresionReporte(null);
-        }, 200);
+        setTimeout(() => { window.print(); setModoImpresionReporte(null); }, 200);
       };
 
       const imprimirReporteIndividualFactura = (item) => {
         setModoImpresionReporte('individual');
         setFacturaImprimirIndividual(item);
-        setTimeout(() => {
-          window.print();
-          setModoImpresionReporte(null);
-          setFacturaImprimirIndividual(null);
-        }, 200);
+        setTimeout(() => { window.print(); setModoImpresionReporte(null); setFacturaImprimirIndividual(null); }, 200);
       };
 
       const toggleCheckAccion = async (id, accionNombre, estadoActual) => {
@@ -641,13 +634,7 @@
                 {facturaImprimirIndividual.retornoBodegaInfo ? (
                   <div className="space-y-1.5">
                     <p><strong>Estado:</strong> {facturaImprimirIndividual.retornoBodegaInfo.completo ? "Llegó Completo y Sano" : "Con Discrepancia / Problema en Trayecto"}</p>
-                    {!facturaImprimirIndividual.retornoBodegaInfo.completo && (
-                      <>
-                        <p><strong>Motivo:</strong> {facturaImprimirIndividual.retornoBodegaInfo.motivoFalta}</p>
-                        <p><strong>Cantidad Afectada:</strong> {facturaImprimirIndividual.retornoBodegaInfo.cantidadFaltante} unidades</p>
-                        <p><strong>Detalle / Condición:</strong> {facturaImprimirIndividual.retornoBodegaInfo.detalleRotura}</p>
-                      </>
-                    )}
+                    <p><strong>Detalle de Recepción:</strong> {facturaImprimirIndividual.retornoBodegaInfo.discrepanciasTexto || "Recibido conforme"}</p>
                     <p><strong>Recibido por:</strong> {facturaImprimirIndividual.retornoBodegaInfo.recibidoPor}</p>
                     <p><strong>Fecha y Hora de Recepción:</strong> {facturaImprimirIndividual.retornoBodegaInfo.fechaHoraRecibo}</p>
                   </div>
@@ -819,6 +806,7 @@
                     const accionesLista = item.acciones || [item.accionResolucion || "Ajustar Inventario en Bodega"];
                     const checksMap = item.checksAcciones || {};
                     const incluyeRetorno = accionesLista.includes("Chofer Retorna Producto a Bodega");
+                    const estaRecibiendo = recibiendoRetornoId === item.id;
 
                     return (
                       <div key={item.id} className={`glass-card rounded-2xl p-5 border transition shadow-lg flex flex-col justify-between ${item.resuelto ? "border-emerald-900/50 opacity-85" : "border-slate-800 hover:border-slate-700"}`}>
@@ -833,7 +821,7 @@
                                 item.motivo === "Sobrante" ? "bg-sky-500/15 text-sky-300 border-sky-500/30" :
                                 item.motivo === "Cruce" ? "bg-purple-500/15 text-purple-300 border-purple-500/30" :
                                 item.motivo === "AceptadoPorCliente" ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" :
-                                "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                                "bg-amber-500/15 text-amber-300 border-amber-300"
                               }`}>
                                 {item.motivo === "AceptadoPorCliente" ? "ACEPTADO X CLIENTE" : item.motivo.toUpperCase()}
                               </span>
@@ -866,40 +854,144 @@
                             )}
                           </div>
 
-                          {/* BLOQUE ESPECIAL DE RETORNO DE CHOFER A BODEGA */}
+                          {/* BLOQUE DE RETORNO DE CHOFER A BODEGA (CON CHECKLIST INTERACTIVO) */}
                           {incluyeRetorno && (
-                            <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-2">
+                            <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-3">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-extrabold text-sky-300 uppercase">
                                   🚚 Control de Retorno a Bodega
                                 </span>
-                                <button
-                                  onClick={() => imprimirReporteIndividualFactura(item)}
-                                  className="bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition"
-                                >
-                                  🖨️ Reporte Factura
-                                </button>
+                                {item.retornoBodegaInfo && (
+                                  <button
+                                    onClick={() => imprimirReporteIndividualFactura(item)}
+                                    className="bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition"
+                                  >
+                                    🖨️ Reporte Factura
+                                  </button>
+                                )}
                               </div>
 
                               {item.retornoBodegaInfo ? (
-                                <div className="text-xs bg-slate-900 p-2.5 rounded-lg border border-sky-900/50 space-y-1">
+                                <div className="text-xs bg-slate-900 p-3 rounded-xl border border-sky-900/50 space-y-1.5">
                                   <p className="font-bold text-emerald-400">
                                     ✓ Recibido por: {item.retornoBodegaInfo.recibidoPor} ({item.retornoBodegaInfo.fechaHoraRecibo})
                                   </p>
-                                  {item.retornoBodegaInfo.completo ? (
-                                    <p className="text-slate-300">Estado: <strong className="text-white">Llegó completo y en buen estado</strong></p>
-                                  ) : (
-                                    <div className="text-rose-300 space-y-0.5 mt-1 pt-1 border-t border-rose-900/40">
-                                      <p>⚠️ <strong>Incidencia en retorno:</strong> {item.retornoBodegaInfo.motivoFalta}</p>
-                                      <p>• Cantidad afectada: {item.retornoBodegaInfo.cantidadFaltante} unds</p>
-                                      <p>• Detalle: {item.retornoBodegaInfo.detalleRotura}</p>
-                                    </div>
+                                  <p className="text-slate-300">Estado: <strong className="text-white">{item.retornoBodegaInfo.completo ? "Llegó completo y en buen estado" : "Con discrepancia / novedad en ruta"}</strong></p>
+                                  {!item.retornoBodegaInfo.completo && (
+                                    <p className="text-rose-300 bg-rose-950/40 p-2 rounded border border-rose-900/40 mt-1">
+                                      ⚠️ {item.retornoBodegaInfo.discrepanciasTexto}
+                                    </p>
                                   )}
+                                  <button
+                                    onClick={() => abrirFormRetorno(item)}
+                                    className="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[11px] font-bold py-1.5 rounded-lg"
+                                  >
+                                    ✏️ Modificar Recepción
+                                  </button>
+                                </div>
+                              ) : estaRecibiendo ? (
+                                <div className="bg-slate-900 p-3.5 rounded-xl border border-sky-700 space-y-3 text-xs">
+                                  <p className="font-bold text-amber-300">📋 Marque los productos que llegaron completos:</p>
+                                  
+                                  {retornoFormState.items && retornoFormState.items.map((it, iIdx) => (
+                                    <div key={iIdx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+                                      <label className="flex items-center gap-2.5 cursor-pointer font-black text-white">
+                                        <input
+                                          type="checkbox"
+                                          checked={it.recibido}
+                                          onChange={(e) => {
+                                            const updated = [...retornoFormState.items];
+                                            updated[iIdx].recibido = e.target.checked;
+                                            setRetornoFormState({ ...retornoFormState, items: updated });
+                                          }}
+                                          className="w-4 h-4 accent-amber-500"
+                                        />
+                                        <span>Recibido completo: {it.cantidad} {it.unidad} de {it.nombre}</span>
+                                      </label>
+
+                                      {!it.recibido && (
+                                        <div className="pl-6 space-y-2 pt-2 border-t border-rose-900/40">
+                                          <div>
+                                            <label className="text-[10px] text-rose-300 block mb-0.5">¿Por qué motivo no llegó completo?</label>
+                                            <select
+                                              value={it.motivoFalta}
+                                              onChange={(e) => {
+                                                const updated = [...retornoFormState.items];
+                                                updated[iIdx].motivoFalta = e.target.value;
+                                                setRetornoFormState({ ...retornoFormState, items: updated });
+                                              }}
+                                              className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                                            >
+                                              <option value="Se partió / rompió en el trayecto">Se partió / rompió en el trayecto</option>
+                                              <option value="Se perdió en el camino">Se perdió en el camino</option>
+                                              <option value="Entregado por error a otro cliente">Entregado por error a otro cliente</option>
+                                            </select>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                              <label className="text-[10px] text-rose-300 block mb-0.5">Unidades falt/dañadas:</label>
+                                              <input
+                                                type="number"
+                                                min="1"
+                                                value={it.cantFalta || 1}
+                                                onChange={(e) => {
+                                                  const updated = [...retornoFormState.items];
+                                                  updated[iIdx].cantFalta = Number(e.target.value);
+                                                  setRetornoFormState({ ...retornoFormState, items: updated });
+                                                }}
+                                                className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white font-bold"
+                                              />
+                                            </div>
+                                            <div>
+                                              <label className="text-[10px] text-rose-300 block mb-0.5">Detalle (ej: sueltas de caja):</label>
+                                              <input
+                                                type="text"
+                                                value={it.detalle || ""}
+                                                placeholder="Ej: 3 unds sueltas de caja"
+                                                onChange={(e) => {
+                                                  const updated = [...retornoFormState.items];
+                                                  updated[iIdx].detalle = e.target.value;
+                                                  setRetornoFormState({ ...retornoFormState, items: updated });
+                                                }}
+                                                className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                                              />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+
+                                  <div>
+                                    <label className="text-[11px] font-bold text-slate-300 block mb-1">👤 Quién recibe en bodega:</label>
+                                    <select
+                                      value={retornoFormState.responsable}
+                                      onChange={(e) => setRetornoFormState({ ...retornoFormState, responsable: e.target.value })}
+                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white"
+                                    >
+                                      {USUARIOS_SISTEMA.map(u => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                  </div>
+
+                                  <div className="flex gap-2 pt-1">
+                                    <button
+                                      onClick={() => guardarRecepcionRetornoDirecto(item)}
+                                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 rounded-xl shadow transition"
+                                    >
+                                      💾 Guardar Recepción
+                                    </button>
+                                    <button
+                                      onClick={() => setRecibiendoRetornoId(null)}
+                                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-xl font-bold"
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
                                 </div>
                               ) : (
                                 <button
-                                  onClick={() => procesarRecepcionRetorno(item)}
-                                  className="w-full bg-sky-600 hover:bg-sky-500 text-slate-950 font-black text-xs py-2 rounded-xl shadow transition text-white"
+                                  onClick={() => abrirFormRetorno(item)}
+                                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-black text-xs py-2.5 rounded-xl shadow transition"
                                 >
                                   📥 Recibido en Bodega (Procesar Retorno)
                                 </button>
