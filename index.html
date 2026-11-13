@@ -292,7 +292,6 @@
         } catch (err) { alert("Error: " + err.message); }
       };
 
-      // Historial acumulativo con registro detallado de quién/cuándo contó y quién/cuándo ajustó
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsableAjuste, fechaAjuste, responsableConteo, fechaConteo, detalleExtra = "") => {
         try {
           const colRef = db.collection("historial_inventario");
@@ -455,11 +454,11 @@
         }
       };
 
-      // Marcar Conteo Físico (Bodega) con fecha y hora
+      // Fase 1: Marcar Conteo Físico por parte del equipo de bodega (Nico, Edwin, Diego)
       const toggleCheckConteoFisico = async (id, estadoActual) => {
-        const resp = prompt(`Selecciona tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Diego");
-        if (!resp || !USUARIOS_SISTEMA.includes(resp.trim())) {
-          if (resp) alert("Nombre no válido. Debe ser uno del equipo.");
+        const resp = prompt(`Selecciona quién realizó el conteo físico:\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`, "Diego");
+        if (!resp || !["Nico", "Edwin", "Diego"].includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
           return;
         }
         const ahoraStr = new Date().toLocaleString("es-CL");
@@ -472,9 +471,9 @@
         } catch (err) { alert(err.message); }
       };
 
-      // Ajuste de Jefatura para Conteo Cíclico Tradicional (con registro detallado)
+      // Fase 2: Ajuste de Jefatura (Pedro o Bedanli) para Conteo Cíclico Tradicional
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
-        const resp = prompt(`Confirma tu nombre:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
+        const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
           if (resp) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
           return;
@@ -506,41 +505,39 @@
         } catch (err) { alert(err.message); }
       };
 
-      // Ajuste de Jefatura para Conteo Digital (con registro detallado de quién contó, quién ajustó y cuándo)
-      const ajustarConteoDigitalJefatura = async (cpId, itemProd, itemUni, itemFact, contadoReal, respConteo, fechaConteo) => {
-        const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario digital:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
-        if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
-          if (resp) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
+      // Guardar Conteo Digital (Fase 1: Registra quién contó y los números, pero deja pendiente a Jefatura)
+      const guardarConteoDigitalBodega = async () => {
+        const seleccionadosIds = Object.keys(seleccionadosConteoDigital).filter(id => seleccionadosConteoDigital[id]);
+        if (seleccionadosIds.length === 0) return alert("No hay ítems seleccionados.");
+
+        const resp = prompt(`¿Quién realizó el conteo digital en estantería?\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`, "Diego");
+        if (!resp || !["Nico", "Edwin", "Diego"].includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
           return;
         }
 
         const ahoraStr = new Date().toLocaleString("es-CL");
+
         try {
-          await db.collection("conteo_pendiente").doc(cpId).update({
-            conteoFisicoHecho: true,
-            ajusteSistemaHecho: true,
-            responsableConteo: respConteo || "Digital",
-            fechaHoraConteo: fechaConteo || ahoraStr,
-            responsableAjuste: resp.trim(),
-            fechaHoraAjuste: ahoraStr
+          const batch = db.batch();
+          seleccionadosIds.forEach(id => {
+            const valorReal = valoresConteoDigital[id] !== undefined ? valoresConteoDigital[id] : 0;
+            const ref = db.collection("conteo_pendiente").doc(id);
+            batch.update(ref, {
+              conteoFisicoHecho: true,
+              responsableConteo: resp.trim(),
+              fechaHoraConteo: ahoraStr,
+              cantidadContada: Number(valorReal)
+            });
           });
 
-          await registrarEnHistorialInventario(
-            itemProd,
-            itemUni,
-            itemFact,
-            resp.trim(),
-            ahoraStr,
-            respConteo || "Digital",
-            fechaConteo || ahoraStr,
-            `Conteo Digital — Cantidad contada: ${contadoReal}`
-          );
-
-          await db.collection("conteo_pendiente").doc(cpId).delete();
-
-          alert("✅ Inventario digital ajustado, registrado en historial con fechas/responsables y limpiado de pendientes.");
+          await batch.commit();
+          setModoConteoDigitalActivo(false);
+          setSeleccionadosConteoDigital({});
+          setValoresConteoDigital({});
+          alert("✅ Conteo digital guardado con éxito. Ahora queda pendiente de revisión y ajuste final por Jefatura (Pedro o Bedanli).");
         } catch (err) {
-          alert("Error al ajustar: " + err.message);
+          alert("Error al guardar: " + err.message);
         }
       };
 
@@ -775,7 +772,7 @@
             </div>
           )}
 
-          {/* REPORTE PERSONALIZADO DE INVENTARIO (CON TAZABILIDAD DE CONTEO Y AJUSTE) */}
+          {/* REPORTE PERSONALIZADO DE INVENTARIO */}
           {modoImpresionReporte === 'inventario' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -1746,7 +1743,7 @@
                   <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                     <div>
                       <h2 className="text-xl font-black text-amber-400">📱 Módulo de Conteo Digital en Estantería</h2>
-                      <p className="text-xs text-slate-400">Ingresa las cantidades reales contadas de los ítems seleccionados.</p>
+                      <p className="text-xs text-slate-400">Ingresa las cantidades reales contadas (Fase 1: Nico, Edwin o Diego).</p>
                     </div>
                     <button
                       onClick={() => setModoConteoDigitalActivo(false)}
@@ -1779,34 +1776,20 @@
                   </div>
 
                   <button
-                    onClick={() => {
-                      const seleccionadosIds = Object.keys(seleccionadosConteoDigital).filter(id => seleccionadosConteoDigital[id]);
-                      if (seleccionadosIds.length === 0) return alert("No hay ítems seleccionados.");
-
-                      seleccionadosIds.forEach(id => {
-                        const cpItem = conteoPendiente.find(cp => cp.id === id);
-                        if (cpItem) {
-                          const valorReal = valoresConteoDigital[id] !== undefined ? valoresConteoDigital[id] : cpItem.cantidad;
-                          ajustarConteoDigitalJefatura(cpItem.id, cpItem.producto, cpItem.unidad, cpItem.factura, valorReal, cpItem.responsableConteo || "Digital", cpItem.fechaHoraConteo || new Date().toLocaleString("es-CL"));
-                        }
-                      });
-
-                      setModoConteoDigitalActivo(false);
-                      setSeleccionadosConteoDigital({});
-                    }}
+                    onClick={guardarConteoDigitalBodega}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-2xl text-sm shadow-xl transition"
                   >
-                    💾 Guardar y Enviar Conteo Digital para Ajuste de Jefatura
+                    💾 Guardar y Enviar Conteo Digital (Queda pendiente de aprobación por Jefatura)
                   </button>
                 </div>
               ) : (
-                /* HOJA DE CONTEO FÍSICO PENDIENTE */
+                /* HOJA DE CONTEO FÍSICO / DIGITAL PENDIENTE */
                 <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                     <div>
                       <h2 className="text-xl font-black text-amber-400">📋 Lista de Conteo Cíclico por Incidencias</h2>
                       <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                        Selecciona ítems para contar digitalmente o imprime la hoja en columnas tradicional.
+                        Doble confirmación: 1. Bodega (Nico, Edwin, Diego) ➔ 2. Jefatura (Pedro, Bedanli).
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1821,7 +1804,7 @@
                         onClick={() => setModoConteoDigitalActivo(true)}
                         className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl shadow transition"
                       >
-                        📱 Generar Inventario Digital ({Object.values(seleccionadosConteoDigital).filter(Boolean).length})
+                        📱 Generar Conteo Digital ({Object.values(seleccionadosConteoDigital).filter(Boolean).length})
                       </button>
                     </div>
                   </div>
@@ -1839,8 +1822,8 @@
                             <th className="p-3">Producto / Descripción</th>
                             <th className="p-3">Unidad</th>
                             <th className="p-3">Factura</th>
-                            <th className="p-3 text-center">1. Conteo Físico Bodega</th>
-                            <th className="p-3 text-center">2. Ajuste en Sistema</th>
+                            <th className="p-3 text-center">1. Conteo Bodega (Nico/Edwin/Diego)</th>
+                            <th className="p-3 text-center">2. Ajuste Jefatura (Pedro/Bedanli)</th>
                             <th className="p-3 rounded-r-xl text-right">Acciones</th>
                           </tr>
                         </thead>
@@ -1857,7 +1840,12 @@
                                     className="w-4 h-4 accent-amber-500 cursor-pointer"
                                   />
                                 </td>
-                                <td className="p-3 font-black text-white">{cp.producto}</td>
+                                <td className="p-3 font-black text-white">
+                                  {cp.producto}
+                                  {cp.cantidadContada !== undefined && (
+                                    <span className="block text-[10px] text-amber-300 font-normal">Contado digital: {cp.cantidadContada} {cp.unidad}</span>
+                                  )}
+                                </td>
                                 <td className="p-3 text-slate-300">{cp.unidad}</td>
                                 <td className="p-3 text-amber-300 font-bold">#{cp.factura}</td>
                                 <td className="p-3 text-center">
