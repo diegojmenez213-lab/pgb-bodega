@@ -66,7 +66,6 @@
       "Chofer Retorna Producto a Bodega"
     ];
 
-    // Función estricta para normalizar nombres de productos (evita duplicados por espacios dobles o minúsculas)
     const normalizarProd = (str) => {
       if (!str) return "";
       return str.trim().replace(/\s+/g, ' ').toUpperCase();
@@ -256,7 +255,6 @@
         await registrarProductoEnCatalogo(prodNorm);
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && prodCruceNorm) await registrarProductoEnCatalogo(prodCruceNorm);
 
-        // REGLA 1: Solo registrar en conteo cíclico si el motivo es físico o requiere ajuste de inventario
         const motivoObj = MOTIVOS.find(m => m.id === motivo);
         const requiereFisico = motivoObj ? motivoObj.fisico : true;
         const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
@@ -425,7 +423,7 @@
         let discrepancias = [];
         let todoCompleto = true;
 
-        items.forEach(async it => {
+        for (const it of items) {
           if (!it.recibido) {
             todoCompleto = false;
             let responsableDanio = it.responsableRuta || "Ninguno";
@@ -437,12 +435,11 @@
             }
             discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${motivoTexto} (Detalle: ${it.detalle || 'N/A'})`);
             
-            // REGLA 2: Si llega algo dañado o incompleto, se envía automáticamente al conteo cíclico para que la jefa lo corrija
             await registrarConteoPendiente(it.nombre, it.unidad, Number(it.cantFalta || 1), item.factura);
           } else {
             discrepancias.push(`Recibido conforme: ${it.cantidad} ${it.unidad} de ${it.nombre}`);
           }
-        });
+        }
 
         const infoRetorno = {
           recibido: true,
@@ -522,7 +519,6 @@
               "Conteo Cíclico por Incidencia (Físico)"
             );
 
-            // SINCRONIZACIÓN AUTOMÁTICA CON EL TABLERO ACTIVO
             const incidenciaAsociada = incidencias.find(inc => inc.factura === itemConteo.factura && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto));
             if (incidenciaAsociada) {
               const checks = incidenciaAsociada.checksAcciones || {};
@@ -2196,7 +2192,7 @@
       );
     }
 
-    ReactDOM.createRoot(getElementById("root") || document.getElementById("root")).render(<App/>);
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
   </script>
 </body>
 </html>
