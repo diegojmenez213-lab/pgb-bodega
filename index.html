@@ -46,12 +46,12 @@
 
     const UNIDADES = ["Unidad", "Caja", "Manga", "Fardo", "Unidad suelta", "Display", "Pack"];
     const MOTIVOS = [
-      { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)" },
-      { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)" },
-      { id: "Cruce", label: "Cruce de Producto", desc: "Se facturó un producto pero se envió otro físico" },
-      { id: "AceptadoPorCliente", label: "Aceptado por Cliente", desc: "Cliente acepta producto cruzado/alternativo" },
-      { id: "Rechazo", label: "Rechazo Cliente", desc: "Cliente devuelve o no recibe mercadería" },
-      { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado" }
+      { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)", fisico: true },
+      { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)", fisico: true },
+      { id: "Cruce", label: "Cruce de Producto", desc: "Se facturó un producto pero se envió otro físico", fisico: true },
+      { id: "AceptadoPorCliente", label: "Aceptado por Cliente", desc: "Cliente acepta producto cruzado/alternativo", fisico: false },
+      { id: "Rechazo", label: "Rechazo Cliente", desc: "Cliente devuelve o no recibe mercadería", fisico: true },
+      { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado", fisico: true }
     ];
     const ARMADORES = ["Diego", "Nico", "Edwin", "Julio", "Horacio", "Sra. Rosa"];
     const RUTAS = ["Ruta 1 (Juan / Julio)", "Ruta 2 (Carlos / Horacio)", "Retiro Bodega / Otra"];
@@ -65,6 +65,12 @@
       "Nota de Crédito (Tributaria)",
       "Chofer Retorna Producto a Bodega"
     ];
+
+    // Función estricta para normalizar nombres de productos (evita duplicados por espacios dobles o minúsculas)
+    const normalizarProd = (str) => {
+      if (!str) return "";
+      return str.trim().replace(/\s+/g, ' ').toUpperCase();
+    };
 
     function App() {
       const [incidencias, setIncidencias] = useState([]);
@@ -175,20 +181,21 @@
       };
 
       const registrarProductoEnCatalogo = async (nombreProd) => {
-        if (!nombreProd || !nombreProd.trim()) return;
-        const nombreMayus = nombreProd.trim().toUpperCase();
-        const existe = catalogoProductos.some(p => p.nombre === nombreMayus);
+        const nombreNorm = normalizarProd(nombreProd);
+        if (!nombreNorm) return;
+        const existe = catalogoProductos.some(p => p.nombre === nombreNorm);
         if (!existe) {
-          try { await db.collection("catalogo_productos").add({ nombre: nombreMayus }); } catch (err) {}
+          try { await db.collection("catalogo_productos").add({ nombre: nombreNorm }); } catch (err) {}
         }
       };
 
       const registrarConteoPendiente = async (prod, uni, cant, fact) => {
         try {
-          const existe = conteoPendiente.some(cp => cp.producto === prod && cp.unidad === uni);
+          const prodNorm = normalizarProd(prod);
+          const existe = conteoPendiente.some(cp => cp.producto === prodNorm && cp.unidad === uni);
           if (!existe) {
             await db.collection("conteo_pendiente").add({
-              producto: prod,
+              producto: prodNorm,
               unidad: uni,
               cantidad: cant,
               factura: fact,
@@ -243,14 +250,22 @@
         if (!factura.trim() || !producto.trim()) return alert("Completa el Nº de Factura y el Producto.");
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && !productoCruce.trim()) return alert("Indica el producto alternativo o enviado por error.");
 
-        await registrarProductoEnCatalogo(producto);
-        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && productoCruce) await registrarProductoEnCatalogo(productoCruce);
+        const prodNorm = normalizarProd(producto);
+        const prodCruceNorm = productoCruce ? normalizarProd(productoCruce) : null;
 
-        if (motivo !== "AceptadoPorCliente") {
-          await registrarConteoPendiente(producto.trim().toUpperCase(), unidad, Number(cantidad), factura.trim());
+        await registrarProductoEnCatalogo(prodNorm);
+        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && prodCruceNorm) await registrarProductoEnCatalogo(prodCruceNorm);
+
+        // REGLA 1: Solo registrar en conteo cíclico si el motivo es físico o requiere ajuste de inventario
+        const motivoObj = MOTIVOS.find(m => m.id === motivo);
+        const requiereFisico = motivoObj ? motivoObj.fisico : true;
+        const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
+
+        if (requiereFisico && requiereAjusteInv && motivo !== "AceptadoPorCliente") {
+          await registrarConteoPendiente(prodNorm, unidad, Number(cantidad), factura.trim());
         }
-        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && productoCruce) {
-          await registrarConteoPendiente(productoCruce.trim().toUpperCase(), unidadCruce, Number(cantidadCruce), factura.trim());
+        if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
+          await registrarConteoPendiente(prodCruceNorm, unidadCruce, Number(cantidadCruce), factura.trim());
         }
 
         const checksIniciales = {};
@@ -266,10 +281,10 @@
           armador,
           registradoPor,
           motivo,
-          producto: producto.trim().toUpperCase(),
+          producto: prodNorm,
           cantidad: Number(cantidad),
           unidad,
-          productoCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? productoCruce.trim().toUpperCase() : null,
+          productoCruce: prodCruceNorm,
           cantidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? Number(cantidadCruce) : null,
           unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
           acciones: accionesSeleccionadas,
@@ -296,9 +311,10 @@
 
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsableAjuste, fechaAjuste, responsableConteo, fechaConteo, detalleExtra = "") => {
         try {
+          const prodNorm = normalizarProd(productoNombre);
           const colRef = db.collection("historial_inventario");
           await colRef.add({
-            producto: productoNombre,
+            producto: prodNorm,
             unidad: unidadMedida,
             factura: facturaNum || "INTERNO",
             corregidoPor: responsableAjuste,
@@ -310,7 +326,7 @@
             timestamp: Date.now()
           });
 
-          const snapshot = await colRef.where("producto", "==", productoNombre).get();
+          const snapshot = await colRef.where("producto", "==", prodNorm).get();
           const registrosProducto = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           registrosProducto.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
@@ -327,11 +343,12 @@
         e.preventDefault();
         if (!prodBodega.trim()) return alert("Ingresa el nombre del producto.");
 
-        await registrarProductoEnCatalogo(prodBodega);
+        const prodNorm = normalizarProd(prodBodega);
+        await registrarProductoEnCatalogo(prodNorm);
 
         try {
           await db.collection("incidentes_bodega").add({
-            producto: prodBodega.trim().toUpperCase(),
+            producto: prodNorm,
             cantidad: Number(cantBodega),
             unidad: uniBodega,
             motivo: motivoBodega,
@@ -408,7 +425,7 @@
         let discrepancias = [];
         let todoCompleto = true;
 
-        items.forEach(it => {
+        items.forEach(async it => {
           if (!it.recibido) {
             todoCompleto = false;
             let responsableDanio = it.responsableRuta || "Ninguno";
@@ -419,6 +436,9 @@
               motivoTexto += ` (Reclamar a Proveedor / Origen)`;
             }
             discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${motivoTexto} (Detalle: ${it.detalle || 'N/A'})`);
+            
+            // REGLA 2: Si llega algo dañado o incompleto, se envía automáticamente al conteo cíclico para que la jefa lo corrija
+            await registrarConteoPendiente(it.nombre, it.unidad, Number(it.cantFalta || 1), item.factura);
           } else {
             discrepancias.push(`Recibido conforme: ${it.cantidad} ${it.unidad} de ${it.nombre}`);
           }
@@ -450,7 +470,7 @@
             resuelto: todasListas ? true : item.resuelto
           });
           setRecibiendoRetornoId(null);
-          alert("✅ Recepción de retorno registrada y acción marcada automáticamente.");
+          alert("✅ Recepción de retorno registrada. Los faltantes/daños se enviaron al Conteo Cíclico para revisión de Jefatura.");
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
@@ -501,6 +521,24 @@
               itemConteo.fechaHoraConteo || ahoraStr,
               "Conteo Cíclico por Incidencia (Físico)"
             );
+
+            // SINCRONIZACIÓN AUTOMÁTICA CON EL TABLERO ACTIVO
+            const incidenciaAsociada = incidencias.find(inc => inc.factura === itemConteo.factura && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto));
+            if (incidenciaAsociada) {
+              const checks = incidenciaAsociada.checksAcciones || {};
+              if (checks["Ajustar Inventario en Bodega"]) {
+                checks["Ajustar Inventario en Bodega"] = {
+                  completado: true,
+                  por: resp.trim(),
+                  fechaHora: ahoraStr
+                };
+                const todasListas = (incidenciaAsociada.acciones || []).every(ac => checks[ac] && checks[ac].completado);
+                await db.collection("incidencias").doc(incidenciaAsociada.id).update({
+                  checksAcciones: checks,
+                  resuelto: todasListas ? true : incidenciaAsociada.resuelto
+                });
+              }
+            }
           }
         } catch (err) { alert(err.message); }
       };
@@ -546,7 +584,10 @@
         }
       };
 
-      const imprimirHojaConteo = () => { window.print(); };
+      const imprimirHojaConteo = () => {
+        setModoImpresionReporte('hoja_conteo');
+        setTimeout(() => { window.print(); setModoImpresionReporte(null); }, 200);
+      };
 
       const imprimirReporteGeneral = () => {
         setModoImpresionReporte('general');
@@ -657,7 +698,14 @@
           });
           
           const batch = db.batch();
-          incidencias.forEach(inc => batch.delete(db.collection("incidencias").doc(inc.id)));
+          
+          incidencias.forEach(inc => {
+            const tieneRetorno = (inc.acciones || []).includes("Chofer Retorna Producto a Bodega");
+            const retornoRecibido = inc.retornoBodegaInfo && inc.retornoBodegaInfo.recibido;
+            if (!tieneRetorno || retornoRecibido) {
+              batch.delete(db.collection("incidencias").doc(inc.id));
+            }
+          });
 
           conteoPendiente.forEach(cp => {
             if (cp.conteoFisicoHecho && cp.ajusteSistemaHecho) {
@@ -672,7 +720,7 @@
           });
 
           await batch.commit();
-          alert("✅ Semana cerrada. Los incidentes de bodega no ajustados se retuvieron automáticamente.");
+          alert("✅ Semana cerrada con éxito. Los retornos pendientes y pendientes de conteo se arrastraron automáticamente a la nueva semana.");
           setVista("historial");
         } catch (err) { alert("Error: " + err.message); }
       };
@@ -702,7 +750,6 @@
         cruces: incidencias.filter(i => i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente").length
       }), [incidencias, incidentesBodega]);
 
-      // Ítems contados por bodega pendientes de ajuste por jefatura (para notificación en vivo)
       const conteosListosParaAjustar = useMemo(() => {
         return conteoPendiente.filter(cp => cp.conteoFisicoHecho && !cp.ajusteSistemaHecho);
       }, [conteoPendiente]);
@@ -721,6 +768,19 @@
           return coincideTexto && coincideEstado && coincideArmador && coincideRuta && coincideFecha;
         });
       }, [incidencias, busqueda, filtroEstado, filtroArmador, filtroRuta, filtroFechaDesde, filtroFechaHasta]);
+
+      const historialAgrupado = useMemo(() => {
+        const mapa = {};
+        historialInventario.forEach(h => {
+          const clave = `${h.producto}___${h.unidad}`;
+          if (!mapa[clave]) mapa[clave] = { producto: h.producto, unidad: h.unidad, registros: [] };
+          mapa[clave].registros.push(h);
+        });
+        Object.values(mapa).forEach(g => {
+          g.registros.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        });
+        return Object.values(mapa);
+      }, [historialInventario]);
 
       const resumenInventario = useMemo(() => {
         const mapa = {};
@@ -750,30 +810,28 @@
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
           
-          {/* BANNER DE NOTIFICACIÓN EN VIVO PARA JEFATURA */}
           {conteosListosParaAjustar.length > 0 && (
             <div className="mb-6 no-print">
               <button
                 onClick={() => setVista("balance")}
-                className="w-full bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black p-4 rounded-2xl shadow-xl flex items-center justify-between gap-3 border border-amber-300 animate-pulse transition"
+                className="w-full bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black p-4 rounded-2xl shadow-xl flex items-center justify-between gap-3 border border-amber-300 animate-pulse transition cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <span className="flex h-3 w-3 relative">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-950 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-3 w-3 bg-slate-950"></span>
                   </span>
-                  <span className="text-sm">
+                  <span className="text-sm text-left">
                     🔔 ¡Atención Jefatura! Hay <strong>{conteosListosParaAjustar.length} ítem(s)</strong> de inventario contados por Bodega pendientes de ajuste final.
                   </span>
                 </div>
-                <span className="bg-slate-950 text-amber-300 text-xs px-3 py-1.5 rounded-xl uppercase tracking-wider font-extrabold">
+                <span className="bg-slate-950 text-amber-300 text-xs px-3 py-1.5 rounded-xl uppercase tracking-wider font-extrabold whitespace-nowrap">
                   Revisar Ahora ➔
                 </span>
               </button>
             </div>
           )}
 
-          {/* REPORTE GENERAL DE INCIDENCIAS */}
           {modoImpresionReporte === 'general' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -804,7 +862,6 @@
             </div>
           )}
 
-          {/* REPORTE PERSONALIZADO DE INVENTARIO */}
           {modoImpresionReporte === 'inventario' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -844,7 +901,6 @@
             </div>
           )}
 
-          {/* REPORTE DE INCIDENTES DE BODEGA INTERNOS */}
           {modoImpresionReporte === 'incidentes_bodega' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -883,7 +939,6 @@
             </div>
           )}
 
-          {/* REPORTE CONSOLIDADO DE RETORNOS AGRUPADO POR RUTA */}
           {modoImpresionReporte === 'retornos_consolidado' && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-6">
@@ -913,9 +968,9 @@
                           <p><strong>Armó:</strong> {item.armador} | <strong>Motivo:</strong> {item.motivo.toUpperCase()}</p>
                           <p><strong>Producto Esperado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
                           {item.retornoBodegaInfo ? (
-                            <div className="mt-2 pt-2 border-t border-gray-300 bg-gray-50 p-2 rounded">
+                            <div className="mt-2 pt-2 border-t border-gray-300 bg-gray-50 p-2 rounded space-y-1">
                               <p><strong>Recepción Bodega:</strong> {item.retornoBodegaInfo.completo ? "Llegó Completo y Sano" : "Con Discrepancia / Problema"}</p>
-                              <p><strong>Detalle:</strong> {item.retornoBodegaInfo.discrepanciasTexto}</p>
+                              <p><strong>Detalle de Recepción:</strong> {item.retornoBodegaInfo.discrepanciasTexto}</p>
                               <p><strong>Recibido por:</strong> {item.retornoBodegaInfo.recibidoPor} ({item.retornoBodegaInfo.fechaHoraRecibo})</p>
                             </div>
                           ) : (
@@ -935,7 +990,6 @@
             </div>
           )}
 
-          {/* REPORTE INDIVIDUAL DE FACTURA CON RETORNO */}
           {modoImpresionReporte === 'individual' && facturaImprimirIndividual && (
             <div className="print-only bg-white text-black p-8">
               <div className="text-center border-b pb-4 mb-4">
@@ -972,43 +1026,37 @@
             </div>
           )}
 
-          {/* HOJA DE CONTEO FÍSICO (LISTA CÍCLICA) */}
-          <div className="print-only bg-white text-black p-8">
-            <div className="text-center border-b pb-4 mb-4">
-              <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
-              <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
-              <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
-            </div>
-            <table className="w-full text-left text-xs border-collapse border border-gray-400 mt-4">
-              <thead>
-                <tr className="bg-gray-200">
-                  <th className="border border-gray-400 p-2">Producto / Descripción</th>
-                  <th className="border border-gray-400 p-2">Unidad</th>
-                  <th className="border border-gray-400 p-2">Fact. Ref</th>
-                  <th className="border border-gray-400 p-2">Stock Real (Anotar a mano)</th>
-                  <th className="border border-gray-400 p-2">Conteo Bodega</th>
-                  <th className="border border-gray-400 p-2">Ajuste Sistema</th>
-                </tr>
-              </thead>
-              <tbody>
-                {conteoPendiente.map((cp, idx) => (
-                  <tr key={idx}>
-                    <td className="border border-gray-400 p-2 font-bold">{cp.producto}</td>
-                    <td className="border border-gray-400 p-2">{cp.unidad}</td>
-                    <td className="border border-gray-400 p-2">#{cp.factura}</td>
-                    <td className="border border-gray-400 p-2">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
-                    <td className="border border-gray-400 p-2">[ {cp.conteoFisicoHecho ? 'X' : ' '} ] {cp.responsableConteo} ({cp.fechaHoraConteo || ''})</td>
-                    <td className="border border-gray-400 p-2">[ {cp.ajusteSistemaHecho ? 'X' : ' '} ] {cp.responsableAjuste} ({cp.fechaHoraAjuste || ''})</td>
+          {modoImpresionReporte === 'hoja_conteo' && (
+            <div className="print-only bg-white text-black p-8">
+              <div className="text-center border-b pb-4 mb-4">
+                <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
+                <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
+                <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
+              </div>
+              <table className="w-full text-left text-xs border-collapse border border-gray-400 mt-4">
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border border-gray-400 p-2">Producto / Descripción</th>
+                    <th className="border border-gray-400 p-2">Und</th>
+                    <th className="border border-gray-400 p-2">Stock Real (Anotar a mano)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-12 pt-4 border-t text-xs">
-              <p>Firma de Encargado de Bodega: _____________________________________</p>
+                </thead>
+                <tbody>
+                  {conteoPendiente.map((cp, idx) => (
+                    <tr key={idx}>
+                      <td className="border border-gray-400 p-2 font-bold">{cp.producto}</td>
+                      <td className="border border-gray-400 p-2">{cp.unidad}</td>
+                      <td className="border border-gray-400 p-2 h-10">[ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ]</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-12 pt-4 border-t text-xs">
+                <p>Firma de Encargado de Bodega: _____________________________________</p>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* HEADER GENERAL */}
           <div className="glass-card rounded-3xl p-6 sm:p-8 mb-6 shadow-2xl relative overflow-hidden no-print">
             <div className="absolute -right-10 -top-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
@@ -1029,13 +1077,13 @@
               </div>
 
               <div className="flex flex-wrap gap-2.5">
-                <button onClick={copiarResumenWhatsApp} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition">
+                <button onClick={copiarResumenWhatsApp} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition cursor-pointer">
                   📲 Copiar a WhatsApp
                 </button>
-                <button onClick={imprimirReporteGeneral} className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition">
+                <button onClick={imprimirReporteGeneral} className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-lg transition cursor-pointer">
                   🖨️ Imprimir Reporte General PDF
                 </button>
-                <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-3 rounded-2xl shadow-xl transition">
+                <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-3 rounded-2xl shadow-xl transition cursor-pointer">
                   ➕ Registrar Incidencia
                 </button>
               </div>
@@ -1061,18 +1109,17 @@
             </div>
           </div>
 
-          {/* MENÚ DE NAVEGACIÓN */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 mb-6 shadow-md no-print">
-            <button onClick={() => setVista("dashboard")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "dashboard" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+            <button onClick={() => setVista("dashboard")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "dashboard" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               📋 Tablero Ruta ({incidencias.length})
             </button>
-            <button onClick={() => setVista("bodega_interna")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "bodega_interna" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+            <button onClick={() => setVista("bodega_interna")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "bodega_interna" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               🏢 Incidentes Bodega ({incidentesBodega.length})
             </button>
-            <button onClick={() => setVista("nuevo")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "nuevo" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+            <button onClick={() => setVista("nuevo")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "nuevo" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               {editandoId ? "✏️ Editando Factura" : "➕ Nueva Incidencia"}
             </button>
-            <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition relative ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+            <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition relative cursor-pointer ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               ⚖️ Cuadratura Bodega ({resumenInventario.length})
               {conteosListosParaAjustar.length > 0 && (
                 <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
@@ -1080,12 +1127,11 @@
                 </span>
               )}
             </button>
-            <button onClick={() => setVista("historial")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "historial" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+            <button onClick={() => setVista("historial")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "historial" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               📁 Archivo Semanal ({cierres.length})
             </button>
           </div>
 
-          {/* VISTA INCIDENTES DE BODEGA INTERNOS */}
           {vista === "bodega_interna" && (
             <div className="space-y-6 no-print">
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
@@ -1098,7 +1144,7 @@
                   </div>
                   <button
                     onClick={imprimirReporteIncidentesBodega}
-                    className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                    className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition cursor-pointer"
                   >
                     🖨️ Imprimir Reporte PDF Bodega
                   </button>
@@ -1110,27 +1156,27 @@
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-2 relative">
                       <label className="text-xs text-slate-400 block mb-1">Nombre del Producto *</label>
-                      <input type="text" list="lista-catalogo-bodega" value={prodBodega} onChange={e => setProdBodega(e.target.value)} placeholder="Ej: Humo líquido / Café mellita..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                      <input type="text" list="lista-catalogo-bodega" value={prodBodega} onChange={e => setProdBodega(e.target.value)} placeholder="Ej: Humo líquido / Café mellita..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
                       <datalist id="lista-catalogo-bodega">
                         {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
                       </datalist>
                     </div>
                     <div>
                       <label className="text-xs text-slate-400 block mb-1">Cantidad *</label>
-                      <input type="number" min="1" value={cantBodega} onChange={e => setCantBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
+                      <input type="number" min="1" value={cantBodega} onChange={e => setCantBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="text-xs text-slate-400 block mb-1">Unidad</label>
-                      <select value={uniBodega} onChange={e => setUniBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-amber-300 font-semibold">
+                      <select value={uniBodega} onChange={e => setUniBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-amber-300 font-semibold outline-none">
                         {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="text-xs text-slate-400 block mb-1">Motivo Interno</label>
-                      <select value={motivoBodega} onChange={e => setMotivoBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-semibold">
+                      <select value={motivoBodega} onChange={e => setMotivoBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-semibold outline-none">
                         <option value="Rotura accidental en pasillo">Rotura accidental en pasillo</option>
                         <option value="Compra personal (Descuento sueldo)">Compra personal (Descuento sueldo)</option>
                         <option value="Dañado de fábrica (Mal sellado)">Dañado de fábrica (Mal sellado)</option>
@@ -1139,7 +1185,7 @@
                     </div>
                     <div>
                       <label className="text-xs text-slate-400 block mb-1">Implicado / Responsable</label>
-                      <select value={responsableBodega} onChange={e => setResponsableBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-bold">
+                      <select value={responsableBodega} onChange={e => setResponsableBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-bold outline-none">
                         {PERSONAL_EQUIPO.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
@@ -1147,10 +1193,10 @@
 
                   <div>
                     <label className="text-xs text-slate-400 block mb-1">Notas Opcionales</label>
-                    <input type="text" value={notasBodega} onChange={e => setNotasBodega(e.target.value)} placeholder="Ej: Se cayó de la repisa superior..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white" />
+                    <input type="text" value={notasBodega} onChange={e => setNotasBodega(e.target.value)} placeholder="Ej: Se cayó de la repisa superior..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" />
                   </div>
 
-                  <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-xs sm:text-sm shadow-lg transition">
+                  <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-xs sm:text-sm shadow-lg transition cursor-pointer">
                     💾 Registrar Incidente Interno
                   </button>
                 </form>
@@ -1179,7 +1225,7 @@
                           {!ib.ajustado ? (
                             <button
                               onClick={() => ajustarIncidenteBodega(ib)}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow transition"
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow transition cursor-pointer"
                             >
                               ⚖️ Ajustar Inventario (Jefatura)
                             </button>
@@ -1190,7 +1236,7 @@
                           )}
                           <button
                             onClick={() => eliminarIncidenteBodega(ib.id)}
-                            className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-3 py-2 rounded-xl font-bold transition"
+                            className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-3 py-2 rounded-xl font-bold transition cursor-pointer"
                             title="Eliminar registro"
                           >
                             🗑️
@@ -1204,7 +1250,6 @@
             </div>
           )}
 
-          {/* VISTA DASHBOARD */}
           {vista === "dashboard" && (
             <div className="space-y-4 no-print">
               <div className="glass-card rounded-2xl p-4 shadow-lg space-y-3">
@@ -1213,21 +1258,21 @@
                     <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                    <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                    <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none">
                       <option value="todos">Estado: Todos</option>
                       <option value="pendientes">⏳ Pendientes</option>
                       <option value="resueltos">✅ Resueltos</option>
                     </select>
-                    <select value={filtroArmador} onChange={e => setFiltroArmador(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                    <select value={filtroArmador} onChange={e => setFiltroArmador(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none">
                       <option value="todos">Armador: Todos</option>
                       {ARMADORES.map(a => <option key={a} value={a}>Armó: {a}</option>)}
                     </select>
-                    <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                    <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none">
                       <option value="todos">Ruta: Todas</option>
                       {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
-                    <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} placeholder="Desde" title="Fecha Desde" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200" />
-                    <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} placeholder="Hasta" title="Fecha Hasta" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200" />
+                    <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} placeholder="Desde" title="Fecha Desde" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none" />
+                    <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} placeholder="Hasta" title="Fecha Hasta" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none" />
                   </div>
                 </div>
               </div>
@@ -1236,7 +1281,7 @@
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                   Mostrando {incidenciasFiltradas.length} registros
                 </span>
-                <button onClick={cerrarSemana} className="bg-rose-600/20 hover:bg-rose-600 hover:text-white text-rose-400 border border-rose-500/30 text-xs font-bold px-4 py-2.5 rounded-xl transition">
+                <button onClick={cerrarSemana} className="bg-rose-600/20 hover:bg-rose-600 hover:text-white text-rose-400 border border-rose-500/30 text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer">
                   🔒 Cerrar y Archivar Semana
                 </button>
               </div>
@@ -1246,7 +1291,7 @@
                   <p className="text-4xl mb-3">📦</p>
                   <p className="text-lg font-bold text-white">Sin incidencias registradas</p>
                   <p className="text-xs text-slate-400 mt-1 mb-5">Todo marcha en orden en las entregas de hoy.</p>
-                  <button onClick={() => setVista("nuevo")} className="bg-amber-500 text-slate-950 font-black text-xs px-6 py-3 rounded-xl shadow-lg">
+                  <button onClick={() => setVista("nuevo")} className="bg-amber-500 text-slate-950 font-black text-xs px-6 py-3 rounded-xl shadow-lg cursor-pointer">
                     ➕ Registrar Incidencia
                   </button>
                 </div>
@@ -1305,7 +1350,6 @@
                             )}
                           </div>
 
-                          {/* CONTROL DE RETORNO A BODEGA */}
                           {incluyeRetorno && (
                             <div className="bg-sky-950/30 border border-sky-800/60 rounded-xl p-3.5 mb-3 space-y-3">
                               <div className="flex items-center justify-between">
@@ -1315,7 +1359,7 @@
                                 {item.retornoBodegaInfo && (
                                   <button
                                     onClick={() => imprimirReporteIndividualFactura(item)}
-                                    className="bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition"
+                                    className="bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold px-3 py-1 rounded-lg shadow transition cursor-pointer"
                                   >
                                     🖨️ Reporte Factura
                                   </button>
@@ -1335,7 +1379,7 @@
                                   )}
                                   <button
                                     onClick={() => abrirFormRetorno(item)}
-                                    className="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[11px] font-bold py-1.5 rounded-lg"
+                                    className="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[11px] font-bold py-1.5 rounded-lg cursor-pointer"
                                   >
                                     ✏️ Modificar Recepción
                                   </button>
@@ -1355,7 +1399,7 @@
                                             updated[iIdx].recibido = e.target.checked;
                                             setRetornoFormState({ ...retornoFormState, items: updated });
                                           }}
-                                          className="w-4 h-4 accent-amber-500"
+                                          className="w-4 h-4 accent-amber-500 cursor-pointer"
                                         />
                                         <span>Recibido completo: {it.cantidad} {it.unidad} de {it.nombre}</span>
                                       </label>
@@ -1371,7 +1415,7 @@
                                                 updated[iIdx].motivoFalta = e.target.value;
                                                 setRetornoFormState({ ...retornoFormState, items: updated });
                                               }}
-                                              className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                                              className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white outline-none"
                                             >
                                               <option value="Se partió / rompió en el trayecto">Se partió / rompió en el trayecto (Golpe furgón/carretilla)</option>
                                               <option value="Dañado de fábrica (Mal sellado / Defecto origen)">Dañado de fábrica (Mal sellado / Defecto origen)</option>
@@ -1390,7 +1434,7 @@
                                                   updated[iIdx].responsableRuta = e.target.value;
                                                   setRetornoFormState({ ...retornoFormState, items: updated });
                                                 }}
-                                                className="w-full bg-slate-900 border border-amber-600 rounded-lg px-2 py-1.5 text-xs text-white font-bold"
+                                                className="w-full bg-slate-900 border border-amber-600 rounded-lg px-2 py-1.5 text-xs text-white font-bold outline-none"
                                               >
                                                 <option value="Ninguno (Golpe accidental en furgón)">Ninguno (Golpe accidental en furgón)</option>
                                                 {item.ruta?.includes("Ruta 2") ? (
@@ -1415,12 +1459,6 @@
                                             </div>
                                           )}
 
-                                          {it.motivoFalta.includes("Dañado de fábrica") && (
-                                            <div className="bg-amber-950/40 p-2 rounded border border-amber-800 text-[10px] text-amber-300">
-                                              💡 Registrado como Defecto de Origen (Aplica Reclamo a Proveedor).
-                                            </div>
-                                          )}
-
                                           <div className="bg-slate-950 p-2 rounded border border-slate-800 space-y-2">
                                             <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-amber-300">
                                               <input
@@ -1438,7 +1476,7 @@
                                                   }
                                                   setRetornoFormState({ ...retornoFormState, items: updated });
                                                 }}
-                                                className="w-3.5 h-3.5 accent-amber-500"
+                                                className="w-3.5 h-3.5 accent-amber-500 cursor-pointer"
                                               />
                                               <span>📦 Daño Total ({it.cantidad} {it.unidad} completa/s)</span>
                                             </label>
@@ -1457,7 +1495,7 @@
                                                     updated[iIdx].cantFalta = Number(e.target.value);
                                                     setRetornoFormState({ ...retornoFormState, items: updated });
                                                   }}
-                                                  className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white font-bold disabled:opacity-50"
+                                                  className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white font-bold disabled:opacity-50 outline-none"
                                                 />
                                               </div>
                                               <div>
@@ -1471,7 +1509,7 @@
                                                     updated[iIdx].detalle = e.target.value;
                                                     setRetornoFormState({ ...retornoFormState, items: updated });
                                                   }}
-                                                  className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                                                  className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white outline-none"
                                                 />
                                               </div>
                                             </div>
@@ -1486,7 +1524,7 @@
                                     <select
                                       value={retornoFormState.responsable}
                                       onChange={(e) => setRetornoFormState({ ...retornoFormState, responsable: e.target.value })}
-                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white"
+                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none"
                                     >
                                       {USUARIOS_SISTEMA.map(u => <option key={u} value={u}>{u}</option>)}
                                     </select>
@@ -1495,13 +1533,13 @@
                                   <div className="flex gap-2 pt-1">
                                     <button
                                       onClick={() => guardarRecepcionRetornoDirecto(item)}
-                                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 rounded-xl shadow transition"
+                                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 rounded-xl shadow transition cursor-pointer"
                                     >
                                       💾 Guardar Recepción
                                     </button>
                                     <button
                                       onClick={() => setRecibiendoRetornoId(null)}
-                                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-xl font-bold"
+                                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-xl font-bold cursor-pointer"
                                     >
                                       Cancelar
                                     </button>
@@ -1510,7 +1548,7 @@
                               ) : (
                                 <button
                                   onClick={() => abrirFormRetorno(item)}
-                                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-black text-xs py-2.5 rounded-xl shadow transition"
+                                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-black text-xs py-2.5 rounded-xl shadow transition cursor-pointer"
                                 >
                                   📥 Recibido en Bodega (Procesar Retorno)
                                 </button>
@@ -1525,7 +1563,7 @@
                           </div>
 
                           {item.notas && (
-                            <p className="text-xs text-slate-300 bg-slate-950/40 px-3 py-2 rounded-lg italic mb-3 border-l-2 border-amber-500">
+                            <p className="text-xs text-slate-300 bg-slate-950/40 px-3 py-2 rounded-xl italic mb-3 border-l-2 border-amber-500">
                               "{item.notas}"
                             </p>
                           )}
@@ -1533,7 +1571,7 @@
                           <div className="mt-2 pt-2 border-t border-slate-800">
                             <button
                               onClick={() => toggleExpandirTarjeta(item.id)}
-                              className="w-full flex items-center justify-between bg-slate-950 hover:bg-slate-900 text-xs font-bold text-amber-300 px-3.5 py-2.5 rounded-xl border border-amber-500/20 transition"
+                              className="w-full flex items-center justify-between bg-slate-950 hover:bg-slate-900 text-xs font-bold text-amber-300 px-3.5 py-2.5 rounded-xl border border-amber-500/20 transition cursor-pointer"
                             >
                               <span>📌 Ver Acciones y Chequear Proceso ({accionesLista.length})</span>
                               <span>{abierto ? "▲ Ocultar" : "▼ Desplegar"}</span>
@@ -1573,14 +1611,14 @@
                         </div>
 
                         <div className="pt-4 mt-3 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
-                          <button onClick={() => cambiarEstado(item.id, item.resuelto)} className={`px-3.5 py-2 rounded-xl font-bold transition ${item.resuelto ? "bg-emerald-600 text-white" : "bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500 hover:text-slate-950"}`}>
+                          <button onClick={() => cambiarEstado(item.id, item.resuelto)} className={`px-3.5 py-2 rounded-xl font-bold transition cursor-pointer ${item.resuelto ? "bg-emerald-600 text-white" : "bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500 hover:text-slate-950"}`}>
                             {item.resuelto ? "✅ Incidencia Resuelta" : "⏳ Marcar Todo Resuelto"}
                           </button>
                           <div className="flex items-center gap-1.5">
-                            <button onClick={() => cargarParaEditar(item)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold rounded-xl">
+                            <button onClick={() => cargarParaEditar(item)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold rounded-xl cursor-pointer">
                               ✏️ Editar
                             </button>
-                            <button onClick={() => eliminarIncidencia(item.id)} className="px-3 py-2 bg-slate-800 hover:bg-rose-950 text-rose-400 font-semibold rounded-xl">
+                            <button onClick={() => eliminarIncidencia(item.id)} className="px-3 py-2 bg-slate-800 hover:bg-rose-950 text-rose-400 font-semibold rounded-xl cursor-pointer">
                               🗑️
                             </button>
                           </div>
@@ -1593,7 +1631,6 @@
             </div>
           )}
 
-          {/* VISTA NUEVO / EDITAR */}
           {vista === "nuevo" && (
             <form onSubmit={guardarIncidencia} className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 max-w-3xl mx-auto no-print">
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -1603,7 +1640,7 @@
                   </h2>
                   <p className="text-xs text-slate-400">Sincronización en tiempo real para todo el equipo.</p>
                 </div>
-                <button type="button" onClick={() => { limpiarFormulario(); setVista("dashboard"); }} className="text-xs font-bold text-slate-400 hover:text-white bg-slate-800 px-3.5 py-2 rounded-xl">
+                <button type="button" onClick={() => { limpiarFormulario(); setVista("dashboard"); }} className="text-xs font-bold text-slate-400 hover:text-white bg-slate-800 px-3.5 py-2 rounded-xl cursor-pointer">
                   ✕ Cancelar
                 </button>
               </div>
@@ -1627,14 +1664,14 @@
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-1">Fecha</label>
-                  <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white" />
+                  <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white outline-none" />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-1">🚚 Ruta / Chofer</label>
-                  <select value={ruta} onChange={e => setRuta(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-semibold text-white">
+                  <select value={ruta} onChange={e => setRuta(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-semibold text-white outline-none">
                     {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
@@ -1642,7 +1679,7 @@
                   <label className="text-xs font-bold text-slate-300 block mb-1">👷 Armador de Bodega</label>
                   <div className="grid grid-cols-3 gap-2">
                     {ARMADORES.map(a => (
-                      <button type="button" key={a} onClick={() => setArmador(a)} className={`py-2 px-1 rounded-xl text-xs font-black border transition ${armador === a ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"}`}>
+                      <button type="button" key={a} onClick={() => setArmador(a)} className={`py-2 px-1 rounded-xl text-xs font-black border transition cursor-pointer ${armador === a ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"}`}>
                         {a}
                       </button>
                     ))}
@@ -1654,7 +1691,7 @@
                 <label className="text-xs font-bold text-slate-300 block mb-2">⚠️ Tipo de Incidencia</label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {MOTIVOS.map(m => (
-                    <button type="button" key={m.id} onClick={() => setMotivo(m.id)} className={`p-3 rounded-xl border text-left transition ${motivo === m.id ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow" : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"}`}>
+                    <button type="button" key={m.id} onClick={() => setMotivo(m.id)} className={`p-3 rounded-xl border text-left transition cursor-pointer ${motivo === m.id ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow" : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"}`}>
                       <div className="text-xs font-black">{m.label}</div>
                       <div className="text-[10px] opacity-75 mt-0.5 leading-tight">{m.desc}</div>
                     </button>
@@ -1672,18 +1709,18 @@
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div className="sm:col-span-2 relative">
                     <label className="text-[11px] text-slate-400 block mb-1">Nombre del Producto *</label>
-                    <input type="text" list="lista-catalogo" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                    <input type="text" list="lista-catalogo" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
                     <datalist id="lista-catalogo">
                       {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
                     </datalist>
                   </div>
                   <div>
                     <label className="text-[11px] text-slate-400 block mb-1">Cantidad *</label>
-                    <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
+                    <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
                   </div>
                   <div>
                     <label className="text-[11px] text-slate-400 block mb-1">Unidad</label>
-                    <select value={unidad} onChange={e => setUnidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-amber-300">
+                    <select value={unidad} onChange={e => setUnidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-amber-300 outline-none">
                       {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
                   </div>
@@ -1698,15 +1735,15 @@
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="sm:col-span-2 relative">
                       <label className="text-[11px] text-purple-300/80 block mb-1">Producto entregado *</label>
-                      <input type="text" list="lista-catalogo" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Producto alternativo..." className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm text-white" required />
+                      <input type="text" list="lista-catalogo" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Producto alternativo..." className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
                     </div>
                     <div>
                       <label className="text-[11px] text-purple-300/80 block mb-1">Cantidad *</label>
-                      <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white" required />
+                      <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
                     </div>
                     <div>
                       <label className="text-[11px] text-purple-300/80 block mb-1">Unidad</label>
-                      <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-purple-300">
+                      <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-purple-300 outline-none">
                         {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </div>
@@ -1727,7 +1764,7 @@
                       catalogoProductos.map(cp => (
                         <div key={cp.id} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-xl text-xs">
                           <span className="font-semibold text-white">{cp.nombre}</span>
-                          <button type="button" onClick={(e) => eliminarProductoCatalogo(cp.id, e)} className="text-rose-400 hover:text-rose-300 text-[11px] font-bold bg-rose-950/50 px-2 py-0.5 rounded-lg border border-rose-900/50">
+                          <button type="button" onClick={(e) => eliminarProductoCatalogo(cp.id, e)} className="text-rose-400 hover:text-rose-300 text-[11px] font-bold bg-rose-950/50 px-2 py-0.5 rounded-lg border border-rose-900/50 cursor-pointer">
                             🗑️ Borrar error
                           </button>
                         </div>
@@ -1747,7 +1784,7 @@
                         type="button"
                         key={ac}
                         onClick={() => toggleAccionForm(ac)}
-                        className={`p-3 rounded-xl border text-left text-xs font-bold transition flex items-center justify-between ${
+                        className={`p-3 rounded-xl border text-left text-xs font-bold transition flex items-center justify-between cursor-pointer ${
                           seleccionada ? "bg-amber-500/20 border-amber-400 text-amber-300" : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
                         }`}
                       >
@@ -1763,20 +1800,18 @@
 
               <div>
                 <label className="text-xs font-bold text-slate-300 block mb-1">💬 Notas Opcionales</label>
-                <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Se rompió una bolsa..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white" />
+                <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Se rompió una bolsa..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white outline-none" />
               </div>
 
-              <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-xl transition">
+              <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-xl transition cursor-pointer">
                 {editandoId ? "💾 Guardar Cambios" : "✅ Guardar y Sincronizar en Vivo"}
               </button>
             </form>
           )}
 
-          {/* VISTA BALANCE (CUADRATURA + CONTEO CÍCLICO FÍSICO / DIGITAL + HISTORIAL) */}
           {vista === "balance" && (
             <div className="space-y-6 no-print">
               
-              {/* VISTA MODO CONTEO DIGITAL ACTIVO */}
               {modoConteoDigitalActivo ? (
                 <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl border border-amber-500/40 space-y-5">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -1786,7 +1821,7 @@
                     </div>
                     <button
                       onClick={() => setModoConteoDigitalActivo(false)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl"
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
                     >
                       ✕ Cancelar Conteo Digital
                     </button>
@@ -1807,7 +1842,7 @@
                             placeholder={cp.cantidad}
                             value={valoresConteoDigital[cp.id] !== undefined ? valoresConteoDigital[cp.id] : cp.cantidad}
                             onChange={(e) => setValoresConteoDigital({ ...valoresConteoDigital, [cp.id]: Number(e.target.value) })}
-                            className="bg-slate-900 border border-amber-500/50 rounded-xl px-4 py-2 text-sm font-bold text-white w-32 text-center"
+                            className="bg-slate-900 border border-amber-500/50 rounded-xl px-4 py-2 text-sm font-bold text-white w-32 text-center outline-none"
                           />
                         </div>
                       </div>
@@ -1816,13 +1851,12 @@
 
                   <button
                     onClick={guardarConteoDigitalBodega}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-2xl text-sm shadow-xl transition"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-2xl text-sm shadow-xl transition cursor-pointer"
                   >
                     💾 Guardar y Enviar Conteo Digital (Notificar a Jefatura)
                   </button>
                 </div>
               ) : (
-                /* HOJA DE CONTEO FÍSICO / DIGITAL PENDIENTE */
                 <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                     <div>
@@ -1834,14 +1868,14 @@
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={imprimirHojaConteo}
-                        className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                        className="inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition cursor-pointer"
                       >
                         🖨️ Imprimir Hoja en Columnas
                       </button>
                       <button
                         disabled={Object.values(seleccionadosConteoDigital).filter(Boolean).length === 0}
                         onClick={() => setModoConteoDigitalActivo(true)}
-                        className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl shadow transition"
+                        className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl shadow transition cursor-pointer"
                       >
                         📱 Generar Conteo Digital ({Object.values(seleccionadosConteoDigital).filter(Boolean).length})
                       </button>
@@ -1861,8 +1895,8 @@
                             <th className="p-3">Producto / Descripción</th>
                             <th className="p-3">Unidad</th>
                             <th className="p-3">Factura</th>
-                            <th className="p-3 text-center">1. Conteo Bodega (Nico/Edwin/Diego)</th>
-                            <th className="p-3 text-center">2. Ajuste Jefatura (Pedro/Bedanli)</th>
+                            <th className="p-3 text-center">1. Conteo Bodega</th>
+                            <th className="p-3 text-center">2. Ajuste Jefatura</th>
                             <th className="p-3 rounded-r-xl text-right">Acciones</th>
                           </tr>
                         </thead>
@@ -1882,7 +1916,9 @@
                                 <td className="p-3 font-black text-white">
                                   {cp.producto}
                                   {cp.cantidadContada !== undefined && (
-                                    <span className="block text-[10px] text-amber-300 font-bold">Contado por {cp.responsableConteo}: {cp.cantidadContada} {cp.unidad}</span>
+                                    <span className="block text-[11px] text-amber-300 font-extrabold mt-0.5">
+                                      📦 Contado por {cp.responsableConteo}: <strong className="text-white underline">{cp.cantidadContada} {cp.unidad}</strong>
+                                    </span>
                                   )}
                                 </td>
                                 <td className="p-3 text-slate-300">{cp.unidad}</td>
@@ -1890,23 +1926,23 @@
                                 <td className="p-3 text-center">
                                   <button
                                     onClick={() => toggleCheckConteoFisico(cp.id, cp.conteoFisicoHecho)}
-                                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${cp.conteoFisicoHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
+                                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${cp.conteoFisicoHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
                                   >
-                                    {cp.conteoFisicoHecho ? `✓ ${cp.responsableConteo} (${cp.fechaHoraConteo || ''})` : "[ ] Marcar Conteo Físico"}
+                                    {cp.conteoFisicoHecho ? `✓ ${cp.responsableConteo}` : "[ ] Físico Hecho"}
                                   </button>
                                 </td>
                                 <td className="p-3 text-center">
                                   <button
                                     onClick={() => toggleCheckAjusteSistema(cp.id, cp.ajusteSistemaHecho)}
-                                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
+                                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
                                   >
-                                    {cp.ajusteSistemaHecho ? `✓ ${cp.responsableAjuste} (${cp.fechaHoraAjuste || ''})` : "[ ] Marcar Sistema"}
+                                    {cp.ajusteSistemaHecho ? `✓ ${cp.responsableAjuste}` : "[ ] Ajustar Sistema"}
                                   </button>
                                 </td>
                                 <td className="p-3 text-right">
                                   <button
                                     onClick={() => eliminarItemConteoPendiente(cp.id)}
-                                    className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-1.5 rounded-xl text-xs font-bold transition"
+                                    className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer"
                                   >
                                     🗑️
                                   </button>
@@ -1921,7 +1957,6 @@
                 </div>
               )}
 
-              {/* SECCIÓN: REPORTES CONSOLIDADOS DE RETORNOS POR RUTA */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                   <div>
@@ -1932,7 +1967,7 @@
                   </div>
                   <button
                     onClick={imprimirReporteRetornosSeleccionados}
-                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition cursor-pointer"
                   >
                     📄 Imprimir PDF Retornos Seleccionados
                   </button>
@@ -1980,7 +2015,6 @@
                 )}
               </div>
 
-              {/* CUADRATURA AUTOMÁTICA */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
@@ -2019,62 +2053,95 @@
                 )}
               </div>
 
-              {/* HISTORIAL ACUMULATIVO CON SELECCIÓN DE REPORTE PDF */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                   <div>
                     <h2 className="text-lg font-black text-amber-400 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
                     <p className="text-xs text-slate-400">
-                      Marca con un check los ítems que deseas incluir en el reporte formal y genera el PDF impreso.
+                      Agrupado por producto con su último ajuste visible y desglose de ajustes anteriores al desplegar.
                     </p>
                   </div>
                   <button
                     onClick={imprimirReporteInventarioSeleccionado}
-                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition"
+                    className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition cursor-pointer"
                   >
                     📄 Imprimir Reporte PDF de Ítems Seleccionados
                   </button>
                 </div>
 
-                {historialInventario.length === 0 ? (
+                {historialAgrupado.length === 0 ? (
                   <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400">
                     Aún no hay correcciones de inventario tildadas en las tarjetas.
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {historialInventario.map((h, i) => {
-                      const seleccionado = seleccionadosInventario[h.id] || false;
+                  <div className="space-y-3">
+                    {historialAgrupado.map((grupo, gIdx) => {
+                      const ultimoReg = grupo.registros[0];
+                      const expandido = tarjetasAbiertas[`hist_${gIdx}`] || false;
+                      const seleccionadoGrupo = seleccionadosInventario[ultimoReg.id] || false;
+
                       return (
-                        <div key={h.id || i} className={`border p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs transition ${seleccionado ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-950 border-slate-800/80'}`}>
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              checked={seleccionado}
-                              onChange={() => toggleSeleccionInventario(h.id)}
-                              className="w-4 h-4 accent-amber-500 cursor-pointer"
-                            />
-                            <div>
-                              <span className="font-black text-white text-sm">{h.producto}</span>
-                              <span className="text-slate-400 ml-2">({h.unidad})</span>
-                              <span className="bg-slate-900 text-amber-300 px-2 py-0.5 rounded-md ml-2 font-bold">Ref #{h.factura}</span>
-                              <p className="text-slate-300 text-[11px] mt-1">
-                                📋 Contado por: <strong className="text-white">{h.contadoPor || "Bodega"}</strong> ({h.fechaHoraConteo || h.fechaHora})
-                              </p>
-                              <p className="text-slate-300 text-[11px]">
-                                ⚖️ Ajustado por: <strong className="text-amber-400">{h.corregidoPor}</strong> ({h.fechaHoraAjuste || h.fechaHora})
-                              </p>
-                              {h.detalle && <p className="text-slate-400 text-[10px] mt-0.5">📝 {h.detalle}</p>}
+                        <div key={gIdx} className={`border rounded-2xl p-4 transition ${seleccionadoGrupo ? 'bg-amber-500/10 border-amber-500/40' : 'bg-slate-950 border-slate-800/80'}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={seleccionadoGrupo}
+                                onChange={() => toggleSeleccionInventario(ultimoReg.id)}
+                                className="w-4 h-4 accent-amber-500 cursor-pointer"
+                              />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-black text-white text-base">{grupo.producto}</span>
+                                  <span className="text-slate-400 text-xs">({grupo.unidad})</span>
+                                  <span className="bg-slate-900 text-amber-300 px-2 py-0.5 rounded-md font-bold text-xs">Ref #{ultimoReg.factura}</span>
+                                </div>
+                                <div className="mt-1 space-y-0.5 text-slate-300">
+                                  <p>📋 Contado por: <strong className="text-white">{ultimoReg.contadoPor || "Bodega"}</strong> ({ultimoReg.fechaHoraConteo || ultimoReg.fechaHora})</p>
+                                  <p>⚖️ Ajustado por: <strong className="text-amber-400">{ultimoReg.corregidoPor}</strong> ({ultimoReg.fechaHoraAjuste || ultimoReg.fechaHora})</p>
+                                  {ultimoReg.detalle && <p className="text-slate-400 text-[11px]">📝 {ultimoReg.detalle}</p>}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {grupo.registros.length > 1 && (
+                                <button
+                                  onClick={() => toggleExpandirTarjeta(`hist_${gIdx}`)}
+                                  className="bg-slate-900 hover:bg-slate-800 text-amber-300 px-3 py-2 rounded-xl text-xs font-bold border border-amber-500/20 transition cursor-pointer"
+                                >
+                                  {expandido ? "▲ Ocultar Historial Anterior" : `▼ Ver Anteriores (${grupo.registros.length - 1})`}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => eliminarRegistroHistorialInv(ultimoReg.id)}
+                                className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                                title="Eliminar registro"
+                              >
+                                🗑️
+                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <button
-                              onClick={() => eliminarRegistroHistorialInv(h.id)}
-                              className="bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-900/50 px-2.5 py-1.5 rounded-xl text-xs font-bold transition"
-                              title="Eliminar este registro"
-                            >
-                              🗑️
-                            </button>
-                          </div>
+
+                          {expandido && grupo.registros.length > 1 && (
+                            <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
+                              <p className="text-[11px] font-bold text-slate-400 uppercase">Historial acumulativo anterior para {grupo.producto}:</p>
+                              {grupo.registros.slice(1).map((ant, aIdx) => (
+                                <div key={ant.id || aIdx} className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-xs flex items-center justify-between gap-2">
+                                  <div>
+                                    <span className="font-bold text-amber-300">Ref #{ant.factura}</span> • <span className="text-slate-300">Ajustó: {ant.corregidoPor} ({ant.fechaHoraAjuste || ant.fechaHora})</span>
+                                    {ant.detalle && <span className="block text-[10px] text-slate-400 mt-0.5">Motivo/Detalle: {ant.detalle}</span>}
+                                  </div>
+                                  <button
+                                    onClick={() => eliminarRegistroHistorialInv(ant.id)}
+                                    className="text-rose-400 hover:text-rose-300 text-[11px] font-bold cursor-pointer"
+                                  >
+                                    🗑️ Borrar
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2084,7 +2151,6 @@
             </div>
           )}
 
-          {/* VISTA HISTORIAL SEMANAL */}
           {vista === "historial" && (
             <div className="space-y-4 max-w-3xl mx-auto no-print">
               <div className="glass-card rounded-2xl p-5">
@@ -2130,7 +2196,7 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+    ReactDOM.createRoot(getElementById("root") || document.getElementById("root")).render(<App/>);
   </script>
 </body>
 </html>
