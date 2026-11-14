@@ -103,6 +103,8 @@
       const [filtroEstado, setFiltroEstado] = useState("todos");
       const [filtroArmador, setFiltroArmador] = useState("todos");
       const [filtroRuta, setFiltroRuta] = useState("todos");
+      const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
+      const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
 
       const hoy = new Date().toISOString().split("T")[0];
       const [factura, setFactura] = useState("");
@@ -219,7 +221,7 @@
         setSeleccionadosInventario(prev => ({ ...prev, [id]: !prev[id] }));
       };
 
-      const toggleSeleccionRetornoPDF = (id) => {
+      const toggleSeleccionRetornosPDF = (id) => {
         setSeleccionadosRetornosPDF(prev => ({ ...prev, [id]: !prev[id] }));
       };
 
@@ -454,7 +456,6 @@
         }
       };
 
-      // Fase 1: Marcar Conteo Físico por parte del equipo de bodega (Nico, Edwin, Diego)
       const toggleCheckConteoFisico = async (id, estadoActual) => {
         const resp = prompt(`Selecciona quién realizó el conteo físico:\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`, "Diego");
         if (!resp || !["Nico", "Edwin", "Diego"].includes(resp.trim())) {
@@ -471,7 +472,6 @@
         } catch (err) { alert(err.message); }
       };
 
-      // Fase 2: Ajuste de Jefatura (Pedro o Bedanli) para Conteo Cíclico Tradicional
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
         const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
@@ -505,7 +505,6 @@
         } catch (err) { alert(err.message); }
       };
 
-      // Guardar Conteo Digital (Fase 1: Registra quién contó y los números, pero deja pendiente a Jefatura)
       const guardarConteoDigitalBodega = async () => {
         const seleccionadosIds = Object.keys(seleccionadosConteoDigital).filter(id => seleccionadosConteoDigital[id]);
         if (seleccionadosIds.length === 0) return alert("No hay ítems seleccionados.");
@@ -535,7 +534,7 @@
           setModoConteoDigitalActivo(false);
           setSeleccionadosConteoDigital({});
           setValoresConteoDigital({});
-          alert("✅ Conteo digital guardado con éxito. Ahora queda pendiente de revisión y ajuste final por Jefatura (Pedro o Bedanli).");
+          alert("✅ Conteo digital guardado con éxito. Ahora la Jefatura (Pedro o Bedanli) ha sido notificada para realizar el ajuste final.");
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
@@ -703,15 +702,25 @@
         cruces: incidencias.filter(i => i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente").length
       }), [incidencias, incidentesBodega]);
 
+      // Ítems contados por bodega pendientes de ajuste por jefatura (para notificación en vivo)
+      const conteosListosParaAjustar = useMemo(() => {
+        return conteoPendiente.filter(cp => cp.conteoFisicoHecho && !cp.ajusteSistemaHecho);
+      }, [conteoPendiente]);
+
       const incidenciasFiltradas = useMemo(() => {
         return incidencias.filter(item => {
           const coincideTexto = item.factura?.toLowerCase().includes(busqueda.toLowerCase()) || item.producto?.toLowerCase().includes(busqueda.toLowerCase()) || item.cliente?.toLowerCase().includes(busqueda.toLowerCase()) || item.registradoPor?.toLowerCase().includes(busqueda.toLowerCase()) || item.armador?.toLowerCase().includes(busqueda.toLowerCase());
           const coincideEstado = filtroEstado === "todos" ? true : filtroEstado === "pendientes" ? !item.resuelto : item.resuelto;
           const coincideArmador = filtroArmador === "todos" ? true : item.armador === filtroArmador;
           const coincideRuta = filtroRuta === "todos" ? true : item.ruta === filtroRuta;
-          return coincideTexto && coincideEstado && coincideArmador && coincideRuta;
+          
+          let coincideFecha = true;
+          if (filtroFechaDesde && item.fecha < filtroFechaDesde) coincideFecha = false;
+          if (filtroFechaHasta && item.fecha > filtroFechaHasta) coincideFecha = false;
+
+          return coincideTexto && coincideEstado && coincideArmador && coincideRuta && coincideFecha;
         });
-      }, [incidencias, busqueda, filtroEstado, filtroArmador, filtroRuta]);
+      }, [incidencias, busqueda, filtroEstado, filtroArmador, filtroRuta, filtroFechaDesde, filtroFechaHasta]);
 
       const resumenInventario = useMemo(() => {
         const mapa = {};
@@ -741,6 +750,29 @@
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
           
+          {/* BANNER DE NOTIFICACIÓN EN VIVO PARA JEFATURA */}
+          {conteosListosParaAjustar.length > 0 && (
+            <div className="mb-6 no-print">
+              <button
+                onClick={() => setVista("balance")}
+                className="w-full bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black p-4 rounded-2xl shadow-xl flex items-center justify-between gap-3 border border-amber-300 animate-pulse transition"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-3 w-3 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-950 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-slate-950"></span>
+                  </span>
+                  <span className="text-sm">
+                    🔔 ¡Atención Jefatura! Hay <strong>{conteosListosParaAjustar.length} ítem(s)</strong> de inventario contados por Bodega pendientes de ajuste final.
+                  </span>
+                </div>
+                <span className="bg-slate-950 text-amber-300 text-xs px-3 py-1.5 rounded-xl uppercase tracking-wider font-extrabold">
+                  Revisar Ahora ➔
+                </span>
+              </button>
+            </div>
+          )}
+
           {/* REPORTE GENERAL DE INCIDENCIAS */}
           {modoImpresionReporte === 'general' && (
             <div className="print-only bg-white text-black p-8">
@@ -1040,8 +1072,13 @@
             <button onClick={() => setVista("nuevo")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "nuevo" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               {editandoId ? "✏️ Editando Factura" : "➕ Nueva Incidencia"}
             </button>
-            <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
+            <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition relative ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               ⚖️ Cuadratura Bodega ({resumenInventario.length})
+              {conteosListosParaAjustar.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+                  {conteosListosParaAjustar.length}
+                </span>
+              )}
             </button>
             <button onClick={() => setVista("historial")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition ${vista === "historial" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}>
               📁 Archivo Semanal ({cierres.length})
@@ -1175,7 +1212,7 @@
                   <div className="flex-1">
                     <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                     <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
                       <option value="todos">Estado: Todos</option>
                       <option value="pendientes">⏳ Pendientes</option>
@@ -1185,10 +1222,12 @@
                       <option value="todos">Armador: Todos</option>
                       {ARMADORES.map(a => <option key={a} value={a}>Armó: {a}</option>)}
                     </select>
-                    <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="col-span-2 sm:col-span-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
+                    <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200">
                       <option value="todos">Ruta: Todas</option>
                       {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
+                    <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} placeholder="Desde" title="Fecha Desde" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200" />
+                    <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} placeholder="Hasta" title="Fecha Hasta" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200" />
                   </div>
                 </div>
               </div>
@@ -1779,7 +1818,7 @@
                     onClick={guardarConteoDigitalBodega}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-2xl text-sm shadow-xl transition"
                   >
-                    💾 Guardar y Enviar Conteo Digital (Queda pendiente de aprobación por Jefatura)
+                    💾 Guardar y Enviar Conteo Digital (Notificar a Jefatura)
                   </button>
                 </div>
               ) : (
@@ -1843,7 +1882,7 @@
                                 <td className="p-3 font-black text-white">
                                   {cp.producto}
                                   {cp.cantidadContada !== undefined && (
-                                    <span className="block text-[10px] text-amber-300 font-normal">Contado digital: {cp.cantidadContada} {cp.unidad}</span>
+                                    <span className="block text-[10px] text-amber-300 font-bold">Contado por {cp.responsableConteo}: {cp.cantidadContada} {cp.unidad}</span>
                                   )}
                                 </td>
                                 <td className="p-3 text-slate-300">{cp.unidad}</td>
@@ -1914,7 +1953,7 @@
                             <input
                               type="checkbox"
                               checked={seleccionado}
-                              onChange={() => toggleSeleccionRetornoPDF(item.id)}
+                              onChange={() => toggleSeleccionRetornosPDF(item.id)}
                               className="w-4 h-4 accent-sky-500 cursor-pointer"
                             />
                             <div>
