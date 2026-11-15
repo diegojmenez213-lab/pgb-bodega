@@ -103,6 +103,7 @@
       const [editandoId, setEditandoId] = useState(null);
       const [cierreExpandido, setCierreExpandido] = useState(null);
       const [tarjetasAbiertas, setTarjetasAbiertas] = useState({});
+      const [cuadraturaAbiertas, setCuadraturaAbiertas] = useState({});
 
       const [busqueda, setBusqueda] = useState("");
       const [filtroEstado, setFiltroEstado] = useState("todos");
@@ -233,6 +234,10 @@
 
       const toggleSeleccionConteoDigital = (id) => {
         setSeleccionadosConteoDigital(prev => ({ ...prev, [id]: !prev[id] }));
+      };
+
+      const toggleCuadraturaExpandida = (key) => {
+        setCuadraturaAbiertas(prev => ({ ...prev, [key]: !prev[key] }));
       };
 
       const toggleAccionForm = (acc) => {
@@ -780,24 +785,28 @@
 
       const resumenInventario = useMemo(() => {
         const mapa = {};
-        const sumar = (prod, uni, cant, tipo, fact) => {
+        const sumar = (prod, uni, cant, tipo, fact, detalleInc = "") => {
           const clave = `${prod}__${uni}`;
-          if (!mapa[clave]) mapa[clave] = { producto: prod, unidad: uni, sobranteBodega: 0, faltanteBodega: 0, facturas: [] };
+          if (!mapa[clave]) mapa[clave] = { producto: prod, unidad: uni, sobranteBodega: 0, faltanteBodega: 0, detallesFacturas: [] };
           if (tipo === "SOBRA_EN_BODEGA") mapa[clave].sobranteBodega += cant;
           if (tipo === "FALTA_EN_BODEGA") mapa[clave].faltanteBodega += cant;
-          if (!mapa[clave].facturas.includes(fact)) mapa[clave].facturas.push(fact);
+          mapa[clave].detallesFacturas.push({ factura: fact, tipo, cantidad: cant, detalle: detalleInc });
         };
         incidencias.forEach(inc => {
-          if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
-          else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura);
+          if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura, `Faltante en ruta (${inc.ruta}) - Cliente: ${inc.cliente || 'N/A'}`);
+          else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura, `Sobrante en ruta (${inc.ruta}) - Cliente: ${inc.cliente || 'N/A'}`);
           else if (inc.motivo === "Cruce") {
-            sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
-            if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura);
+            sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura, `Cruce facturado (${inc.ruta})`);
+            if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura, `Cruce enviado (${inc.ruta})`);
+          } else if (inc.motivo === "Rechazo") {
+            sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura, `Rechazo cliente (${inc.ruta})`);
+          } else if (inc.motivo === "Daño/Merma") {
+            sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura, `Daño / Merma (${inc.ruta})`);
           }
         });
         incidentesBodega.forEach(ib => {
           if (ib.ajustado) {
-            sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT");
+            sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT", `Incidente interno: ${ib.motivo} (Implicado: ${ib.responsable})`);
           }
         });
         return Object.values(mapa);
@@ -1516,14 +1525,23 @@
                                   ))}
 
                                   <div>
-                                    <label className="text-[11px] font-bold text-slate-300 block mb-1">👤 Quién recibe en bodega:</label>
-                                    <select
-                                      value={retornoFormState.responsable}
-                                      onChange={(e) => setRetornoFormState({ ...retornoFormState, responsable: e.target.value })}
-                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none"
-                                    >
-                                      {USUARIOS_SISTEMA.map(u => <option key={u} value={u}>{u}</option>)}
-                                    </select>
+                                    <label className="text-[11px] font-bold text-slate-300 block mb-2">👤 Quién recibe en bodega:</label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                      {USUARIOS_SISTEMA.map(u => (
+                                        <button
+                                          type="button"
+                                          key={u}
+                                          onClick={() => setRetornoFormState({ ...retornoFormState, responsable: u })}
+                                          className={`py-2 px-1 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                            retornoFormState.responsable === u
+                                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow"
+                                              : "bg-slate-950 text-slate-300 border-slate-800"
+                                          }`}
+                                        >
+                                          {u}
+                                        </button>
+                                      ))}
+                                    </div>
                                   </div>
 
                                   <div className="flex gap-2 pt-1">
@@ -2011,10 +2029,11 @@
                 )}
               </div>
 
+              {/* CUADRATURA AUTOMÁTICA CON DESPLIEGUE DE FACTURAS AL PRESIONAR */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
-                  Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente en estanterías según las incidencias de ruta y bodega.
+                  Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente. <strong>Presiona cualquier producto para ver las facturas involucradas.</strong>
                 </p>
 
                 {resumenInventario.length === 0 ? (
@@ -2022,29 +2041,59 @@
                     Sin desfases de inventario registrados esta semana. ¡Todo cuadrado!
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs sm:text-sm">
-                      <thead className="bg-slate-950 text-slate-400 uppercase text-[11px]">
-                        <tr>
-                          <th className="p-4 rounded-l-xl">Producto</th>
-                          <th className="p-4">Unidad</th>
-                          <th className="p-4 text-emerald-400">Sobra en Bodega (+)</th>
-                          <th className="p-4 text-rose-400">Falta en Bodega (-)</th>
-                          <th className="p-4 rounded-r-xl">Facturas / Origen</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {resumenInventario.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-950/40">
-                            <td className="p-4 font-black text-white">{item.producto}</td>
-                            <td className="p-4 text-slate-300 font-semibold">{item.unidad}</td>
-                            <td className="p-4 font-black text-emerald-400 text-base">{item.sobranteBodega > 0 ? `+${item.sobranteBodega}` : "—"}</td>
-                            <td className="p-4 font-black text-rose-400 text-base">{item.faltanteBodega > 0 ? `-${item.faltanteBodega}` : "—"}</td>
-                            <td className="p-4 text-xs text-amber-300 font-semibold">#{item.facturas.join(", #")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="space-y-3">
+                    {resumenInventario.map((item, idx) => {
+                      const claveCuad = `${item.producto}_${item.unidad}`;
+                      const abiertoCuad = cuadraturaAbiertas[claveCuad] || false;
+
+                      return (
+                        <div key={idx} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden transition">
+                          <div
+                            onClick={() => toggleCuadraturaExpandida(claveCuad)}
+                            className="p-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-900/60 transition"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-amber-400 font-bold text-xs">{abiertoCuad ? "▼" : "▶"}</span>
+                              <div>
+                                <span className="font-black text-white text-base">{item.producto}</span>
+                                <span className="text-slate-400 text-xs ml-2 font-medium">({item.unidad})</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-6">
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-400 uppercase block">Sobra (+)</span>
+                                <span className="font-black text-emerald-400 text-base">{item.sobranteBodega > 0 ? `+${item.sobranteBodega}` : "—"}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-400 uppercase block">Falta (-)</span>
+                                <span className="font-black text-rose-400 text-base">{item.faltanteBodega > 0 ? `-${item.faltanteBodega}` : "—"}</span>
+                              </div>
+                              <span className="text-xs bg-slate-900 text-amber-300 px-3 py-1.5 rounded-xl font-bold border border-slate-800">
+                                {abiertoCuad ? "Ocultar Facturas" : `Ver Facturas (${item.detallesFacturas.length})`}
+                              </span>
+                            </div>
+                          </div>
+
+                          {abiertoCuad && (
+                            <div className="bg-slate-900/90 p-4 border-t border-slate-800 space-y-2 text-xs">
+                              <p className="font-bold text-slate-300 uppercase tracking-wider mb-2">📄 Detalle de Facturas y Origen de la Incidencia:</p>
+                              {item.detallesFacturas.map((df, dIdx) => (
+                                <div key={dIdx} className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+                                  <div>
+                                    <span className="font-black text-amber-300 text-sm">Fact #{df.factura}</span>
+                                    <span className="text-slate-300 ml-2">{df.detalle}</span>
+                                  </div>
+                                  <span className={`font-bold px-2.5 py-1 rounded-lg ${df.tipo === 'SOBRA_EN_BODEGA' ? 'bg-emerald-950 text-emerald-400 border border-emerald-900' : 'bg-rose-950 text-rose-400 border border-rose-900'}`}>
+                                    {df.tipo === 'SOBRA_EN_BODEGA' ? `+${df.cantidad}` : `-${df.cantidad}`}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
