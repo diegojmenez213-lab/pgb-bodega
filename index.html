@@ -57,6 +57,12 @@
     const RUTAS = ["Ruta 1 (Juan / Julio)", "Ruta 2 (Carlos / Horacio)", "Retiro Bodega / Otra"];
     const USUARIOS_SISTEMA = ["Edwin", "Nico", "Diego", "Bedanli", "Pedro", "Gabriel"];
     const PERSONAL_EQUIPO = ["Nico", "Edwin", "Horacio", "Julio", "Juan", "Sra. Rosa", "Diego", "Bedanli", "Pedro", "Gabriel", "Carlos"];
+    const MOTIVOS_BODEGA_INTERNA = [
+      "Rotura accidental en pasillo",
+      "Compra personal (Descuento sueldo)",
+      "Dañado de fábrica (Mal sellado)",
+      "Pérdida o extravío interno"
+    ];
 
     const ACCIONES_DISPONIBLES = [
       "Ajustar Inventario en Bodega",
@@ -94,7 +100,7 @@
       const [prodBodega, setProdBodega] = useState("");
       const [cantBodega, setCantBodega] = useState(1);
       const [uniBodega, setUniBodega] = useState(UNIDADES[0]);
-      const [motivoBodega, setMotivoBodega] = useState("Rotura accidental en pasillo");
+      const [motivoBodega, setMotivoBodega] = useState(MOTIVOS_BODEGA_INTERNA[0]);
       const [responsableBodega, setResponsableBodega] = useState(PERSONAL_EQUIPO[0]);
       const [notasBodega, setNotasBodega] = useState("");
 
@@ -103,7 +109,6 @@
       const [editandoId, setEditandoId] = useState(null);
       const [cierreExpandido, setCierreExpandido] = useState(null);
       const [tarjetasAbiertas, setTarjetasAbiertas] = useState({});
-      const [cuadraturaAbiertas, setCuadraturaAbiertas] = useState({});
 
       const [busqueda, setBusqueda] = useState("");
       const [filtroEstado, setFiltroEstado] = useState("todos");
@@ -234,10 +239,6 @@
 
       const toggleSeleccionConteoDigital = (id) => {
         setSeleccionadosConteoDigital(prev => ({ ...prev, [id]: !prev[id] }));
-      };
-
-      const toggleCuadraturaExpandida = (key) => {
-        setCuadraturaAbiertas(prev => ({ ...prev, [key]: !prev[key] }));
       };
 
       const toggleAccionForm = (acc) => {
@@ -785,28 +786,30 @@
 
       const resumenInventario = useMemo(() => {
         const mapa = {};
-        const sumar = (prod, uni, cant, tipo, fact, detalleInc = "") => {
-          const clave = `${prod}__${uni}`;
-          if (!mapa[clave]) mapa[clave] = { producto: prod, unidad: uni, sobranteBodega: 0, faltanteBodega: 0, detallesFacturas: [] };
+        const sumar = (prod, uni, cant, tipo, fact) => {
+          const clave = prod;
+          if (!mapa[clave]) {
+            mapa[clave] = { producto: prod, unidadesDetalle: {}, sobranteBodega: 0, faltanteBodega: 0, facturas: [] };
+          }
           if (tipo === "SOBRA_EN_BODEGA") mapa[clave].sobranteBodega += cant;
           if (tipo === "FALTA_EN_BODEGA") mapa[clave].faltanteBodega += cant;
-          mapa[clave].detallesFacturas.push({ factura: fact, tipo, cantidad: cant, detalle: detalleInc });
+
+          const uniKey = uni || "Unidad";
+          mapa[clave].unidadesDetalle[uniKey] = (mapa[clave].unidadesDetalle[uniKey] || 0) + cant;
+
+          if (!mapa[clave].facturas.includes(fact)) mapa[clave].facturas.push(fact);
         };
         incidencias.forEach(inc => {
-          if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura, `Faltante en ruta (${inc.ruta}) - Cliente: ${inc.cliente || 'N/A'}`);
-          else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura, `Sobrante en ruta (${inc.ruta}) - Cliente: ${inc.cliente || 'N/A'}`);
+          if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
+          else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura);
           else if (inc.motivo === "Cruce") {
-            sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura, `Cruce facturado (${inc.ruta})`);
-            if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura, `Cruce enviado (${inc.ruta})`);
-          } else if (inc.motivo === "Rechazo") {
-            sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura, `Rechazo cliente (${inc.ruta})`);
-          } else if (inc.motivo === "Daño/Merma") {
-            sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura, `Daño / Merma (${inc.ruta})`);
+            sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
+            if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura);
           }
         });
         incidentesBodega.forEach(ib => {
           if (ib.ajustado) {
-            sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT", `Incidente interno: ${ib.motivo} (Implicado: ${ib.responsable})`);
+            sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT");
           }
         });
         return Object.values(mapa);
@@ -846,7 +849,7 @@
               </div>
 
               <div className="mb-6 bg-gray-100 p-4 rounded text-xs">
-                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltos: {kpis.resueltas}</p>
+                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltas: {kpis.resueltas}</p>
               </div>
 
               <div className="space-y-4 text-xs">
@@ -1172,27 +1175,59 @@
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs text-slate-400 block mb-1">Unidad</label>
-                      <select value={uniBodega} onChange={e => setUniBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-amber-300 font-semibold outline-none">
-                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
+                      <label className="text-xs text-slate-400 block mb-2">Unidad</label>
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                        {UNIDADES.map(u => (
+                          <button
+                            type="button"
+                            key={u}
+                            onClick={() => setUniBodega(u)}
+                            className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                              uniBodega === u ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                            }`}
+                          >
+                            {u}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+
                     <div>
-                      <label className="text-xs text-slate-400 block mb-1">Motivo Interno</label>
-                      <select value={motivoBodega} onChange={e => setMotivoBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-semibold outline-none">
-                        <option value="Rotura accidental en pasillo">Rotura accidental en pasillo</option>
-                        <option value="Compra personal (Descuento sueldo)">Compra personal (Descuento sueldo)</option>
-                        <option value="Dañado de fábrica (Mal sellado)">Dañado de fábrica (Mal sellado)</option>
-                        <option value="Pérdida o extravío interno">Pérdida o extravío interno</option>
-                      </select>
+                      <label className="text-xs text-slate-400 block mb-2">Motivo Interno</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {MOTIVOS_BODEGA_INTERNA.map(m => (
+                          <button
+                            type="button"
+                            key={m}
+                            onClick={() => setMotivoBodega(m)}
+                            className={`py-2 px-3 rounded-xl text-xs font-bold border text-left transition cursor-pointer ${
+                              motivoBodega === m ? "bg-amber-500/20 text-amber-300 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                            }`}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-xs text-slate-400 block mb-1">Implicado / Responsable</label>
-                      <select value={responsableBodega} onChange={e => setResponsableBodega(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-bold outline-none">
-                        {PERSONAL_EQUIPO.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-2">Implicado / Responsable</label>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {PERSONAL_EQUIPO.map(p => (
+                        <button
+                          type="button"
+                          key={p}
+                          onClick={() => setResponsableBodega(p)}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                            responsableBodega === p ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -1262,22 +1297,39 @@
                   <div className="flex-1">
                     <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                    <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none">
-                      <option value="todos">Estado: Todos</option>
-                      <option value="pendientes">⏳ Pendientes</option>
-                      <option value="resueltos">✅ Resueltos</option>
-                    </select>
-                    <select value={filtroArmador} onChange={e => setFiltroArmador(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none">
-                      <option value="todos">Armador: Todos</option>
-                      {ARMADORES.map(a => <option key={a} value={a}>Armó: {a}</option>)}
-                    </select>
-                    <select value={filtroRuta} onChange={e => setFiltroRuta(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none">
-                      <option value="todos">Ruta: Todas</option>
-                      {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                    <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} placeholder="Desde" title="Fecha Desde" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none" />
-                    <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} placeholder="Hasta" title="Fecha Hasta" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-xs font-bold text-slate-200 outline-none" />
+                  <div className="flex flex-wrap gap-2">
+                    <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
+                      {[{ id: "todos", label: "Estado: Todos" }, { id: "pendientes", label: "⏳ Pendientes" }, { id: "resueltos", label: "✅ Resueltos" }].map(f => (
+                        <button
+                          key={f.id}
+                          onClick={() => setFiltroEstado(f.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${filtroEstado === f.id ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
+                      <button
+                        onClick={() => setFiltroArmador("todos")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${filtroArmador === "todos" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                      >
+                        Armador: Todos
+                      </button>
+                      {ARMADORES.map(a => (
+                        <button
+                          key={a}
+                          onClick={() => setFiltroArmador(a)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${filtroArmador === a ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                        >
+                          {a}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} title="Fecha Desde" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none" />
+                    <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} title="Fecha Hasta" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none" />
                   </div>
                 </div>
               </div>
@@ -1412,55 +1464,53 @@
                                       {!it.recibido && (
                                         <div className="pl-6 space-y-2 pt-2 border-t border-rose-900/40">
                                           <div>
-                                            <label className="text-[10px] text-rose-300 block mb-0.5">¿Qué pasó con este producto?</label>
-                                            <select
-                                              value={it.motivoFalta}
-                                              onChange={(e) => {
-                                                const updated = [...retornoFormState.items];
-                                                updated[iIdx].motivoFalta = e.target.value;
-                                                setRetornoFormState({ ...retornoFormState, items: updated });
-                                              }}
-                                              className="w-full bg-slate-900 border border-rose-800 rounded-lg px-2 py-1.5 text-xs text-white outline-none"
-                                            >
-                                              <option value="Se partió / rompió en el trayecto">Se partió / rompió en el trayecto (Golpe furgón/carretilla)</option>
-                                              <option value="Dañado de fábrica (Mal sellado / Defecto origen)">Dañado de fábrica (Mal sellado / Defecto origen)</option>
-                                              <option value="Se perdió en el camino">Se perdió en el camino</option>
-                                              <option value="Entregado por error a otro cliente">Entregado por error a otro cliente</option>
-                                            </select>
+                                            <label className="text-[10px] text-rose-300 block mb-1">¿Qué pasó con este producto?</label>
+                                            <div className="grid grid-cols-1 gap-1.5">
+                                              {[
+                                                "Se partió / rompió en el trayecto",
+                                                "Dañado de fábrica (Mal sellado / Defecto origen)",
+                                                "Se perdió en el camino",
+                                                "Entregado por error a otro cliente"
+                                              ].map(mot => (
+                                                <button
+                                                  type="button"
+                                                  key={mot}
+                                                  onClick={() => {
+                                                    const updated = [...retornoFormState.items];
+                                                    updated[iIdx].motivoFalta = mot;
+                                                    setRetornoFormState({ ...retornoFormState, items: updated });
+                                                  }}
+                                                  className={`py-1.5 px-2 rounded-lg text-xs font-bold border text-left transition cursor-pointer ${
+                                                    it.motivoFalta === mot ? "bg-rose-500/20 text-rose-300 border-rose-500" : "bg-slate-900 text-slate-300 border-slate-800"
+                                                  }`}
+                                                >
+                                                  {mot}
+                                                </button>
+                                              ))}
+                                            </div>
                                           </div>
 
                                           {it.motivoFalta === "Se partió / rompió en el trayecto" && (
                                             <div>
-                                              <label className="text-[10px] text-rose-300 block mb-0.5 font-bold text-amber-300">👤 ¿Quién de la ruta causó el daño/rotura?</label>
-                                              <select
-                                                value={it.responsableRuta || "Ninguno (Golpe accidental en furgón)"}
-                                                onChange={(e) => {
-                                                  const updated = [...retornoFormState.items];
-                                                  updated[iIdx].responsableRuta = e.target.value;
-                                                  setRetornoFormState({ ...retornoFormState, items: updated });
-                                                }}
-                                                className="w-full bg-slate-900 border border-amber-600 rounded-lg px-2 py-1.5 text-xs text-white font-bold outline-none"
-                                              >
-                                                <option value="Ninguno (Golpe accidental en furgón)">Ninguno (Golpe accidental en furgón)</option>
-                                                {item.ruta?.includes("Ruta 2") ? (
-                                                  <>
-                                                    <option value="Carlos">Carlos</option>
-                                                    <option value="Horacio">Horacio</option>
-                                                  </>
-                                                ) : item.ruta?.includes("Ruta 1") ? (
-                                                  <>
-                                                    <option value="Juan">Juan</option>
-                                                    <option value="Julio">Julio</option>
-                                                  </>
-                                                ) : (
-                                                  <>
-                                                    <option value="Juan">Juan</option>
-                                                    <option value="Julio">Julio</option>
-                                                    <option value="Carlos">Carlos</option>
-                                                    <option value="Horacio">Horacio</option>
-                                                  </>
-                                                )}
-                                              </select>
+                                              <label className="text-[10px] text-rose-300 block mb-1 font-bold text-amber-300">👤 ¿Quién de la ruta causó el daño/rotura?</label>
+                                              <div className="grid grid-cols-2 gap-1.5">
+                                                {(item.ruta?.includes("Ruta 2") ? ["Carlos", "Horacio"] : item.ruta?.includes("Ruta 1") ? ["Juan", "Julio"] : ["Juan", "Julio", "Carlos", "Horacio"]).map(chofer => (
+                                                  <button
+                                                    type="button"
+                                                    key={chofer}
+                                                    onClick={() => {
+                                                      const updated = [...retornoFormState.items];
+                                                      updated[iIdx].responsableRuta = chofer;
+                                                      setRetornoFormState({ ...retornoFormState, items: updated });
+                                                    }}
+                                                    className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                                                      (it.responsableRuta || "Ninguno") === chofer ? "bg-amber-500 text-slate-950 border-amber-400" : "bg-slate-900 text-slate-300 border-slate-800"
+                                                    }`}
+                                                  >
+                                                    {chofer}
+                                                  </button>
+                                                ))}
+                                              </div>
                                             </div>
                                           )}
 
@@ -1661,10 +1711,21 @@
 
               <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl">
                 <label className="text-xs font-extrabold text-amber-300 block mb-2">✍️ ¿Quién está registrando esta incidencia?</label>
-                <select value={registradoPor} onChange={e => setRegistradoPor(e.target.value)} className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none">
-                  {USUARIOS_SISTEMA.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-                <p className="text-[10px] text-slate-400 mt-1.5">*(Choferes y pionetas avisan por WhatsApp; los registros en sistema los realiza el equipo administrativo/bodega).*</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {USUARIOS_SISTEMA.map(u => (
+                    <button
+                      type="button"
+                      key={u}
+                      onClick={() => setRegistradoPor(u)}
+                      className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                        registradoPor === u ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                      }`}
+                    >
+                      {u}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2">*(Choferes y pionetas avisan por WhatsApp; los registros en sistema los realiza el equipo administrativo/bodega).*</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1684,13 +1745,24 @@
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1">🚚 Ruta / Chofer</label>
-                  <select value={ruta} onChange={e => setRuta(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-semibold text-white outline-none">
-                    {RUTAS.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
+                  <label className="text-xs font-bold text-slate-300 block mb-2">🚚 Ruta / Chofer</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {RUTAS.map(r => (
+                      <button
+                        type="button"
+                        key={r}
+                        onClick={() => setRuta(r)}
+                        className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition cursor-pointer ${
+                          ruta === r ? "bg-amber-500/20 text-amber-300 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1">👷 Armador de Bodega</label>
+                  <label className="text-xs font-bold text-slate-300 block mb-2">👷 Armador de Bodega</label>
                   <div className="grid grid-cols-3 gap-2">
                     {ARMADORES.map(a => (
                       <button type="button" key={a} onClick={() => setArmador(a)} className={`py-2 px-1 rounded-xl text-xs font-black border transition cursor-pointer ${armador === a ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"}`}>
@@ -1720,7 +1792,7 @@
                   </p>
                   <span className="text-[10px] text-slate-400">💡 Autocompletado inteligente</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="sm:col-span-2 relative">
                     <label className="text-[11px] text-slate-400 block mb-1">Nombre del Producto *</label>
                     <input type="text" list="lista-catalogo" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
@@ -1732,11 +1804,22 @@
                     <label className="text-[11px] text-slate-400 block mb-1">Cantidad *</label>
                     <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
                   </div>
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Unidad</label>
-                    <select value={unidad} onChange={e => setUnidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-amber-300 outline-none">
-                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
+                </div>
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-2">Unidad</label>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {UNIDADES.map(u => (
+                      <button
+                        type="button"
+                        key={u}
+                        onClick={() => setUnidad(u)}
+                        className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                          unidad === u ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1746,7 +1829,7 @@
                   <p className="text-xs font-extrabold text-purple-300 uppercase">
                     {motivo === "AceptadoPorCliente" ? "2️⃣ Producto Alternativo que el Cliente Aceptó" : "2️⃣ Producto enviado físicamente por error"}
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-2 relative">
                       <label className="text-[11px] text-purple-300/80 block mb-1">Producto entregado *</label>
                       <input type="text" list="lista-catalogo" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Producto alternativo..." className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
@@ -1755,11 +1838,22 @@
                       <label className="text-[11px] text-purple-300/80 block mb-1">Cantidad *</label>
                       <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
                     </div>
-                    <div>
-                      <label className="text-[11px] text-purple-300/80 block mb-1">Unidad</label>
-                      <select value={unidadCruce} onChange={e => setUnidadCruce(e.target.value)} className="w-full bg-slate-900 border border-purple-700/60 rounded-xl px-4 py-2.5 text-sm font-semibold text-purple-300 outline-none">
-                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-purple-300/80 block mb-2">Unidad</label>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {UNIDADES.map(u => (
+                        <button
+                          type="button"
+                          key={u}
+                          onClick={() => setUnidadCruce(u)}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                            unidadCruce === u ? "bg-purple-500 text-slate-950 border-purple-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                          }`}
+                        >
+                          {u}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -2029,11 +2123,10 @@
                 )}
               </div>
 
-              {/* CUADRATURA AUTOMÁTICA CON DESPLIEGUE DE FACTURAS AL PRESIONAR */}
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
-                  Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente. <strong>Presiona cualquier producto para ver las facturas involucradas.</strong>
+                  Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente en estanterías según las incidencias de ruta y bodega.
                 </p>
 
                 {resumenInventario.length === 0 ? (
@@ -2041,59 +2134,31 @@
                     Sin desfases de inventario registrados esta semana. ¡Todo cuadrado!
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {resumenInventario.map((item, idx) => {
-                      const claveCuad = `${item.producto}_${item.unidad}`;
-                      const abiertoCuad = cuadraturaAbiertas[claveCuad] || false;
-
-                      return (
-                        <div key={idx} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden transition">
-                          <div
-                            onClick={() => toggleCuadraturaExpandida(claveCuad)}
-                            className="p-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-900/60 transition"
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className="text-amber-400 font-bold text-xs">{abiertoCuad ? "▼" : "▶"}</span>
-                              <div>
-                                <span className="font-black text-white text-base">{item.producto}</span>
-                                <span className="text-slate-400 text-xs ml-2 font-medium">({item.unidad})</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-6">
-                              <div className="text-right">
-                                <span className="text-[10px] text-slate-400 uppercase block">Sobra (+)</span>
-                                <span className="font-black text-emerald-400 text-base">{item.sobranteBodega > 0 ? `+${item.sobranteBodega}` : "—"}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-[10px] text-slate-400 uppercase block">Falta (-)</span>
-                                <span className="font-black text-rose-400 text-base">{item.faltanteBodega > 0 ? `-${item.faltanteBodega}` : "—"}</span>
-                              </div>
-                              <span className="text-xs bg-slate-900 text-amber-300 px-3 py-1.5 rounded-xl font-bold border border-slate-800">
-                                {abiertoCuad ? "Ocultar Facturas" : `Ver Facturas (${item.detallesFacturas.length})`}
-                              </span>
-                            </div>
-                          </div>
-
-                          {abiertoCuad && (
-                            <div className="bg-slate-900/90 p-4 border-t border-slate-800 space-y-2 text-xs">
-                              <p className="font-bold text-slate-300 uppercase tracking-wider mb-2">📄 Detalle de Facturas y Origen de la Incidencia:</p>
-                              {item.detallesFacturas.map((df, dIdx) => (
-                                <div key={dIdx} className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
-                                  <div>
-                                    <span className="font-black text-amber-300 text-sm">Fact #{df.factura}</span>
-                                    <span className="text-slate-300 ml-2">{df.detalle}</span>
-                                  </div>
-                                  <span className={`font-bold px-2.5 py-1 rounded-lg ${df.tipo === 'SOBRA_EN_BODEGA' ? 'bg-emerald-950 text-emerald-400 border border-emerald-900' : 'bg-rose-950 text-rose-400 border border-rose-900'}`}>
-                                    {df.tipo === 'SOBRA_EN_BODEGA' ? `+${df.cantidad}` : `-${df.cantidad}`}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs sm:text-sm">
+                      <thead className="bg-slate-950 text-slate-400 uppercase text-[11px]">
+                        <tr>
+                          <th className="p-4 rounded-l-xl">Producto</th>
+                          <th className="p-4">Unidades / Detalle</th>
+                          <th className="p-4 text-emerald-400">Sobra en Bodega (+)</th>
+                          <th className="p-4 text-rose-400">Falta en Bodega (-)</th>
+                          <th className="p-4 rounded-r-xl">Facturas / Origen</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {resumenInventario.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-950/40">
+                            <td className="p-4 font-black text-white">{item.producto}</td>
+                            <td className="p-4 text-slate-300 font-semibold">
+                              {Object.entries(item.unidadesDetalle).map(([u, c]) => `${c} ${u}`).join(" / ")}
+                            </td>
+                            <td className="p-4 font-black text-emerald-400 text-base">{item.sobranteBodega > 0 ? `+${item.sobranteBodega}` : "—"}</td>
+                            <td className="p-4 font-black text-rose-400 text-base">{item.faltanteBodega > 0 ? `-${item.faltanteBodega}` : "—"}</td>
+                            <td className="p-4 text-xs text-amber-300 font-semibold">#{item.facturas.join(", #")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
