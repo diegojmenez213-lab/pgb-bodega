@@ -849,7 +849,7 @@
               </div>
 
               <div className="mb-6 bg-gray-100 p-4 rounded text-xs">
-                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltas: {kpis.resueltas}</p>
+                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltos: {kpis.resueltas}</p>
               </div>
 
               <div className="space-y-4 text-xs">
@@ -1297,7 +1297,9 @@
                   <div className="flex-1">
                     <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  
+                  {/* FILTROS MEJORADOS CON ETIQUETAS VISIBLES */}
+                  <div className="flex flex-wrap items-center gap-2">
                     <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
                       {[{ id: "todos", label: "Estado: Todos" }, { id: "pendientes", label: "⏳ Pendientes" }, { id: "resueltos", label: "✅ Resueltos" }].map(f => (
                         <button
@@ -1328,8 +1330,16 @@
                       ))}
                     </div>
 
-                    <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} title="Fecha Desde" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none" />
-                    <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} title="Fecha Hasta" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 outline-none" />
+                    {/* FILTROS DE FECHA DESDE / HASTA CON ETIQUETAS */}
+                    <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+                      <span className="text-[10px] font-extrabold text-amber-400 whitespace-nowrap">📅 Desde:</span>
+                      <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} title="Fecha Desde" className="bg-transparent text-xs font-bold text-slate-200 outline-none cursor-pointer" />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+                      <span className="text-[10px] font-extrabold text-amber-400 whitespace-nowrap">📅 Hasta:</span>
+                      <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} title="Fecha Hasta" className="bg-transparent text-xs font-bold text-slate-200 outline-none cursor-pointer" />
+                    </div>
                   </div>
                 </div>
               </div>
