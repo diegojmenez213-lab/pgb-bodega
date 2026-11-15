@@ -849,7 +849,7 @@
               </div>
 
               <div className="mb-6 bg-gray-100 p-4 rounded text-xs">
-                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltos: {kpis.resueltas}</p>
+                <p><strong>Resumen Ejecutivo:</strong> Total Registros: {kpis.total} | Pendientes: {kpis.pendientes} | Resueltas: {kpis.resueltas}</p>
               </div>
 
               <div className="space-y-4 text-xs">
@@ -1292,53 +1292,88 @@
 
           {vista === "dashboard" && (
             <div className="space-y-4 no-print">
-              <div className="glass-card rounded-2xl p-4 shadow-lg space-y-3">
-                <div className="flex flex-col lg:flex-row gap-3">
-                  <div className="flex-1">
-                    <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
-                  </div>
-                  
-                  {/* FILTROS MEJORADOS CON ETIQUETAS VISIBLES */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
-                      {[{ id: "todos", label: "Estado: Todos" }, { id: "pendientes", label: "⏳ Pendientes" }, { id: "resueltos", label: "✅ Resueltos" }].map(f => (
+              <div className="glass-card rounded-2xl p-4 shadow-lg space-y-4">
+                <div className="w-full">
+                  <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
+                </div>
+
+                {/* FILTROS MEJORADOS EN CUADRÍCULA (SIN DESBORDAR) */}
+                <div className="space-y-3 pt-2 border-t border-slate-800/80">
+                  <div>
+                    <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1.5">Filtrar por Estado:</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[{ id: "todos", label: "Todos" }, { id: "pendientes", label: "⏳ Pendientes" }, { id: "resueltos", label: "✅ Resueltos" }].map(f => (
                         <button
                           key={f.id}
                           onClick={() => setFiltroEstado(f.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${filtroEstado === f.id ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                            filtroEstado === f.id ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                          }`}
                         >
                           {f.label}
                         </button>
                       ))}
                     </div>
+                  </div>
 
-                    <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
+                  <div>
+                    <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1.5">Filtrar por Armador:</label>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                       <button
                         onClick={() => setFiltroArmador("todos")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${filtroArmador === "todos" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                        className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                          filtroArmador === "todos" ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                        }`}
                       >
-                        Armador: Todos
+                        Todos
                       </button>
                       {ARMADORES.map(a => (
                         <button
                           key={a}
                           onClick={() => setFiltroArmador(a)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${filtroArmador === a ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"}`}
+                          className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                            filtroArmador === a ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                          }`}
                         >
                           {a}
                         </button>
                       ))}
                     </div>
+                  </div>
 
-                    {/* FILTROS DE FECHA DESDE / HASTA CON ETIQUETAS */}
-                    <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
-                      <span className="text-[10px] font-extrabold text-amber-400 whitespace-nowrap">📅 Desde:</span>
-                      <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} title="Fecha Desde" className="bg-transparent text-xs font-bold text-slate-200 outline-none cursor-pointer" />
+                  <div>
+                    <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1.5">Filtrar por Ruta:</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        onClick={() => setFiltroRuta("todos")}
+                        className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-left ${
+                          filtroRuta === "todos" ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                        }`}
+                      >
+                        Todas las rutas
+                      </button>
+                      {RUTAS.map(r => (
+                        <button
+                          key={r}
+                          onClick={() => setFiltroRuta(r)}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-left ${
+                            filtroRuta === r ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
                     </div>
+                  </div>
 
-                    <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
-                      <span className="text-[10px] font-extrabold text-amber-400 whitespace-nowrap">📅 Hasta:</span>
-                      <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} title="Fecha Hasta" className="bg-transparent text-xs font-bold text-slate-200 outline-none cursor-pointer" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                      <span className="text-[10px] font-extrabold text-amber-400 block mb-1">📅 Desde:</span>
+                      <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)} className="w-full bg-transparent text-xs font-bold text-slate-200 outline-none cursor-pointer" />
+                    </div>
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                      <span className="text-[10px] font-extrabold text-amber-400 block mb-1">📅 Hasta:</span>
+                      <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)} className="w-full bg-transparent text-xs font-bold text-slate-200 outline-none cursor-pointer" />
                     </div>
                   </div>
                 </div>
