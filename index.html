@@ -55,7 +55,11 @@
       { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado", fisico: true }
     ];
     const ARMADORES = ["Diego", "Nico", "Edwin", "Julio", "Horacio", "Sra. Rosa"];
-    const RUTAS = ["Ruta 1 (Juan / Julio)", "Ruta 2 (Carlos / Horacio)", "Retiro Bodega / Otra"];
+    const RUTAS_BASE = ["Ruta 1", "Ruta 2", "Ruta Alternativa"];
+    const EQUIPO_RUTA_ALTERNATIVA = ["Pedro", "Juan", "Carlos", "Horacio", "Julio", "Nico", "Diego", "Edwin"];
+    const JERARQUIA_CHOFERES = ["Pedro", "Juan", "Carlos", "Nico"];
+    const SOLO_PIONETAS = ["Julio", "Horacio", "Edwin", "Diego"];
+
     const USUARIOS_SISTEMA = ["Edwin", "Nico", "Diego", "Bedanli", "Pedro", "Gabriel"];
     const PERSONAL_EQUIPO = ["Nico", "Edwin", "Horacio", "Julio", "Juan", "Sra. Rosa", "Diego", "Bedanli", "Pedro", "Gabriel", "Carlos"];
     const MOTIVOS_BODEGA_INTERNA = [
@@ -83,6 +87,24 @@
     const normalizarProd = (str) => {
       if (!str) return "";
       return str.trim().replace(/\s+/g, ' ').toUpperCase();
+    };
+
+    // Determina silenciosamente los roles (Chofer vs Pioneta) según jerarquía
+    const resolverRolesRutaAlternativa = (seleccionados) => {
+      if (!seleccionados || seleccionados.length === 0) return { chofer: "", pioneta: "", texto: "Ruta Alternativa" };
+      const ordenados = [...seleccionados].sort((a, b) => {
+        const idxA = JERARQUIA_CHOFERES.indexOf(a);
+        const idxB = JERARQUIA_CHOFERES.indexOf(b);
+        const rankA = idxA !== -1 ? idxA : 99;
+        const rankB = idxB !== -1 ? idxB : 99;
+        return rankA - rankB;
+      });
+      const chofer = ordenados[0];
+      const pioneta = ordenados[1] || "";
+      const texto = pioneta
+        ? `Ruta Alternativa (Chofer: ${chofer} / Pioneta: ${pioneta})`
+        : `Ruta Alternativa (Chofer: ${chofer})`;
+      return { chofer, pioneta, texto };
     };
 
     function App() {
@@ -129,7 +151,8 @@
       const [factura, setFactura] = useState("");
       const [cliente, setCliente] = useState("");
       const [fecha, setFecha] = useState(hoy);
-      const [ruta, setRuta] = useState(RUTAS[0]);
+      const [rutaTipo, setRutaTipo] = useState("Ruta 1");
+      const [equipoAlternativo, setEquipoAlternativo] = useState(["Pedro"]);
       const [armador, setArmador] = useState(ARMADORES[0]);
       const [registradoPor, setRegistradoPor] = useState("Diego");
       const [motivo, setMotivo] = useState("Faltante");
@@ -142,7 +165,6 @@
       const [cantidadCruce, setCantidadCruce] = useState(1);
       const [unidadCruce, setUnidadCruce] = useState(UNIDADES[0]);
 
-      // ESTADOS PARA ERROR DE FACTURACIÓN
       const [productoMalFacturado, setProductoMalFacturado] = useState("");
       const [cantidadMalFacturada, setCantidadMalFacturada] = useState(1);
       const [unidadMalFacturada, setUnidadMalFacturada] = useState(UNIDADES[0]);
@@ -155,17 +177,32 @@
       const [accionesSeleccionadas, setAccionesSeleccionadas] = useState(["Ajustar Inventario en Bodega"]);
       const [notas, setNotas] = useState("");
 
+      const toggleIntegranteAlternativo = (nombre) => {
+        if (equipoAlternativo.includes(nombre)) {
+          if (equipoAlternativo.length === 1) return;
+          setEquipoAlternativo(equipoAlternativo.filter(n => n !== nombre));
+        } else {
+          // Si ya hay 2 seleccionados, reemplaza el segundo manteniendo la regla de al menos un chofer válido
+          let nuevaLista = equipoAlternativo.length >= 2 ? [equipoAlternativo[0], nombre] : [...equipoAlternativo, nombre];
+          const tieneChofer = nuevaLista.some(n => JERARQUIA_CHOFERES.includes(n));
+          if (!tieneChofer) {
+            return alert("Debe haber al menos un chofer habilitado (Pedro, Juan, Carlos o Nico) en la ruta.");
+          }
+          setEquipoAlternativo(nuevaLista);
+        }
+      };
+
       const personalRutaActual = useMemo(() => {
-        if (ruta.includes("Ruta 1")) return ["Juan", "Julio"];
-        if (ruta.includes("Ruta 2")) return ["Carlos", "Horacio"];
-        return ["Diego", "Nico", "Edwin", "Julio", "Horacio"];
-      }, [ruta]);
+        if (rutaTipo === "Ruta 1") return ["Juan", "Julio"];
+        if (rutaTipo === "Ruta 2") return ["Carlos", "Horacio"];
+        return equipoAlternativo.length > 0 ? equipoAlternativo : EQUIPO_RUTA_ALTERNATIVA;
+      }, [rutaTipo, equipoAlternativo]);
 
       useEffect(() => {
         if (!personalRutaActual.includes(responsableDanio)) {
           setResponsableDanio(personalRutaActual[0]);
         }
-      }, [ruta, personalRutaActual]);
+      }, [rutaTipo, personalRutaActual]);
 
       useEffect(() => {
         auth.signInAnonymously().catch(() => {});
@@ -223,6 +260,8 @@
         setProductoCruce(""); setCantidadCruce(1); setUnidadCruce(UNIDADES[0]);
         setProductoMalFacturado(""); setCantidadMalFacturada(1); setUnidadMalFacturada(UNIDADES[0]);
         setNotas(""); setEditandoId(null);
+        setRutaTipo("Ruta 1");
+        setEquipoAlternativo(["Pedro"]);
         setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
         setCausaDanio(CAUSAS_DANIO_RUTA[0]);
         setDanioTotalForm(true);
@@ -300,6 +339,23 @@
         if (motivo !== "ErrorFacturacion" && !producto.trim()) return alert("Completa el Producto.");
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && !productoCruce.trim()) return alert("Indica el producto alternativo o enviado por error.");
         if (motivo === "ErrorFacturacion" && !productoMalFacturado.trim()) return alert("Indica qué producto se envió mal facturado por el vendedor.");
+        if (rutaTipo === "Ruta Alternativa" && !equipoAlternativo.some(n => JERARQUIA_CHOFERES.includes(n))) {
+          return alert("Selecciona al menos un chofer válido en la Ruta Alternativa.");
+        }
+
+        let rutaTextoFinal = rutaTipo;
+        let integrantesRuta = [];
+        if (rutaTipo === "Ruta 1") {
+          rutaTextoFinal = "Ruta 1 (Juan / Julio)";
+          integrantesRuta = ["Juan", "Julio"];
+        } else if (rutaTipo === "Ruta 2") {
+          rutaTextoFinal = "Ruta 2 (Carlos / Horacio)";
+          integrantesRuta = ["Carlos", "Horacio"];
+        } else {
+          const roles = resolverRolesRutaAlternativa(equipoAlternativo);
+          rutaTextoFinal = roles.texto;
+          integrantesRuta = equipoAlternativo;
+        }
 
         const prodPrincipal = motivo === "ErrorFacturacion" ? normalizarProd(productoMalFacturado) : normalizarProd(producto);
         const cantPrincipal = motivo === "ErrorFacturacion" ? Number(cantidadMalFacturada) : Number(cantidad);
@@ -351,7 +407,9 @@
           factura: factura.trim(),
           cliente: cliente.trim(),
           fecha,
-          ruta,
+          ruta: rutaTextoFinal,
+          rutaTipo,
+          integrantesRuta,
           armador,
           registradoPor,
           motivo,
@@ -746,7 +804,21 @@
       const cargarParaEditar = (item) => {
         setEditandoId(item.id);
         setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || hoy);
-        setRuta(item.ruta || RUTAS[0]); setArmador(item.armador || ARMADORES[0]);
+        
+        if (item.rutaTipo) {
+          setRutaTipo(item.rutaTipo);
+          if (item.integrantesRuta && item.integrantesRuta.length > 0) {
+            setEquipoAlternativo(item.integrantesRuta);
+          }
+        } else if (item.ruta?.includes("Ruta 2")) {
+          setRutaTipo("Ruta 2");
+        } else if (item.ruta?.includes("Alternativa")) {
+          setRutaTipo("Ruta Alternativa");
+        } else {
+          setRutaTipo("Ruta 1");
+        }
+
+        setArmador(item.armador || ARMADORES[0]);
         setRegistradoPor(item.registradoPor || "Diego"); setMotivo(item.motivo || "Faltante");
         
         if (item.motivo === "ErrorFacturacion") {
@@ -838,7 +910,7 @@
           if ((i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente") && i.productoCruce) {
             texto += `   • Alt/Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
           }
-          texto += `   • Armó: ${i.armador} | Registró: ${i.registradoPor || 'N/A'}\n`;
+          texto += `   • Ruta: ${i.ruta} | Armó: ${i.armador}\n`;
           texto += `   • Acciones: ${acs}\n\n`;
         });
         navigator.clipboard.writeText(texto);
@@ -858,10 +930,10 @@
 
       const incidenciasFiltradas = useMemo(() => {
         return incidencias.filter(item => {
-          const coincideTexto = item.factura?.toLowerCase().includes(busqueda.toLowerCase()) || item.producto?.toLowerCase().includes(busqueda.toLowerCase()) || item.cliente?.toLowerCase().includes(busqueda.toLowerCase()) || item.registradoPor?.toLowerCase().includes(busqueda.toLowerCase()) || item.armador?.toLowerCase().includes(busqueda.toLowerCase());
+          const coincideTexto = item.factura?.toLowerCase().includes(busqueda.toLowerCase()) || item.producto?.toLowerCase().includes(busqueda.toLowerCase()) || item.cliente?.toLowerCase().includes(busqueda.toLowerCase()) || item.registradoPor?.toLowerCase().includes(busqueda.toLowerCase()) || item.armador?.toLowerCase().includes(busqueda.toLowerCase()) || item.ruta?.toLowerCase().includes(busqueda.toLowerCase());
           const coincideEstado = filtroEstado === "todos" ? true : filtroEstado === "pendientes" ? !item.resuelto : item.resuelto;
           const coincideArmador = filtroArmador === "todos" ? true : item.armador === filtroArmador;
-          const coincideRuta = filtroRuta === "todos" ? true : item.ruta === filtroRuta;
+          const coincideRuta = filtroRuta === "todos" ? true : (item.rutaTipo === filtroRuta || item.ruta?.startsWith(filtroRuta));
           
           let coincideFecha = true;
           if (filtroFechaDesde && item.fecha < filtroFechaDesde) coincideFecha = false;
@@ -1453,20 +1525,20 @@
 
                   <div>
                     <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1.5">Filtrar por Ruta:</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <button
                         onClick={() => setFiltroRuta("todos")}
-                        className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-left ${
+                        className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
                           filtroRuta === "todos" ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
                         }`}
                       >
-                        Todas las rutas
+                        Todas
                       </button>
-                      {RUTAS.map(r => (
+                      {RUTAS_BASE.map(r => (
                         <button
                           key={r}
                           onClick={() => setFiltroRuta(r)}
-                          className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-left ${
+                          className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
                             filtroRuta === r ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
                           }`}
                         >
@@ -1515,6 +1587,14 @@
                     const checksMap = item.checksAcciones || {};
                     const incluyeRetorno = accionesLista.includes("Chofer Retorna Producto a Bodega");
                     const estaRecibiendo = recibiendoRetornoId === item.id;
+
+                    const choferesPosibles = item.integrantesRuta && item.integrantesRuta.length > 0
+                      ? item.integrantesRuta
+                      : item.ruta?.includes("Ruta 2")
+                        ? ["Carlos", "Horacio"]
+                        : item.ruta?.includes("Ruta 1")
+                          ? ["Juan", "Julio"]
+                          : EQUIPO_RUTA_ALTERNATIVA;
 
                     return (
                       <div key={item.id} className={`glass-card rounded-2xl p-5 border transition shadow-lg flex flex-col justify-between ${item.resuelto ? "border-emerald-900/50 opacity-85" : "border-slate-800 hover:border-slate-700"}`}>
@@ -1661,7 +1741,7 @@
                                             <div>
                                               <label className="text-[10px] text-rose-300 block mb-1 font-bold text-amber-300">👤 ¿Quién de la ruta causó el daño/rotura?</label>
                                               <div className="grid grid-cols-2 gap-1.5">
-                                                {(item.ruta?.includes("Ruta 2") ? ["Carlos", "Horacio"] : item.ruta?.includes("Ruta 1") ? ["Juan", "Julio"] : ["Juan", "Julio", "Carlos", "Horacio"]).map(chofer => (
+                                                {choferesPosibles.map(chofer => (
                                                   <button
                                                     type="button"
                                                     key={chofer}
@@ -1790,7 +1870,7 @@
                           <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 mb-3 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
                             <span>👷 Armó: <strong className="text-white">{item.armador}</strong></span>
                             <span>✍️ Registró: <strong className="text-amber-400">{item.registradoPor || 'N/A'}</strong></span>
-                            <span className="col-span-2">🚚 Ruta: {item.ruta}</span>
+                            <span className="col-span-2">🚚 Ruta: <strong className="text-slate-200">{item.ruta}</strong></span>
                           </div>
 
                           {item.notas && (
@@ -1913,21 +1993,48 @@
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-2">🚚 Ruta / Chofer</label>
-                  <div className="grid grid-cols-1 gap-2">
-                    {RUTAS.map(r => (
+                  <div className="grid grid-cols-3 gap-2">
+                    {RUTAS_BASE.map(r => (
                       <button
                         type="button"
                         key={r}
-                        onClick={() => setRuta(r)}
-                        className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition cursor-pointer ${
-                          ruta === r ? "bg-amber-500/20 text-amber-300 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                        onClick={() => setRutaTipo(r)}
+                        className={`py-2.5 px-2 rounded-xl text-xs font-black border text-center transition cursor-pointer ${
+                          rutaTipo === r ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
                         }`}
                       >
                         {r}
                       </button>
                     ))}
                   </div>
+
+                  {/* DESPLIEGUE DE EQUIPO PARA RUTA ALTERNATIVA */}
+                  {rutaTipo === "Ruta Alternativa" && (
+                    <div className="mt-3 p-3 bg-slate-950 rounded-2xl border border-amber-500/30 space-y-2">
+                      <label className="text-[11px] font-bold text-amber-300 block">
+                        Selecciona quiénes salieron en esta ruta (máx 2):
+                      </label>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {EQUIPO_RUTA_ALTERNATIVA.map(nombre => {
+                          const activo = equipoAlternativo.includes(nombre);
+                          return (
+                            <button
+                              type="button"
+                              key={nombre}
+                              onClick={() => toggleIntegranteAlternativo(nombre)}
+                              className={`py-2 px-1 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                activo ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                              }`}
+                            >
+                              {nombre}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-2">👷 Armador de Bodega</label>
                   <div className="grid grid-cols-3 gap-2">
@@ -1952,7 +2059,6 @@
                 </div>
               </div>
 
-              {/* PANEL ESPECÍFICO CUANDO SE SELECCIONA ERROR DE FACTURACIÓN */}
               {motivo === "ErrorFacturacion" ? (
                 <div className="bg-indigo-950/30 p-4 rounded-2xl border border-indigo-700/60 space-y-3">
                   <div className="flex justify-between items-center">
@@ -2063,7 +2169,7 @@
                   {causaDanio.includes("manipulación") && (
                     <div>
                       <label className="text-[11px] text-amber-300 font-bold block mb-2">
-                        👤 Responsable de la Ruta ({ruta}):
+                        👤 Responsable de la Ruta ({rutaTipo}):
                       </label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {personalRutaActual.map(p => (
