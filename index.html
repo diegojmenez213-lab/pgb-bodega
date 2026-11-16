@@ -27,7 +27,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -187,6 +187,8 @@
       const [accionesSeleccionadas, setAccionesSeleccionadas] = useState(["Ajustar Inventario en Bodega"]);
       const [notas, setNotas] = useState("");
 
+      const sincronizandoRef = useRef(false);
+
       const toggleIntegranteAlternativo = (nombre) => {
         if (equipoAlternativo.includes(nombre)) {
           if (equipoAlternativo.length === 1) return;
@@ -255,6 +257,58 @@
         return () => { unsubInc(); unsubIncBodega(); unsubCierres(); unsubCat(); unsubHistInv(); unsubConteo(); };
       }, []);
 
+      // SINCRONIZACIÓN AUTOMÁTICA: ASEGURA QUE TODA INCIDENCIA PENDIENTE DE AJUSTE DE INVENTARIO ESTÉ EN CONTEO CÍCLICO
+      useEffect(() => {
+        if (!conectado || sincronizandoRef.current) return;
+
+        const sincronizarPendientesFaltantes = async () => {
+          sincronizandoRef.current = true;
+          try {
+            for (const inc of incidencias) {
+              const requiereAjuste = (inc.acciones || []).includes("Ajustar Inventario en Bodega");
+              const yaAjustado = inc.checksAcciones?.["Ajustar Inventario en Bodega"]?.completado;
+              const motivoObj = MOTIVOS.find(m => m.id === inc.motivo);
+              const esFisico = motivoObj ? motivoObj.fisico : true;
+
+              if (requiereAjuste && !yaAjustado && esFisico && inc.motivo !== "AceptadoPorCliente" && inc.motivo !== "ErrorFacturacion") {
+                const prodNorm = normalizarProd(inc.producto);
+                const uniNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? inc.detalleDanio.unidadDanada : inc.unidad;
+                const cantNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? Number(inc.detalleDanio.cantidadDanada) : Number(inc.cantidad);
+
+                const yaEnConteo = conteoPendiente.some(cp =>
+                  cp.producto === prodNorm &&
+                  cp.unidad === uniNorm &&
+                  cp.factura && cp.factura.includes(inc.factura)
+                );
+
+                if (!yaEnConteo) {
+                  await registrarConteoPendiente(prodNorm, uniNorm, cantNorm, inc.factura);
+                }
+
+                if (inc.motivo === "Cruce" && inc.productoCruce) {
+                  const prodCruceN = normalizarProd(inc.productoCruce);
+                  const yaEnConteoCruce = conteoPendiente.some(cp =>
+                    cp.producto === prodCruceN &&
+                    cp.unidad === inc.unidadCruce &&
+                    cp.factura && cp.factura.includes(inc.factura)
+                  );
+                  if (!yaEnConteoCruce) {
+                    await registrarConteoPendiente(prodCruceN, inc.unidadCruce, Number(inc.cantidadCruce), inc.factura);
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          } finally {
+            sincronizandoRef.current = false;
+          }
+        };
+
+        const timer = setTimeout(sincronizarPendientesFaltantes, 800);
+        return () => clearTimeout(timer);
+      }, [incidencias, conteoPendiente, conectado]);
+
       const seleccionarMotivo = (nuevoMotivo) => {
         setMotivo(nuevoMotivo);
         if (nuevoMotivo === "ErrorFacturacion") {
@@ -289,11 +343,15 @@
       const registrarConteoPendiente = async (prod, uni, cant, fact) => {
         try {
           const prodNorm = normalizarProd(prod);
-          const existente = conteoPendiente.find(cp => cp.producto === prodNorm && cp.unidad === uni);
-          if (existente) {
-            const nuevaCantidad = (Number(existente.cantidad) || 0) + Number(cant);
-            const nuevasFacturas = existente.factura.includes(fact) ? existente.factura : `${existente.factura}, #${fact}`;
-            await db.collection("conteo_pendiente").doc(existente.id).update({
+          const snap = await db.collection("conteo_pendiente").where("producto", "==", prodNorm).get();
+          const existenteDoc = snap.docs.find(d => d.data().unidad === uni);
+
+          if (existenteDoc) {
+            const dataExist = existenteDoc.data();
+            if (dataExist.factura && dataExist.factura.includes(fact)) return; // Ya está sumada esta factura
+            const nuevaCantidad = (Number(dataExist.cantidad) || 0) + Number(cant);
+            const nuevasFacturas = dataExist.factura ? `${dataExist.factura}, #${fact}` : fact;
+            await db.collection("conteo_pendiente").doc(existenteDoc.id).update({
               cantidad: nuevaCantidad,
               factura: nuevasFacturas,
               timestamp: Date.now()
@@ -313,7 +371,7 @@
               timestamp: Date.now()
             });
           }
-        } catch (err) {}
+        } catch (err) { console.error(err); }
       };
 
       const eliminarProductoCatalogo = async (id, e) => {
@@ -446,8 +504,14 @@
 
         try {
           if (editandoId) {
+            const incAnterior = incidencias.find(i => i.id === editandoId);
+            const checksAnteriores = incAnterior?.checksAcciones || {};
+            const nuevosChecks = {};
+            accionesSeleccionadas.forEach(ac => {
+              nuevosChecks[ac] = checksAnteriores[ac] || { completado: false, por: "", fechaHora: "" };
+            });
+            datos.checksAcciones = nuevosChecks;
             delete datos.timestamp;
-            delete datos.checksAcciones;
             delete datos.retornoBodegaInfo;
             await db.collection("incidencias").doc(editandoId).update(datos);
           } else {
@@ -661,6 +725,7 @@
             ? `Conteo Cíclico Digital (Stock físico contado: ${itemConteo.cantidadContada} ${itemConteo.unidad} | Desfase reportado: ${itemConteo.cantidad} ${itemConteo.unidad})`
             : `Conteo Cíclico Físico (Cantidad ajustada: ${itemConteo.cantidad} ${itemConteo.unidad} — Ref Fact #${itemConteo.factura})`;
 
+          // 1. Guarda en el Historial Acumulativo
           await registrarEnHistorialInventario(
             itemConteo.producto,
             itemConteo.unidad,
@@ -672,11 +737,14 @@
             detalleTexto
           );
 
+          // 2. Marca como completada la acción en todas las incidencias vinculadas
           const facturasAsociadas = itemConteo.factura.split(",").map(f => f.replace("#", "").trim());
           for (const inc of incidencias) {
-            if (facturasAsociadas.includes(inc.factura) && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto)) {
+            const prodNormInc = normalizarProd(inc.producto);
+            const prodCruceInc = inc.productoCruce ? normalizarProd(inc.productoCruce) : "";
+            if (facturasAsociadas.includes(inc.factura) && (prodNormInc === itemConteo.producto || prodCruceInc === itemConteo.producto)) {
               const checks = inc.checksAcciones || {};
-              if (checks["Ajustar Inventario en Bodega"]) {
+              if ((inc.acciones || []).includes("Ajustar Inventario en Bodega")) {
                 checks["Ajustar Inventario en Bodega"] = {
                   completado: true,
                   por: resp.trim(),
@@ -691,6 +759,7 @@
             }
           }
 
+          // 3. Elimina el ítem de conteo pendiente
           await db.collection("conteo_pendiente").doc(id).delete();
 
           setSeleccionadosConteoDigital(prev => {
@@ -797,17 +866,28 @@
 
         const checks = incidenciaActual.checksAcciones || {};
         const ahora = new Date().toLocaleString("es-CL");
+        const nuevoEstado = !estadoActual;
 
         checks[accionNombre] = {
-          completado: !estadoActual,
+          completado: nuevoEstado,
           por: usuarioActual.trim(),
-          fechaHora: !estadoActual ? ahora : ""
+          fechaHora: nuevoEstado ? ahora : ""
         };
 
-        if (!estadoActual && accionNombre.includes("Inventario")) {
-          await registrarEnHistorialInventario(incidenciaActual.producto, incidenciaActual.unidad, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Directo en Ruta (${incidenciaActual.cantidad} ${incidenciaActual.unidad})`);
+        if (nuevoEstado && accionNombre.includes("Inventario")) {
+          const cantAjuste = (incidenciaActual.motivo === "Daño/Merma" && incidenciaActual.detalleDanio) ? incidenciaActual.detalleDanio.cantidadDanada : incidenciaActual.cantidad;
+          const uniAjuste = (incidenciaActual.motivo === "Daño/Merma" && incidenciaActual.detalleDanio) ? incidenciaActual.detalleDanio.unidadDanada : incidenciaActual.unidad;
+
+          await registrarEnHistorialInventario(incidenciaActual.producto, uniAjuste, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Directo en Ruta (${cantAjuste} ${uniAjuste})`);
           if (incidenciaActual.productoCruce) {
             await registrarEnHistorialInventario(incidenciaActual.productoCruce, incidenciaActual.unidadCruce, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Cruce en Ruta (${incidenciaActual.cantidadCruce} ${incidenciaActual.unidadCruce})`);
+          }
+
+          // También limpia si estaba en conteo pendiente
+          const prodNorm = normalizarProd(incidenciaActual.producto);
+          const cpAsociado = conteoPendiente.find(cp => cp.producto === prodNorm && cp.factura && cp.factura.includes(incidenciaActual.factura));
+          if (cpAsociado) {
+            await db.collection("conteo_pendiente").doc(cpAsociado.id).delete();
           }
         }
 
@@ -1081,7 +1161,6 @@
 
           {/* BARRA LATERAL ESTILO ERP CORPORATIVO SOLO EN PC (lg:flex) */}
           <aside className="hidden lg:flex lg:flex-col lg:w-72 lg:fixed lg:inset-y-0 bg-gradient-to-b from-amber-600 via-amber-600 to-orange-700 text-white shadow-2xl z-30 no-print">
-            {/* Cabecera Corporativa del Sidebar */}
             <div className="p-5 bg-amber-700/80 border-b border-amber-500/40">
               <div className="flex items-center gap-2 mb-2">
                 <span className={`h-2.5 w-2.5 rounded-full ${conectado ? 'bg-emerald-300 animate-ping' : 'bg-white'}`}></span>
@@ -1097,7 +1176,6 @@
               </div>
             </div>
 
-            {/* Lista Vertical de Navegación */}
             <nav className="flex-1 divide-y divide-amber-500/30 overflow-y-auto">
               <button
                 onClick={() => setVista("dashboard")}
@@ -1210,7 +1288,7 @@
             </div>
           </aside>
 
-          {/* CONTENIDO PRINCIPAL (SE ADAPTA CON MARGEN IZQUIERDO EN PC) */}
+          {/* CONTENIDO PRINCIPAL */}
           <div className="flex-1 lg:pl-72">
             <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
               
@@ -1483,7 +1561,6 @@
                     </p>
                   </div>
 
-                  {/* Botones de acción rápida en móvil (en PC están en el sidebar lateral) */}
                   <div className="flex flex-wrap gap-2.5 lg:hidden">
                     <button onClick={copiarResumenWhatsApp} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm px-4 py-3 rounded-2xl shadow-sm transition cursor-pointer">
                       📲 Copiar a WhatsApp
@@ -1496,7 +1573,6 @@
                     </button>
                   </div>
 
-                  {/* Botón rápido en PC */}
                   <div className="hidden lg:block">
                     <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-sm px-6 py-3.5 rounded-2xl shadow-md transition cursor-pointer">
                       ➕ Registrar Nueva Incidencia
@@ -1705,7 +1781,6 @@
                       <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
                     </div>
 
-                    {/* FILTROS EN PC: ESTILO COMPACTO EN UNA SOLA FILA */}
                     <div className="hidden lg:grid lg:grid-cols-5 gap-3 pt-2 border-t border-slate-200">
                       <div>
                         <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Estado:</label>
@@ -1739,7 +1814,6 @@
                       </div>
                     </div>
 
-                    {/* FILTROS EN TELÉFONO/TABLET: MISMA CUADRÍCULA DE BOTONES TÁCTILES */}
                     <div className="space-y-3 pt-2 border-t border-slate-200 lg:hidden">
                       <div>
                         <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1.5">Filtrar por Estado:</label>
@@ -2593,7 +2667,6 @@
                       </div>
                     </div>
 
-                    {/* BARRA APILADA DEL 100% */}
                     <div className="mb-6">
                       <div className="flex justify-between text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">
                         <span>0%</span>
@@ -2625,7 +2698,6 @@
                       </div>
                     </div>
 
-                    {/* GRÁFICO CIRCULAR (DONA 100%) + LEYENDA DETALLADA */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center pt-2">
                       <div className="flex flex-col items-center justify-center">
                         <div
