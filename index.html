@@ -60,6 +60,7 @@
     const MOTIVOS_BODEGA_INTERNA = [
       "Rotura accidental en pasillo",
       "Compra personal (Descuento sueldo)",
+      "Consumo / Uso interno bodega",
       "Dañado de fábrica (Mal sellado)",
       "Pérdida o extravío interno"
     ];
@@ -406,6 +407,7 @@
             unidad: uniBodega,
             motivo: motivoBodega,
             responsable: responsableBodega,
+            notas: notasBodega.trim(),
             registradoPor: "Equipo Bodega",
             ajustado: false,
             ajustadoPor: "",
@@ -850,7 +852,6 @@
         return Object.values(mapa);
       }, [historialInventario]);
 
-      // CUADRATURA AUTOMÁTICA: SOLO MUESTRA LO QUE AÚN ESTÁ PENDIENTE DE AJUSTE
       const resumenInventario = useMemo(() => {
         const mapa = {};
         const sumar = (prod, uni, cant, tipo, fact) => {
@@ -869,7 +870,7 @@
 
         incidencias.forEach(inc => {
           const ajusteYaHecho = inc.checksAcciones?.["Ajustar Inventario en Bodega"]?.completado;
-          if (ajusteYaHecho) return; // Si ya se corrigió el inventario, no debe aparecer como pendiente en cuadratura
+          if (ajusteYaHecho) return;
 
           if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
           else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura);
@@ -882,7 +883,7 @@
         });
 
         incidentesBodega.forEach(ib => {
-          if (!ib.ajustado) { // Solo los pendientes de ajuste en bodega
+          if (!ib.ajustado) {
             sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT");
           }
         });
@@ -1225,7 +1226,7 @@
                   <div>
                     <h2 className="text-xl font-black text-amber-400">🏢 Registro de Incidentes y Mermas en Bodega</h2>
                     <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                      Control interno de roturas en pasillo, consumos de personal (descuento sueldo) y defectos de fábrica.
+                      Control interno de roturas, consumo para uso de bodega, compras de personal y defectos de fábrica.
                     </p>
                   </div>
                   <button
@@ -1311,7 +1312,7 @@
 
                   <div>
                     <label className="text-xs text-slate-400 block mb-1">Notas Opcionales</label>
-                    <input type="text" value={notasBodega} onChange={e => setNotasBodega(e.target.value)} placeholder="Ej: Se cayó de la repisa superior..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" />
+                    <input type="text" value={notasBodega} onChange={e => setNotasBodega(e.target.value)} placeholder="Ej: Se abrió para uso en oficina/bodega..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" />
                   </div>
 
                   <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-xs sm:text-sm shadow-lg transition cursor-pointer">
