@@ -44,7 +44,7 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    const UNIDADES = ["Unidad", "Caja", "Manga", "Fardo", "Unidad suelta", "Display", "Pack"];
+    const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
     const MOTIVOS = [
       { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)", fisico: true },
       { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)", fisico: true },
@@ -140,7 +140,6 @@
       const [cantidadCruce, setCantidadCruce] = useState(1);
       const [unidadCruce, setUnidadCruce] = useState(UNIDADES[0]);
 
-      // ESTADOS ESPECÍFICOS PARA DAÑO / MERMA EN RUTA
       const [causaDanio, setCausaDanio] = useState(CAUSAS_DANIO_RUTA[0]);
       const [responsableDanio, setResponsableDanio] = useState("Juan");
       const [danioTotalForm, setDanioTotalForm] = useState(true);
@@ -149,7 +148,6 @@
       const [accionesSeleccionadas, setAccionesSeleccionadas] = useState(["Ajustar Inventario en Bodega"]);
       const [notas, setNotas] = useState("");
 
-      // Personal disponible según ruta seleccionada
       const personalRutaActual = useMemo(() => {
         if (ruta.includes("Ruta 1")) return ["Juan", "Julio"];
         if (ruta.includes("Ruta 2")) return ["Carlos", "Horacio"];
@@ -727,9 +725,9 @@
         setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || hoy);
         setRuta(item.ruta || RUTAS[0]); setArmador(item.armador || ARMADORES[0]);
         setRegistradoPor(item.registradoPor || "Diego"); setMotivo(item.motivo || "Faltante");
-        setProducto(item.producto || ""); setCantidad(item.cantidad || 1); setUnidad(item.unidad || UNIDADES[0]);
+        setProducto(item.producto || ""); setCantidad(item.cantidad || 1); setUnidad(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
         if (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") {
-          setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(item.unidadCruce || UNIDADES[0]);
+          setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(UNIDADES.includes(item.unidadCruce) ? item.unidadCruce : UNIDADES[0]);
         }
         if (item.motivo === "Daño/Merma" && item.detalleDanio) {
           setCausaDanio(item.detalleDanio.causa || CAUSAS_DANIO_RUTA[0]);
@@ -1251,7 +1249,7 @@
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs text-slate-400 block mb-2">Unidad</label>
-                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         {UNIDADES.map(u => (
                           <button
                             type="button"
@@ -1935,7 +1933,7 @@
                 </div>
                 <div>
                   <label className="text-[11px] text-slate-400 block mb-2">Unidad</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {UNIDADES.map(u => (
                       <button
                         type="button"
@@ -1952,7 +1950,6 @@
                 </div>
               </div>
 
-              {/* PANEL ESPECÍFICO CUANDO SE SELECCIONA DAÑO / MERMA */}
               {motivo === "Daño/Merma" && (
                 <div className="bg-rose-950/25 p-4 rounded-2xl border border-rose-800/60 space-y-4">
                   <p className="text-xs font-extrabold text-rose-300 uppercase">
@@ -2046,7 +2043,7 @@
                   </div>
                   <div>
                     <label className="text-[11px] text-purple-300/80 block mb-2">Unidad</label>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {UNIDADES.map(u => (
                         <button
                           type="button"
