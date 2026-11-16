@@ -49,6 +49,7 @@
       { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)", fisico: true },
       { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)", fisico: true },
       { id: "Cruce", label: "Cruce de Producto", desc: "Se facturó un producto pero se envió otro físico", fisico: true },
+      { id: "ErrorFacturacion", label: "Error de Facturación", desc: "Vendedor facturó mal; cliente rechaza y retorna", fisico: false },
       { id: "AceptadoPorCliente", label: "Aceptado por Cliente", desc: "Cliente acepta producto cruzado/alternativo", fisico: false },
       { id: "Rechazo", label: "Rechazo Cliente", desc: "Cliente devuelve o no recibe mercadería", fisico: true },
       { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado", fisico: true }
@@ -141,6 +142,11 @@
       const [cantidadCruce, setCantidadCruce] = useState(1);
       const [unidadCruce, setUnidadCruce] = useState(UNIDADES[0]);
 
+      // ESTADOS PARA ERROR DE FACTURACIÓN
+      const [productoMalFacturado, setProductoMalFacturado] = useState("");
+      const [cantidadMalFacturada, setCantidadMalFacturada] = useState(1);
+      const [unidadMalFacturada, setUnidadMalFacturada] = useState(UNIDADES[0]);
+
       const [causaDanio, setCausaDanio] = useState(CAUSAS_DANIO_RUTA[0]);
       const [responsableDanio, setResponsableDanio] = useState("Juan");
       const [danioTotalForm, setDanioTotalForm] = useState(true);
@@ -203,9 +209,20 @@
         return () => { unsubInc(); unsubIncBodega(); unsubCierres(); unsubCat(); unsubHistInv(); unsubConteo(); };
       }, []);
 
+      const seleccionarMotivo = (nuevoMotivo) => {
+        setMotivo(nuevoMotivo);
+        if (nuevoMotivo === "ErrorFacturacion") {
+          setAccionesSeleccionadas(["Chofer Retorna Producto a Bodega", "Nota de Crédito (Tributaria)"]);
+        } else if (!editandoId) {
+          setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
+        }
+      };
+
       const limpiarFormulario = () => {
         setFactura(""); setCliente(""); setProducto(""); setCantidad(1); setUnidad(UNIDADES[0]);
-        setProductoCruce(""); setCantidadCruce(1); setUnidadCruce(UNIDADES[0]); setNotas(""); setEditandoId(null);
+        setProductoCruce(""); setCantidadCruce(1); setUnidadCruce(UNIDADES[0]);
+        setProductoMalFacturado(""); setCantidadMalFacturada(1); setUnidadMalFacturada(UNIDADES[0]);
+        setNotas(""); setEditandoId(null);
         setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
         setCausaDanio(CAUSAS_DANIO_RUTA[0]);
         setDanioTotalForm(true);
@@ -279,13 +296,17 @@
 
       const guardarIncidencia = async (e) => {
         e.preventDefault();
-        if (!factura.trim() || !producto.trim()) return alert("Completa el Nº de Factura y el Producto.");
+        if (!factura.trim()) return alert("Completa el Nº de Factura.");
+        if (motivo !== "ErrorFacturacion" && !producto.trim()) return alert("Completa el Producto.");
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && !productoCruce.trim()) return alert("Indica el producto alternativo o enviado por error.");
+        if (motivo === "ErrorFacturacion" && !productoMalFacturado.trim()) return alert("Indica qué producto se envió mal facturado por el vendedor.");
 
-        const prodNorm = normalizarProd(producto);
+        const prodPrincipal = motivo === "ErrorFacturacion" ? normalizarProd(productoMalFacturado) : normalizarProd(producto);
+        const cantPrincipal = motivo === "ErrorFacturacion" ? Number(cantidadMalFacturada) : Number(cantidad);
+        const uniPrincipal = motivo === "ErrorFacturacion" ? unidadMalFacturada : unidad;
         const prodCruceNorm = productoCruce ? normalizarProd(productoCruce) : null;
 
-        await registrarProductoEnCatalogo(prodNorm);
+        await registrarProductoEnCatalogo(prodPrincipal);
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && prodCruceNorm) await registrarProductoEnCatalogo(prodCruceNorm);
 
         const motivoObj = MOTIVOS.find(m => m.id === motivo);
@@ -293,8 +314,8 @@
         const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
 
         let infoDanioObj = null;
-        let cantidadParaConteo = Number(cantidad);
-        let unidadParaConteo = unidad;
+        let cantidadParaConteo = cantPrincipal;
+        let unidadParaConteo = uniPrincipal;
 
         if (motivo === "Daño/Merma") {
           const esManipulacion = causaDanio.includes("manipulación");
@@ -314,8 +335,8 @@
           }
         }
 
-        if (requiereFisico && requiereAjusteInv && motivo !== "AceptadoPorCliente") {
-          await registrarConteoPendiente(prodNorm, unidadParaConteo, cantidadParaConteo, factura.trim());
+        if (requiereFisico && requiereAjusteInv && motivo !== "AceptadoPorCliente" && motivo !== "ErrorFacturacion") {
+          await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim());
         }
         if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
           await registrarConteoPendiente(prodCruceNorm, unidadCruce, Number(cantidadCruce), factura.trim());
@@ -334,9 +355,9 @@
           armador,
           registradoPor,
           motivo,
-          producto: prodNorm,
-          cantidad: Number(cantidad),
-          unidad,
+          producto: prodPrincipal,
+          cantidad: cantPrincipal,
+          unidad: uniPrincipal,
           productoCruce: prodCruceNorm,
           cantidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? Number(cantidadCruce) : null,
           unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
@@ -727,7 +748,17 @@
         setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || hoy);
         setRuta(item.ruta || RUTAS[0]); setArmador(item.armador || ARMADORES[0]);
         setRegistradoPor(item.registradoPor || "Diego"); setMotivo(item.motivo || "Faltante");
-        setProducto(item.producto || ""); setCantidad(item.cantidad || 1); setUnidad(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
+        
+        if (item.motivo === "ErrorFacturacion") {
+          setProductoMalFacturado(item.producto || "");
+          setCantidadMalFacturada(item.cantidad || 1);
+          setUnidadMalFacturada(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
+        } else {
+          setProducto(item.producto || "");
+          setCantidad(item.cantidad || 1);
+          setUnidad(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
+        }
+
         if (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") {
           setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(UNIDADES.includes(item.unidadCruce) ? item.unidadCruce : UNIDADES[0]);
         }
@@ -798,7 +829,8 @@
         incidencias.forEach((i, idx) => {
           const estado = i.resuelto ? "✅ RESUELTO" : "⏳ PENDIENTE";
           const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
-          texto += `*${idx + 1}. Fact #${i.factura}* (${i.motivo}) - ${estado}\n`;
+          const labelMotivo = i.motivo === "ErrorFacturacion" ? "Error de Facturación" : i.motivo;
+          texto += `*${idx + 1}. Fact #${i.factura}* (${labelMotivo}) - ${estado}\n`;
           texto += `   • Prod: ${i.cantidad} ${i.unidad} de ${i.producto}\n`;
           if (i.motivo === "Daño/Merma" && i.detalleDanio) {
             texto += `   • Daño: ${i.detalleDanio.causa} (Resp: ${i.detalleDanio.responsable}) - Dañado: ${i.detalleDanio.cantidadDanada} ${i.detalleDanio.unidadDanada}\n`;
@@ -817,7 +849,7 @@
         total: incidencias.length + incidentesBodega.length,
         pendientes: incidencias.filter(i => !i.resuelto).length + incidentesBodega.filter(ib => !ib.ajustado).length,
         resueltas: incidencias.filter(i => i.resuelto).length + incidentesBodega.filter(ib => ib.ajustado).length,
-        cruces: incidencias.filter(i => i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente").length
+        cruces: incidencias.filter(i => i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente" || i.motivo === "ErrorFacturacion").length
       }), [incidencias, incidentesBodega]);
 
       const conteosListosParaAjustar = useMemo(() => {
@@ -931,9 +963,9 @@
               <div className="space-y-4 text-xs">
                 {incidencias.map((item, idx) => (
                   <div key={item.id} className="border border-gray-400 p-3 rounded">
-                    <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Motivo:</strong> {item.motivo.toUpperCase()} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
+                    <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Motivo:</strong> {item.motivo === "ErrorFacturacion" ? "ERROR DE FACTURACIÓN" : item.motivo.toUpperCase()} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
                     <p><strong>Cliente:</strong> {item.cliente || "N/A"} | <strong>Ruta:</strong> {item.ruta} | <strong>Armó:</strong> {item.armador} | <strong>Registró:</strong> {item.registradoPor || "N/A"}</p>
-                    <p><strong>Producto Facturado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                    <p><strong>{item.motivo === "ErrorFacturacion" ? "Producto Mal Facturado (Retorna):" : "Producto Facturado:"}</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
                     {item.motivo === "Daño/Merma" && item.detalleDanio && (
                       <p><strong>Detalle Daño/Merma:</strong> {item.detalleDanio.causa} — <strong>Responsable/Origen:</strong> {item.detalleDanio.responsable} — <strong>Dañado:</strong> {item.detalleDanio.cantidadDanada} {item.detalleDanio.unidadDanada}</p>
                     )}
@@ -1052,7 +1084,7 @@
                       {itemsRuta.map((item, iIdx) => (
                         <div key={item.id} className="border border-gray-400 p-3 rounded text-xs space-y-1">
                           <p><strong>{iIdx + 1}. Factura #{item.factura}</strong> — <strong>Cliente:</strong> {item.cliente || "N/A"}</p>
-                          <p><strong>Armó:</strong> {item.armador} | <strong>Motivo:</strong> {item.motivo.toUpperCase()}</p>
+                          <p><strong>Armó:</strong> {item.armador} | <strong>Motivo:</strong> {item.motivo === "ErrorFacturacion" ? "ERROR DE FACTURACIÓN" : item.motivo.toUpperCase()}</p>
                           <p><strong>Producto Esperado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
                           {item.retornoBodegaInfo ? (
                             <div className="mt-2 pt-2 border-t border-gray-300 bg-gray-50 p-2 rounded space-y-1">
@@ -1088,7 +1120,7 @@
               <div className="mb-6 space-y-2 text-xs border p-4 rounded bg-gray-50">
                 <p><strong>Cliente / Local:</strong> {facturaImprimirIndividual.cliente || "N/A"}</p>
                 <p><strong>Ruta:</strong> {facturaImprimirIndividual.ruta} | <strong>Armó:</strong> {facturaImprimirIndividual.armador}</p>
-                <p><strong>Motivo de Incidencia:</strong> {facturaImprimirIndividual.motivo.toUpperCase()}</p>
+                <p><strong>Motivo de Incidencia:</strong> {facturaImprimirIndividual.motivo === "ErrorFacturacion" ? "ERROR DE FACTURACIÓN" : facturaImprimirIndividual.motivo.toUpperCase()}</p>
                 <p><strong>Producto Esperado de Retorno:</strong> {facturaImprimirIndividual.cantidad} {facturaImprimirIndividual.unidad} de {facturaImprimirIndividual.producto}</p>
               </div>
 
@@ -1496,10 +1528,11 @@
                                 item.motivo === "Faltante" ? "bg-rose-500/15 text-rose-300 border-rose-500/30" :
                                 item.motivo === "Sobrante" ? "bg-sky-500/15 text-sky-300 border-sky-500/30" :
                                 item.motivo === "Cruce" ? "bg-purple-500/15 text-purple-300 border-purple-500/30" :
+                                item.motivo === "ErrorFacturacion" ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" :
                                 item.motivo === "AceptadoPorCliente" ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" :
                                 "bg-amber-500/15 text-amber-300 border-amber-300"
                               }`}>
-                                {item.motivo === "AceptadoPorCliente" ? "ACEPTADO X CLIENTE" : item.motivo.toUpperCase()}
+                                {item.motivo === "AceptadoPorCliente" ? "ACEPTADO X CLIENTE" : item.motivo === "ErrorFacturacion" ? "ERROR FACTURACIÓN" : item.motivo.toUpperCase()}
                               </span>
                               {item.cliente && (
                                 <span className="text-xs font-semibold text-slate-300 bg-slate-800/80 px-2.5 py-1 rounded-lg">
@@ -1512,10 +1545,10 @@
 
                           <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 mb-3">
                             <span className="text-[11px] font-bold uppercase text-slate-400 block mb-0.5">
-                              {item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente" ? "Producto Facturado:" : "Producto Afectado:"}
+                              {item.motivo === "ErrorFacturacion" ? "🧾 Producto Mal Facturado (Retorna a Bodega):" : (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") ? "Producto Facturado:" : "Producto Afectado:"}
                             </span>
                             <p className="text-base font-black text-white">
-                              {item.cantidad} {item.unidad} — <span className="text-amber-300">{item.producto}</span>
+                              {item.cantidad} {item.unidad} — <span className={item.motivo === "ErrorFacturacion" ? "text-indigo-300" : "text-amber-300"}>{item.producto}</span>
                             </p>
 
                             {item.motivo === "Daño/Merma" && item.detalleDanio && (
@@ -1911,7 +1944,7 @@
                 <label className="text-xs font-bold text-slate-300 block mb-2">⚠️ Tipo de Incidencia</label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {MOTIVOS.map(m => (
-                    <button type="button" key={m.id} onClick={() => setMotivo(m.id)} className={`p-3 rounded-xl border text-left transition cursor-pointer ${motivo === m.id ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow" : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"}`}>
+                    <button type="button" key={m.id} onClick={() => seleccionarMotivo(m.id)} className={`p-3 rounded-xl border text-left transition cursor-pointer ${motivo === m.id ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow" : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"}`}>
                       <div className="text-xs font-black">{m.label}</div>
                       <div className="text-[10px] opacity-75 mt-0.5 leading-tight">{m.desc}</div>
                     </button>
@@ -1919,44 +1952,89 @@
                 </div>
               </div>
 
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-                <div className="flex justify-between items-center">
-                  <p className="text-xs font-extrabold text-emerald-400 uppercase">
-                    {(motivo === "Cruce" || motivo === "AceptadoPorCliente") ? "1️⃣ Producto que decía la Factura" : "📦 Detalle del Producto"}
+              {/* PANEL ESPECÍFICO CUANDO SE SELECCIONA ERROR DE FACTURACIÓN */}
+              {motivo === "ErrorFacturacion" ? (
+                <div className="bg-indigo-950/30 p-4 rounded-2xl border border-indigo-700/60 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs font-extrabold text-indigo-300 uppercase">
+                      🧾 Producto Mal Facturado por el Vendedor (Retorna con Chofer)
+                    </p>
+                    <span className="text-[10px] text-slate-400">💡 Retorno directo a bodega</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    Indica qué producto se llevó en la factura mal emitida por el vendedor y el cliente rechazó para que el chofer lo retorne:
                   </p>
-                  <span className="text-[10px] text-slate-400">💡 Autocompletado inteligente</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="sm:col-span-2 relative">
-                    <label className="text-[11px] text-slate-400 block mb-1">Nombre del Producto *</label>
-                    <input type="text" list="lista-catalogo" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
-                    <datalist id="lista-catalogo">
-                      {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
-                    </datalist>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2 relative">
+                      <label className="text-[11px] text-indigo-200 block mb-1">Producto enviado que debe retornar *</label>
+                      <input type="text" list="lista-catalogo" value={productoMalFacturado} onChange={e => setProductoMalFacturado(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-slate-900 border border-indigo-700/60 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
+                      <datalist id="lista-catalogo">
+                        {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-indigo-200 block mb-1">Cantidad *</label>
+                      <input type="number" min="1" value={cantidadMalFacturada} onChange={e => setCantidadMalFacturada(e.target.value)} className="w-full bg-slate-900 border border-indigo-700/60 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
+                    </div>
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Cantidad *</label>
-                    <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
+                    <label className="text-[11px] text-indigo-200 block mb-2">Unidad</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {UNIDADES.map(u => (
+                        <button
+                          type="button"
+                          key={u}
+                          onClick={() => setUnidadMalFacturada(u)}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                            unidadMalFacturada === u ? "bg-indigo-500 text-white border-indigo-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                          }`}
+                        >
+                          {u}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label className="text-[11px] text-slate-400 block mb-2">Unidad</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {UNIDADES.map(u => (
-                      <button
-                        type="button"
-                        key={u}
-                        onClick={() => setUnidad(u)}
-                        className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
-                          unidad === u ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
-                        }`}
-                      >
-                        {u}
-                      </button>
-                    ))}
+              ) : (
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs font-extrabold text-emerald-400 uppercase">
+                      {(motivo === "Cruce" || motivo === "AceptadoPorCliente") ? "1️⃣ Producto que decía la Factura" : "📦 Detalle del Producto"}
+                    </p>
+                    <span className="text-[10px] text-slate-400">💡 Autocompletado inteligente</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2 relative">
+                      <label className="text-[11px] text-slate-400 block mb-1">Nombre del Producto *</label>
+                      <input type="text" list="lista-catalogo" value={producto} onChange={e => setProducto(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white outline-none" required />
+                      <datalist id="lista-catalogo">
+                        {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Cantidad *</label>
+                      <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-2">Unidad</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {UNIDADES.map(u => (
+                        <button
+                          type="button"
+                          key={u}
+                          onClick={() => setUnidad(u)}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                            unidad === u ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-900 text-slate-300 border-slate-800"
+                          }`}
+                        >
+                          {u}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {motivo === "Daño/Merma" && (
                 <div className="bg-rose-950/25 p-4 rounded-2xl border border-rose-800/60 space-y-4">
@@ -2118,7 +2196,7 @@
 
               <div>
                 <label className="text-xs font-bold text-slate-300 block mb-1">💬 Notas Opcionales</label>
-                <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Se rompió una bolsa..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white outline-none" />
+                <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Vendedor digitó código equivocado..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white outline-none" />
               </div>
 
               <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-xl transition cursor-pointer">
