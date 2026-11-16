@@ -850,6 +850,7 @@
         return Object.values(mapa);
       }, [historialInventario]);
 
+      // CUADRATURA AUTOMÁTICA: SOLO MUESTRA LO QUE AÚN ESTÁ PENDIENTE DE AJUSTE
       const resumenInventario = useMemo(() => {
         const mapa = {};
         const sumar = (prod, uni, cant, tipo, fact) => {
@@ -865,7 +866,11 @@
 
           if (!mapa[clave].facturas.includes(fact)) mapa[clave].facturas.push(fact);
         };
+
         incidencias.forEach(inc => {
+          const ajusteYaHecho = inc.checksAcciones?.["Ajustar Inventario en Bodega"]?.completado;
+          if (ajusteYaHecho) return; // Si ya se corrigió el inventario, no debe aparecer como pendiente en cuadratura
+
           if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
           else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura);
           else if (inc.motivo === "Cruce") {
@@ -875,11 +880,13 @@
             sumar(inc.producto, inc.detalleDanio.unidadDanada, inc.detalleDanio.cantidadDanada, "FALTA_EN_BODEGA", inc.factura);
           }
         });
+
         incidentesBodega.forEach(ib => {
-          if (ib.ajustado) {
+          if (!ib.ajustado) { // Solo los pendientes de ajuste en bodega
             sumar(ib.producto, ib.unidad, ib.cantidad, "FALTA_EN_BODEGA", "BODEGA-INT");
           }
         });
+
         return Object.values(mapa);
       }, [incidencias, incidentesBodega]);
 
@@ -2328,12 +2335,12 @@
               <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl">
                 <h2 className="text-xl font-black text-amber-400">⚖️ Cuadratura Automática de Inventario en Bodega</h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1 mb-6">
-                  Cálculo instantáneo de lo que sobra (+) o falta (-) físicamente en estanterías según las incidencias de ruta y bodega.
+                  Desfases pendientes de ajuste en estanterías. Al corregirse pasan automáticamente al historial acumulativo.
                 </p>
 
                 {resumenInventario.length === 0 ? (
                   <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-10 text-center text-sm text-slate-400">
-                    Sin desfases de inventario registrados esta semana. ¡Todo cuadrado!
+                    Sin desfases de inventario pendientes. ¡Todo cuadrado!
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
