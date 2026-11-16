@@ -64,6 +64,12 @@
       "Pérdida o extravío interno"
     ];
 
+    const CAUSAS_DANIO_RUTA = [
+      "Dañado de fábrica (Mal sellado / Defecto origen)",
+      "Accidente en trayecto (Golpe dentro del furgón)",
+      "Rotura por manipulación (Chofer / Pioneta)"
+    ];
+
     const ACCIONES_DISPONIBLES = [
       "Ajustar Inventario en Bodega",
       "Enviar / Reponer Producto al Cliente",
@@ -134,8 +140,27 @@
       const [cantidadCruce, setCantidadCruce] = useState(1);
       const [unidadCruce, setUnidadCruce] = useState(UNIDADES[0]);
 
+      // ESTADOS ESPECÍFICOS PARA DAÑO / MERMA EN RUTA
+      const [causaDanio, setCausaDanio] = useState(CAUSAS_DANIO_RUTA[0]);
+      const [responsableDanio, setResponsableDanio] = useState("Juan");
+      const [danioTotalForm, setDanioTotalForm] = useState(true);
+      const [cantDanadaParcial, setCantDanadaParcial] = useState(1);
+
       const [accionesSeleccionadas, setAccionesSeleccionadas] = useState(["Ajustar Inventario en Bodega"]);
       const [notas, setNotas] = useState("");
+
+      // Personal disponible según ruta seleccionada
+      const personalRutaActual = useMemo(() => {
+        if (ruta.includes("Ruta 1")) return ["Juan", "Julio"];
+        if (ruta.includes("Ruta 2")) return ["Carlos", "Horacio"];
+        return ["Diego", "Nico", "Edwin", "Julio", "Horacio"];
+      }, [ruta]);
+
+      useEffect(() => {
+        if (!personalRutaActual.includes(responsableDanio)) {
+          setResponsableDanio(personalRutaActual[0]);
+        }
+      }, [ruta, personalRutaActual]);
 
       useEffect(() => {
         auth.signInAnonymously().catch(() => {});
@@ -183,6 +208,9 @@
         setFactura(""); setCliente(""); setProducto(""); setCantidad(1); setUnidad(UNIDADES[0]);
         setProductoCruce(""); setCantidadCruce(1); setUnidadCruce(UNIDADES[0]); setNotas(""); setEditandoId(null);
         setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
+        setCausaDanio(CAUSAS_DANIO_RUTA[0]);
+        setDanioTotalForm(true);
+        setCantDanadaParcial(1);
       };
 
       const registrarProductoEnCatalogo = async (nombreProd) => {
@@ -265,8 +293,30 @@
         const requiereFisico = motivoObj ? motivoObj.fisico : true;
         const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
 
+        let infoDanioObj = null;
+        let cantidadParaConteo = Number(cantidad);
+        let unidadParaConteo = unidad;
+
+        if (motivo === "Daño/Merma") {
+          const esManipulacion = causaDanio.includes("manipulación");
+          const respFinal = esManipulacion ? responsableDanio : (causaDanio.includes("fábrica") ? "Origen / Fábrica" : "Accidente en furgón");
+          
+          infoDanioObj = {
+            causa: causaDanio,
+            responsable: respFinal,
+            esDanioTotal: danioTotalForm,
+            cantidadDanada: danioTotalForm ? Number(cantidad) : Number(cantDanadaParcial),
+            unidadDanada: danioTotalForm ? unidad : (unidad === "Unidad" ? "Unidad" : "Unidad suelta")
+          };
+
+          if (!danioTotalForm) {
+            cantidadParaConteo = Number(cantDanadaParcial);
+            unidadParaConteo = unidad === "Unidad" ? "Unidad" : "Unidad suelta";
+          }
+        }
+
         if (requiereFisico && requiereAjusteInv && motivo !== "AceptadoPorCliente") {
-          await registrarConteoPendiente(prodNorm, unidad, Number(cantidad), factura.trim());
+          await registrarConteoPendiente(prodNorm, unidadParaConteo, cantidadParaConteo, factura.trim());
         }
         if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
           await registrarConteoPendiente(prodCruceNorm, unidadCruce, Number(cantidadCruce), factura.trim());
@@ -291,6 +341,7 @@
           productoCruce: prodCruceNorm,
           cantidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? Number(cantidadCruce) : null,
           unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
+          detalleDanio: infoDanioObj,
           acciones: accionesSeleccionadas,
           checksAcciones: checksIniciales,
           retornoBodegaInfo: null,
@@ -496,7 +547,7 @@
       };
 
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
-        if (estadoActual) return; // Ya está ajustado
+        if (estadoActual) return;
 
         const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario y archivarlo en el historial:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
@@ -514,7 +565,6 @@
             ? `Conteo Cíclico Digital (Stock físico contado: ${itemConteo.cantidadContada} ${itemConteo.unidad})`
             : `Conteo Cíclico Físico (Incidencia Factura #${itemConteo.factura})`;
 
-          // 1. Guardar en el historial acumulativo con todos los detalles
           await registrarEnHistorialInventario(
             itemConteo.producto,
             itemConteo.unidad,
@@ -526,7 +576,6 @@
             detalleTexto
           );
 
-          // 2. Sincronizar y marcar check en la tarjeta de incidencia si corresponde
           const incidenciaAsociada = incidencias.find(inc => inc.factura === itemConteo.factura && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto));
           if (incidenciaAsociada) {
             const checks = incidenciaAsociada.checksAcciones || {};
@@ -544,10 +593,8 @@
             }
           }
 
-          // 3. Eliminar automáticamente del conteo cíclico pendiente
           await db.collection("conteo_pendiente").doc(id).delete();
 
-          // Limpiar selección digital si estaba marcada
           setSeleccionadosConteoDigital(prev => {
             const copy = { ...prev };
             delete copy[id];
@@ -684,6 +731,12 @@
         if (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") {
           setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(item.unidadCruce || UNIDADES[0]);
         }
+        if (item.motivo === "Daño/Merma" && item.detalleDanio) {
+          setCausaDanio(item.detalleDanio.causa || CAUSAS_DANIO_RUTA[0]);
+          setResponsableDanio(item.detalleDanio.responsable || "Juan");
+          setDanioTotalForm(item.detalleDanio.esDanioTotal !== undefined ? item.detalleDanio.esDanioTotal : true);
+          setCantDanadaParcial(item.detalleDanio.cantidadDanada || 1);
+        }
         setAccionesSeleccionadas(item.acciones || [item.accionResolucion || ACCIONES_DISPONIBLES[0]]);
         setNotas(item.notas || "");
         setVista("nuevo"); window.scrollTo({ top: 0, behavior: "smooth" });
@@ -747,6 +800,9 @@
           const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
           texto += `*${idx + 1}. Fact #${i.factura}* (${i.motivo}) - ${estado}\n`;
           texto += `   • Prod: ${i.cantidad} ${i.unidad} de ${i.producto}\n`;
+          if (i.motivo === "Daño/Merma" && i.detalleDanio) {
+            texto += `   • Daño: ${i.detalleDanio.causa} (Resp: ${i.detalleDanio.responsable}) - Dañado: ${i.detalleDanio.cantidadDanada} ${i.detalleDanio.unidadDanada}\n`;
+          }
           if ((i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente") && i.productoCruce) {
             texto += `   • Alt/Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
           }
@@ -817,6 +873,8 @@
           else if (inc.motivo === "Cruce") {
             sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
             if (inc.productoCruce) sumar(inc.productoCruce, inc.unidadCruce, inc.cantidadCruce, "FALTA_EN_BODEGA", inc.factura);
+          } else if (inc.motivo === "Daño/Merma" && inc.detalleDanio) {
+            sumar(inc.producto, inc.detalleDanio.unidadDanada, inc.detalleDanio.cantidadDanada, "FALTA_EN_BODEGA", inc.factura);
           }
         });
         incidentesBodega.forEach(ib => {
@@ -870,6 +928,9 @@
                     <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Motivo:</strong> {item.motivo.toUpperCase()} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
                     <p><strong>Cliente:</strong> {item.cliente || "N/A"} | <strong>Ruta:</strong> {item.ruta} | <strong>Armó:</strong> {item.armador} | <strong>Registró:</strong> {item.registradoPor || "N/A"}</p>
                     <p><strong>Producto Facturado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                    {item.motivo === "Daño/Merma" && item.detalleDanio && (
+                      <p><strong>Detalle Daño/Merma:</strong> {item.detalleDanio.causa} — <strong>Responsable/Origen:</strong> {item.detalleDanio.responsable} — <strong>Dañado:</strong> {item.detalleDanio.cantidadDanada} {item.detalleDanio.unidadDanada}</p>
+                    )}
                     {(item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") && <p><strong>Producto Alternativo / Enviado:</strong> {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>}
                     <p><strong>Acciones / Estatus:</strong> {item.acciones ? item.acciones.join(" + ") : "N/A"}</p>
                   </div>
@@ -1309,7 +1370,6 @@
                   <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white outline-none" />
                 </div>
 
-                {/* FILTROS MEJORADOS EN CUADRÍCULA (SIN DESBORDAR) */}
                 <div className="space-y-3 pt-2 border-t border-slate-800/80">
                   <div>
                     <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1.5">Filtrar por Estado:</label>
@@ -1451,6 +1511,17 @@
                             <p className="text-base font-black text-white">
                               {item.cantidad} {item.unidad} — <span className="text-amber-300">{item.producto}</span>
                             </p>
+
+                            {item.motivo === "Daño/Merma" && item.detalleDanio && (
+                              <div className="mt-2.5 pt-2.5 border-t border-rose-900/40 text-xs space-y-1">
+                                <span className="text-[10px] font-extrabold uppercase text-rose-400 block">⚠️ Detalle de Daño / Merma en Ruta:</span>
+                                <p className="text-slate-200 font-semibold">• Causa: <strong className="text-white">{item.detalleDanio.causa}</strong></p>
+                                <p className="text-slate-200 font-semibold">• Responsable / Origen: <strong className="text-amber-300">{item.detalleDanio.responsable}</strong></p>
+                                <p className="text-slate-200 font-semibold">
+                                  • Cantidad Dañada: <strong className="text-rose-300 underline">{item.detalleDanio.cantidadDanada} {item.detalleDanio.unidadDanada}</strong> {item.detalleDanio.esDanioTotal ? "(Daño Total)" : "(Parcial / Sueltas)"}
+                                </p>
+                              </div>
+                            )}
 
                             {(item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") && item.productoCruce && (
                               <div className="mt-2.5 pt-2.5 border-t border-purple-900/40">
@@ -1880,6 +1951,83 @@
                   </div>
                 </div>
               </div>
+
+              {/* PANEL ESPECÍFICO CUANDO SE SELECCIONA DAÑO / MERMA */}
+              {motivo === "Daño/Merma" && (
+                <div className="bg-rose-950/25 p-4 rounded-2xl border border-rose-800/60 space-y-4">
+                  <p className="text-xs font-extrabold text-rose-300 uppercase">
+                    ⚠️ Detalle de Daño / Merma en Calle o Ruta
+                  </p>
+
+                  <div>
+                    <label className="text-[11px] text-rose-200 font-bold block mb-2">¿Cómo ocurrió el daño?</label>
+                    <div className="grid grid-cols-1 gap-2">
+                      {CAUSAS_DANIO_RUTA.map(c => (
+                        <button
+                          type="button"
+                          key={c}
+                          onClick={() => setCausaDanio(c)}
+                          className={`py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition cursor-pointer ${
+                            causaDanio === c ? "bg-rose-500/25 text-rose-200 border-rose-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {causaDanio.includes("manipulación") && (
+                    <div>
+                      <label className="text-[11px] text-amber-300 font-bold block mb-2">
+                        👤 Responsable de la Ruta ({ruta}):
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {personalRutaActual.map(p => (
+                          <button
+                            type="button"
+                            key={p}
+                            onClick={() => setResponsableDanio(p)}
+                            className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                              responsableDanio === p ? "bg-amber-500 text-slate-950 border-amber-400 shadow" : "bg-slate-950 text-slate-300 border-slate-800"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-3">
+                    <label className="flex items-center gap-2.5 cursor-pointer text-xs font-black text-amber-300">
+                      <input
+                        type="checkbox"
+                        checked={danioTotalForm}
+                        onChange={(e) => setDanioTotalForm(e.target.checked)}
+                        className="w-4 h-4 accent-amber-500 cursor-pointer"
+                      />
+                      <span>📦 Daño Total ({cantidad} {unidad} completa/s)</span>
+                    </label>
+
+                    {!danioTotalForm && (
+                      <div className="pt-2 border-t border-slate-800">
+                        <label className="text-[11px] text-rose-300 block mb-1 font-bold">
+                          ¿Cuántas unidades sueltas se dañaron exactamente?
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={cantDanadaParcial}
+                          onChange={(e) => setCantDanadaParcial(Number(e.target.value))}
+                          className="w-full bg-slate-900 border border-rose-700 rounded-xl px-4 py-2 text-sm font-bold text-white outline-none"
+                          required
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {(motivo === "Cruce" || motivo === "AceptadoPorCliente") && (
                 <div className="bg-purple-950/30 p-4 rounded-2xl border border-purple-800/60 space-y-3">
