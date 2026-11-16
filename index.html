@@ -55,6 +55,15 @@
       { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado", fisico: true }
     ];
     const ARMADORES = ["Diego", "Nico", "Edwin", "Julio", "Horacio", "Sra. Rosa"];
+    const COLORES_ARMADORES = {
+      "Diego": { hex: "#f59e0b", bg: "bg-amber-500", badge: "bg-amber-100 text-amber-900 border-amber-300" },
+      "Nico": { hex: "#0284c7", bg: "bg-sky-600", badge: "bg-sky-100 text-sky-900 border-sky-300" },
+      "Edwin": { hex: "#10b981", bg: "bg-emerald-500", badge: "bg-emerald-100 text-emerald-900 border-emerald-300" },
+      "Julio": { hex: "#8b5cf6", bg: "bg-violet-500", badge: "bg-violet-100 text-violet-900 border-violet-300" },
+      "Horacio": { hex: "#f43f5e", bg: "bg-rose-500", badge: "bg-rose-100 text-rose-900 border-rose-300" },
+      "Sra. Rosa": { hex: "#ec4899", bg: "bg-pink-500", badge: "bg-pink-100 text-pink-900 border-pink-300" }
+    };
+
     const RUTAS_BASE = ["Ruta 1", "Ruta 2", "Ruta Alternativa"];
     const EQUIPO_RUTA_ALTERNATIVA = ["Pedro", "Juan", "Carlos", "Horacio", "Julio", "Nico", "Diego", "Edwin"];
     const JERARQUIA_CHOFERES = ["Pedro", "Juan", "Carlos", "Nico"];
@@ -277,13 +286,11 @@
         }
       };
 
-      // SUMA AUTOMÁTICA DE PRODUCTOS AL CONTEO CÍCLICO PENDIENTE
       const registrarConteoPendiente = async (prod, uni, cant, fact) => {
         try {
           const prodNorm = normalizarProd(prod);
           const existente = conteoPendiente.find(cp => cp.producto === prodNorm && cp.unidad === uni);
           if (existente) {
-            // Si el producto ya está en conteo cíclico pendiente, suma la nueva cantidad afectada
             const nuevaCantidad = (Number(existente.cantidad) || 0) + Number(cant);
             const nuevasFacturas = existente.factura.includes(fact) ? existente.factura : `${existente.factura}, #${fact}`;
             await db.collection("conteo_pendiente").doc(existente.id).update({
@@ -401,7 +408,6 @@
           }
         }
 
-        // Todo producto que requiera ajuste físico en bodega se suma automáticamente al Conteo Cíclico
         if (requiereFisico && requiereAjusteInv && motivo !== "AceptadoPorCliente" && motivo !== "ErrorFacturacion") {
           await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim());
         }
@@ -636,7 +642,6 @@
         } catch (err) { alert(err.message); }
       };
 
-      // AL AJUSTAR EL CONTEO CÍCLICO: SALTA AL HISTORIAL ACUMULATIVO Y SE ELIMINA DE PENDIENTES
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
         if (estadoActual) return;
 
@@ -656,7 +661,6 @@
             ? `Conteo Cíclico Digital (Stock físico contado: ${itemConteo.cantidadContada} ${itemConteo.unidad} | Desfase reportado: ${itemConteo.cantidad} ${itemConteo.unidad})`
             : `Conteo Cíclico Físico (Cantidad ajustada: ${itemConteo.cantidad} ${itemConteo.unidad} — Ref Fact #${itemConteo.factura})`;
 
-          // 1. Salta y se suma al Historial Acumulativo de Correcciones de Inventario
           await registrarEnHistorialInventario(
             itemConteo.producto,
             itemConteo.unidad,
@@ -668,7 +672,6 @@
             detalleTexto
           );
 
-          // 2. Marca como resuelta la acción de inventario en todas las incidencias vinculadas
           const facturasAsociadas = itemConteo.factura.split(",").map(f => f.replace("#", "").trim());
           for (const inc of incidencias) {
             if (facturasAsociadas.includes(inc.factura) && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto)) {
@@ -688,7 +691,6 @@
             }
           }
 
-          // 3. Se elimina de Conteo Cíclico Pendiente
           await db.collection("conteo_pendiente").doc(id).delete();
 
           setSeleccionadosConteoDigital(prev => {
@@ -697,7 +699,6 @@
             return copy;
           });
 
-          // 4. Desplaza suavemente hacia el Historial Acumulativo para mostrar el salto
           setTimeout(() => {
             const histEl = document.getElementById("seccion-historial-acumulativo");
             if (histEl) histEl.scrollIntoView({ behavior: "smooth" });
@@ -951,7 +952,7 @@
         return conteoPendiente.filter(cp => cp.conteoFisicoHecho && !cp.ajusteSistemaHecho);
       }, [conteoPendiente]);
 
-      // GRÁFICO DE ERRORES AL MES POR ARMADOR (COMBINA TABLERO ACTIVO + ARCHIVOS SEMANALES)
+      // GRÁFICO DE DISTRIBUCIÓN PORCENTUAL (100%) DE ERRORES AL MES POR ARMADOR
       const estadisticasArmadoresMes = useMemo(() => {
         const conteo = {};
         ARMADORES.forEach(a => { conteo[a] = 0; });
@@ -969,7 +970,6 @@
 
         let totalMes = 0;
         todosLosRegistros.forEach(item => {
-          // Excluimos Error de Facturación porque es error administrativo de vendedor, no del armador
           if (item.motivo === "ErrorFacturacion") return;
           if (item.fecha && item.fecha.startsWith(mesGrafico)) {
             const arm = item.armador;
@@ -981,12 +981,34 @@
         });
 
         const lista = Object.entries(conteo)
-          .map(([nombre, errores]) => ({ nombre, errores }))
+          .map(([nombre, errores]) => {
+            const pctExacto = totalMes > 0 ? (errores / totalMes) * 100 : 0;
+            return {
+              nombre,
+              errores,
+              pctExacto,
+              pctRedondeado: totalMes > 0 ? Math.round(pctExacto * 10) / 10 : 0
+            };
+          })
           .sort((a, b) => b.errores - a.errores);
 
-        const maxErrores = Math.max(...lista.map(l => l.errores), 1);
+        // Construcción del gradiente cónico para el gráfico circular 100%
+        let acumulado = 0;
+        const segmentosConic = lista
+          .filter(item => item.errores > 0)
+          .map(item => {
+            const inicio = acumulado;
+            const fin = acumulado + item.pctExacto;
+            acumulado = fin;
+            const color = COLORES_ARMADORES[item.nombre]?.hex || "#94a3b8";
+            return `${color} ${inicio}% ${fin}%`;
+          });
 
-        return { lista, totalMes, maxErrores };
+        const conicGradient = segmentosConic.length > 0
+          ? `conic-gradient(${segmentosConic.join(", ")})`
+          : "conic-gradient(#e2e8f0 0% 100%)";
+
+        return { lista, totalMes, conicGradient };
       }, [incidencias, cierres, mesGrafico]);
 
       const incidenciasFiltradas = useMemo(() => {
@@ -1374,7 +1396,7 @@
             </button>
             <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition relative cursor-pointer ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
               ⚖️ Cuadratura y Gráficos ({conteoPendiente.length})
-              {(conteosListosParaAjustar.length > 0 || conteoPendiente.length > 0) && (
+              {conteoPendiente.length > 0 && (
                 <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">
                   {conteoPendiente.length}
                 </span>
@@ -2375,13 +2397,13 @@
           {vista === "balance" && (
             <div className="space-y-6 no-print">
 
-              {/* GRÁFICO DE ERRORES POR ARMADOR AL MES */}
+              {/* GRÁFICO DE DISTRIBUCIÓN PORCENTUAL (100%) DE ERRORES POR ARMADOR AL MES */}
               <div className="light-card rounded-3xl p-6 sm:p-8">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                   <div>
-                    <h2 className="text-xl font-black text-slate-900">📊 Gráfico Mensual de Errores por Armador</h2>
+                    <h2 className="text-xl font-black text-slate-900">📊 Distribución Porcentual (100%) de Errores por Armador</h2>
                     <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                      Control de calidad en armado de pedidos (excluye errores administrativos de facturación).
+                      Cada armador ocupa el porcentaje proporcional respecto al 100% de errores cometidos en el mes.
                     </p>
                   </div>
                   <div className="flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2">
@@ -2395,48 +2417,74 @@
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                  <div className="md:col-span-2 space-y-3.5">
-                    {estadisticasArmadoresMes.lista.map((arm, idx) => {
-                      const porcentaje = estadisticasArmadoresMes.totalMes > 0
-                        ? Math.round((arm.errores / estadisticasArmadoresMes.maxErrores) * 100)
-                        : 0;
-                      const cuotaDelTotal = estadisticasArmadoresMes.totalMes > 0
-                        ? Math.round((arm.errores / estadisticasArmadoresMes.totalMes) * 100)
-                        : 0;
-
-                      return (
-                        <div key={arm.nombre} className="space-y-1">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-black text-slate-800 flex items-center gap-2">
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${arm.errores === 0 ? 'bg-emerald-100 text-emerald-700' : idx === 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'}`}>
-                                {idx + 1}
-                              </span>
-                              {arm.nombre}
-                            </span>
-                            <span className="font-bold text-slate-600">
-                              <strong className="text-slate-900 text-sm">{arm.errores}</strong> {arm.errores === 1 ? 'error' : 'errores'} ({cuotaDelTotal}%)
-                            </span>
-                          </div>
-                          <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                {/* BARRA APILADA DEL 100% */}
+                <div className="mb-6">
+                  <div className="flex justify-between text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">
+                    <span>0%</span>
+                    <span>Distribución Total de Errores ({estadisticasArmadoresMes.totalMes} en el mes)</span>
+                    <span>100%</span>
+                  </div>
+                  <div className="w-full h-10 bg-slate-100 rounded-2xl overflow-hidden flex border border-slate-300 shadow-inner">
+                    {estadisticasArmadoresMes.totalMes === 0 ? (
+                      <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">
+                        Sin errores registrados en este mes (0%)
+                      </div>
+                    ) : (
+                      estadisticasArmadoresMes.lista
+                        .filter(arm => arm.errores > 0)
+                        .map(arm => {
+                          const colorObj = COLORES_ARMADORES[arm.nombre] || { bg: "bg-slate-500" };
+                          return (
                             <div
-                              className={`h-full rounded-full transition-all duration-500 ${
-                                arm.errores === 0 ? 'bg-emerald-500' : idx === 0 ? 'bg-rose-500' : 'bg-amber-500'
-                              }`}
-                              style={{ width: `${arm.errores > 0 ? Math.max(porcentaje, 6) : 0}%` }}
-                            ></div>
+                              key={arm.nombre}
+                              style={{ width: `${arm.pctExacto}%` }}
+                              className={`${colorObj.bg} h-full flex items-center justify-center text-white text-xs font-black transition-all duration-500 border-r border-white/30 last:border-r-0 px-1 truncate`}
+                              title={`${arm.nombre}: ${arm.errores} errores (${arm.pctRedondeado}%)`}
+                            >
+                              {arm.pctRedondeado >= 8 ? `${arm.nombre} (${arm.pctRedondeado}%)` : `${arm.pctRedondeado}%`}
+                            </div>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+
+                {/* GRÁFICO CIRCULAR (DONA 100%) + LEYENDA DETALLADA */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center pt-2">
+                  <div className="flex flex-col items-center justify-center">
+                    <div
+                      className="w-44 h-44 rounded-full flex items-center justify-center shadow-md relative transition-all duration-500"
+                      style={{ background: estadisticasArmadoresMes.conicGradient }}
+                    >
+                      <div className="w-28 h-28 bg-white rounded-full flex flex-col items-center justify-center shadow-inner border border-slate-100">
+                        <span className="text-2xl font-black text-slate-900">100%</span>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">
+                          {estadisticasArmadoresMes.totalMes} {estadisticasArmadoresMes.totalMes === 1 ? 'Error' : 'Errores'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {estadisticasArmadoresMes.lista.map(arm => {
+                      const colorObj = COLORES_ARMADORES[arm.nombre] || { bg: "bg-slate-500", badge: "bg-slate-100 text-slate-800 border-slate-300" };
+                      return (
+                        <div key={arm.nombre} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className={`w-3.5 h-3.5 rounded-full ${colorObj.bg} shadow-sm`}></span>
+                            <div>
+                              <p className="text-xs font-black text-slate-900">{arm.nombre}</p>
+                              <p className="text-[11px] text-slate-500 font-semibold">
+                                {arm.errores} {arm.errores === 1 ? 'error registrado' : 'errores registrados'}
+                              </p>
+                            </div>
                           </div>
+                          <span className={`text-xs font-black px-2.5 py-1 rounded-lg border ${colorObj.badge}`}>
+                            {arm.pctRedondeado}%
+                          </span>
                         </div>
                       );
                     })}
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center space-y-2">
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Total Errores del Mes</span>
-                    <p className="text-4xl font-black text-slate-900">{estadisticasArmadoresMes.totalMes}</p>
-                    <p className="text-[11px] text-slate-500">
-                      Período: <strong className="text-slate-800">{mesGrafico}</strong>
-                    </p>
                   </div>
                 </div>
               </div>
