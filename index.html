@@ -496,53 +496,65 @@
       };
 
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
-        const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
+        if (estadoActual) return; // Ya está ajustado
+
+        const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario y archivarlo en el historial:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
           if (resp) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
           return;
         }
 
         const itemConteo = conteoPendiente.find(cp => cp.id === id);
-        const nuevoEstado = !estadoActual;
+        if (!itemConteo) return;
+
         const ahoraStr = new Date().toLocaleString("es-CL");
 
         try {
-          await db.collection("conteo_pendiente").doc(id).update({
-            ajusteSistemaHecho: nuevoEstado,
-            responsableAjuste: nuevoEstado ? resp.trim() : "",
-            fechaHoraAjuste: nuevoEstado ? ahoraStr : ""
-          });
+          const detalleTexto = itemConteo.cantidadContada !== undefined
+            ? `Conteo Cíclico Digital (Stock físico contado: ${itemConteo.cantidadContada} ${itemConteo.unidad})`
+            : `Conteo Cíclico Físico (Incidencia Factura #${itemConteo.factura})`;
 
-          if (nuevoEstado && itemConteo) {
-            await registrarEnHistorialInventario(
-              itemConteo.producto,
-              itemConteo.unidad,
-              itemConteo.factura,
-              resp.trim(),
-              ahoraStr,
-              itemConteo.responsableConteo || "Bodega",
-              itemConteo.fechaHoraConteo || ahoraStr,
-              "Conteo Cíclico por Incidencia (Físico)"
-            );
+          // 1. Guardar en el historial acumulativo con todos los detalles
+          await registrarEnHistorialInventario(
+            itemConteo.producto,
+            itemConteo.unidad,
+            itemConteo.factura,
+            resp.trim(),
+            ahoraStr,
+            itemConteo.responsableConteo || "Bodega",
+            itemConteo.fechaHoraConteo || ahoraStr,
+            detalleTexto
+          );
 
-            const incidenciaAsociada = incidencias.find(inc => inc.factura === itemConteo.factura && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto));
-            if (incidenciaAsociada) {
-              const checks = incidenciaAsociada.checksAcciones || {};
-              if (checks["Ajustar Inventario en Bodega"]) {
-                checks["Ajustar Inventario en Bodega"] = {
-                  completado: true,
-                  por: resp.trim(),
-                  fechaHora: ahoraStr
-                };
-                const todasListas = (incidenciaAsociada.acciones || []).every(ac => checks[ac] && checks[ac].completado);
-                await db.collection("incidencias").doc(incidenciaAsociada.id).update({
-                  checksAcciones: checks,
-                  resuelto: todasListas ? true : incidenciaAsociada.resuelto
-                });
-              }
+          // 2. Sincronizar y marcar check en la tarjeta de incidencia si corresponde
+          const incidenciaAsociada = incidencias.find(inc => inc.factura === itemConteo.factura && (inc.producto === itemConteo.producto || inc.productoCruce === itemConteo.producto));
+          if (incidenciaAsociada) {
+            const checks = incidenciaAsociada.checksAcciones || {};
+            if (checks["Ajustar Inventario en Bodega"]) {
+              checks["Ajustar Inventario en Bodega"] = {
+                completado: true,
+                por: resp.trim(),
+                fechaHora: ahoraStr
+              };
+              const todasListas = (incidenciaAsociada.acciones || []).every(ac => checks[ac] && checks[ac].completado);
+              await db.collection("incidencias").doc(incidenciaAsociada.id).update({
+                checksAcciones: checks,
+                resuelto: todasListas ? true : incidenciaAsociada.resuelto
+              });
             }
           }
-        } catch (err) { alert(err.message); }
+
+          // 3. Eliminar automáticamente del conteo cíclico pendiente
+          await db.collection("conteo_pendiente").doc(id).delete();
+
+          // Limpiar selección digital si estaba marcada
+          setSeleccionadosConteoDigital(prev => {
+            const copy = { ...prev };
+            delete copy[id];
+            return copy;
+          });
+
+        } catch (err) { alert("Error al procesar ajuste: " + err.message); }
       };
 
       const guardarConteoDigitalBodega = async () => {
@@ -2015,7 +2027,7 @@
                     <div>
                       <h2 className="text-xl font-black text-amber-400">📋 Lista de Conteo Cíclico por Incidencias</h2>
                       <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                        Doble confirmación: 1. Bodega (Nico, Edwin, Diego) ➔ 2. Jefatura (Pedro, Bedanli).
+                        Doble confirmación: 1. Bodega (Nico, Edwin, Diego) ➔ 2. Jefatura (Pedro, Bedanli). Al ajustar se archiva automáticamente.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2087,7 +2099,7 @@
                                 <td className="p-3 text-center">
                                   <button
                                     onClick={() => toggleCheckAjusteSistema(cp.id, cp.ajusteSistemaHecho)}
-                                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300'}`}
+                                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-slate-300 hover:border-amber-500/50'}`}
                                   >
                                     {cp.ajusteSistemaHecho ? `✓ ${cp.responsableAjuste}` : "[ ] Ajustar Sistema"}
                                   </button>
