@@ -92,7 +92,7 @@
       "Chofer Retorna Producto a Bodega"
     ];
 
-    const normalizarProd = (str) => {
+    const normalizarTexto = (str) => {
       if (!str) return "";
       return str.trim().replace(/\s+/g, ' ').toUpperCase();
     };
@@ -119,6 +119,7 @@
       const [incidentesBodega, setIncidentesBodega] = useState([]);
       const [cierres, setCierres] = useState([]);
       const [catalogoProductos, setCatalogoProductos] = useState([]);
+      const [catalogoClientes, setCatalogoClientes] = useState([]);
       const [historialInventario, setHistorialInventario] = useState([]);
       const [conteoPendiente, setConteoPendiente] = useState([]);
       const [seleccionadosInventario, setSeleccionadosInventario] = useState({});
@@ -243,6 +244,12 @@
           setCatalogoProductos(lista);
         });
 
+        const unsubCatClientes = db.collection("catalogo_clientes").onSnapshot((snap) => {
+          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+          setCatalogoClientes(lista);
+        });
+
         const unsubHistInv = db.collection("historial_inventario").onSnapshot((snap) => {
           const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -254,7 +261,7 @@
           setConteoPendiente(lista);
         });
 
-        return () => { unsubInc(); unsubIncBodega(); unsubCierres(); unsubCat(); unsubHistInv(); unsubConteo(); };
+        return () => { unsubInc(); unsubIncBodega(); unsubCierres(); unsubCat(); unsubCatClientes(); unsubHistInv(); unsubConteo(); };
       }, []);
 
       // SINCRONIZACIÓN AUTOMÁTICA: ASEGURA QUE TODA INCIDENCIA PENDIENTE DE AJUSTE DE INVENTARIO ESTÉ EN CONTEO CÍCLICO
@@ -271,7 +278,7 @@
               const esFisico = motivoObj ? motivoObj.fisico : true;
 
               if (requiereAjuste && !yaAjustado && esFisico && inc.motivo !== "AceptadoPorCliente" && inc.motivo !== "ErrorFacturacion") {
-                const prodNorm = normalizarProd(inc.producto);
+                const prodNorm = normalizarTexto(inc.producto);
                 const uniNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? inc.detalleDanio.unidadDanada : inc.unidad;
                 const cantNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? Number(inc.detalleDanio.cantidadDanada) : Number(inc.cantidad);
 
@@ -286,7 +293,7 @@
                 }
 
                 if (inc.motivo === "Cruce" && inc.productoCruce) {
-                  const prodCruceN = normalizarProd(inc.productoCruce);
+                  const prodCruceN = normalizarTexto(inc.productoCruce);
                   const yaEnConteoCruce = conteoPendiente.some(cp =>
                     cp.producto === prodCruceN &&
                     cp.unidad === inc.unidadCruce &&
@@ -332,7 +339,7 @@
       };
 
       const registrarProductoEnCatalogo = async (nombreProd) => {
-        const nombreNorm = normalizarProd(nombreProd);
+        const nombreNorm = normalizarTexto(nombreProd);
         if (!nombreNorm) return;
         const existe = catalogoProductos.some(p => p.nombre === nombreNorm);
         if (!existe) {
@@ -340,15 +347,24 @@
         }
       };
 
+      const registrarClienteEnCatalogo = async (nombreCliente) => {
+        const nombreNorm = normalizarTexto(nombreCliente);
+        if (!nombreNorm) return;
+        const existe = catalogoClientes.some(c => c.nombre === nombreNorm);
+        if (!existe) {
+          try { await db.collection("catalogo_clientes").add({ nombre: nombreNorm }); } catch (err) {}
+        }
+      };
+
       const registrarConteoPendiente = async (prod, uni, cant, fact) => {
         try {
-          const prodNorm = normalizarProd(prod);
+          const prodNorm = normalizarTexto(prod);
           const snap = await db.collection("conteo_pendiente").where("producto", "==", prodNorm).get();
           const existenteDoc = snap.docs.find(d => d.data().unidad === uni);
 
           if (existenteDoc) {
             const dataExist = existenteDoc.data();
-            if (dataExist.factura && dataExist.factura.includes(fact)) return; // Ya está sumada esta factura
+            if (dataExist.factura && dataExist.factura.includes(fact)) return;
             const nuevaCantidad = (Number(dataExist.cantidad) || 0) + Number(cant);
             const nuevasFacturas = dataExist.factura ? `${dataExist.factura}, #${fact}` : fact;
             await db.collection("conteo_pendiente").doc(existenteDoc.id).update({
@@ -378,6 +394,13 @@
         e.stopPropagation();
         if (confirm("¿Eliminar este producto del catálogo?")) {
           try { await db.collection("catalogo_productos").doc(id).delete(); } catch (err) { alert(err.message); }
+        }
+      };
+
+      const eliminarClienteCatalogo = async (id, e) => {
+        e.stopPropagation();
+        if (confirm("¿Eliminar este cliente del catálogo?")) {
+          try { await db.collection("catalogo_clientes").doc(id).delete(); } catch (err) { alert(err.message); }
         }
       };
 
@@ -432,11 +455,13 @@
           integrantesRuta = equipoAlternativo;
         }
 
-        const prodPrincipal = motivo === "ErrorFacturacion" ? normalizarProd(productoMalFacturado) : normalizarProd(producto);
+        const clienteNorm = normalizarTexto(cliente);
+        const prodPrincipal = motivo === "ErrorFacturacion" ? normalizarTexto(productoMalFacturado) : normalizarTexto(producto);
         const cantPrincipal = motivo === "ErrorFacturacion" ? Number(cantidadMalFacturada) : Number(cantidad);
         const uniPrincipal = motivo === "ErrorFacturacion" ? unidadMalFacturada : unidad;
-        const prodCruceNorm = productoCruce ? normalizarProd(productoCruce) : null;
+        const prodCruceNorm = productoCruce ? normalizarTexto(productoCruce) : null;
 
+        if (clienteNorm) await registrarClienteEnCatalogo(clienteNorm);
         await registrarProductoEnCatalogo(prodPrincipal);
         if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && prodCruceNorm) await registrarProductoEnCatalogo(prodCruceNorm);
 
@@ -480,7 +505,7 @@
 
         const datos = {
           factura: factura.trim(),
-          cliente: cliente.trim(),
+          cliente: clienteNorm,
           fecha,
           ruta: rutaTextoFinal,
           rutaTipo,
@@ -525,7 +550,7 @@
 
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsableAjuste, fechaAjuste, responsableConteo, fechaConteo, detalleExtra = "") => {
         try {
-          const prodNorm = normalizarProd(productoNombre);
+          const prodNorm = normalizarTexto(productoNombre);
           const colRef = db.collection("historial_inventario");
           await colRef.add({
             producto: prodNorm,
@@ -557,7 +582,7 @@
         e.preventDefault();
         if (!prodBodega.trim()) return alert("Ingresa el nombre del producto.");
 
-        const prodNorm = normalizarProd(prodBodega);
+        const prodNorm = normalizarTexto(prodBodega);
         await registrarProductoEnCatalogo(prodNorm);
 
         try {
@@ -725,7 +750,6 @@
             ? `Conteo Cíclico Digital (Stock físico contado: ${itemConteo.cantidadContada} ${itemConteo.unidad} | Desfase reportado: ${itemConteo.cantidad} ${itemConteo.unidad})`
             : `Conteo Cíclico Físico (Cantidad ajustada: ${itemConteo.cantidad} ${itemConteo.unidad} — Ref Fact #${itemConteo.factura})`;
 
-          // 1. Guarda en el Historial Acumulativo
           await registrarEnHistorialInventario(
             itemConteo.producto,
             itemConteo.unidad,
@@ -737,11 +761,10 @@
             detalleTexto
           );
 
-          // 2. Marca como completada la acción en todas las incidencias vinculadas
           const facturasAsociadas = itemConteo.factura.split(",").map(f => f.replace("#", "").trim());
           for (const inc of incidencias) {
-            const prodNormInc = normalizarProd(inc.producto);
-            const prodCruceInc = inc.productoCruce ? normalizarProd(inc.productoCruce) : "";
+            const prodNormInc = normalizarTexto(inc.producto);
+            const prodCruceInc = inc.productoCruce ? normalizarTexto(inc.productoCruce) : "";
             if (facturasAsociadas.includes(inc.factura) && (prodNormInc === itemConteo.producto || prodCruceInc === itemConteo.producto)) {
               const checks = inc.checksAcciones || {};
               if ((inc.acciones || []).includes("Ajustar Inventario en Bodega")) {
@@ -759,7 +782,6 @@
             }
           }
 
-          // 3. Elimina el ítem de conteo pendiente
           await db.collection("conteo_pendiente").doc(id).delete();
 
           setSeleccionadosConteoDigital(prev => {
@@ -883,8 +905,7 @@
             await registrarEnHistorialInventario(incidenciaActual.productoCruce, incidenciaActual.unidadCruce, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Cruce en Ruta (${incidenciaActual.cantidadCruce} ${incidenciaActual.unidadCruce})`);
           }
 
-          // También limpia si estaba en conteo pendiente
-          const prodNorm = normalizarProd(incidenciaActual.producto);
+          const prodNorm = normalizarTexto(incidenciaActual.producto);
           const cpAsociado = conteoPendiente.find(cp => cp.producto === prodNorm && cp.factura && cp.factura.includes(incidenciaActual.factura));
           if (cpAsociado) {
             await db.collection("conteo_pendiente").doc(cpAsociado.id).delete();
@@ -2314,9 +2335,12 @@
                       <label className="text-xs font-bold text-slate-700 block mb-1">Nº Factura *</label>
                       <input type="text" value={factura} onChange={e => setFactura(e.target.value)} placeholder="Ej: 45892" className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none" required />
                     </div>
-                    <div>
-                      <label className="text-xs font-bold text-slate-700 block mb-1">Cliente / Local</label>
-                      <input type="text" value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Ej: Minimarket Don Pedro" className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none" />
+                    <div className="relative">
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Cliente / Local <span className="text-[10px] text-amber-700 font-normal">💡 Autocompletado</span></label>
+                      <input type="text" list="lista-clientes" value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Ej: Minimarket Don Pedro" className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none" />
+                      <datalist id="lista-clientes">
+                        {catalogoClientes.map(c => <option key={c.id} value={c.nombre} />)}
+                      </datalist>
                     </div>
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-1">Fecha</label>
@@ -2586,27 +2610,53 @@
                     </div>
                   )}
 
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                    <details className="group">
-                      <summary className="text-xs font-bold text-amber-800 cursor-pointer flex items-center justify-between">
-                        <span>📚 Administrar Catálogo Inteligente ({catalogoProductos.length} guardados)</span>
-                        <span className="text-[10px] bg-white border border-slate-300 px-2 py-1 rounded-lg text-slate-700 group-open:rotate-180 transition">▼ Ver lista</span>
-                      </summary>
-                      <div className="max-h-36 overflow-y-auto space-y-1.5 mt-2 pr-1">
-                        {catalogoProductos.length === 0 ? (
-                          <p className="text-xs text-slate-500 italic">Aún no hay productos guardados.</p>
-                        ) : (
-                          catalogoProductos.map(cp => (
-                            <div key={cp.id} className="flex items-center justify-between bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
-                              <span className="font-semibold text-slate-900">{cp.nombre}</span>
-                              <button type="button" onClick={(e) => eliminarProductoCatalogo(cp.id, e)} className="text-rose-600 hover:text-rose-800 text-[11px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer">
-                                🗑️ Borrar error
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </details>
+                  {/* ADMINISTRADORES DE CATÁLOGOS INTELIGENTES (PRODUCTOS Y CLIENTES) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                      <details className="group">
+                        <summary className="text-xs font-bold text-amber-800 cursor-pointer flex items-center justify-between">
+                          <span>📚 Catálogo Productos ({catalogoProductos.length})</span>
+                          <span className="text-[10px] bg-white border border-slate-300 px-2 py-1 rounded-lg text-slate-700 group-open:rotate-180 transition">▼ Ver</span>
+                        </summary>
+                        <div className="max-h-36 overflow-y-auto space-y-1.5 mt-2 pr-1">
+                          {catalogoProductos.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic">Aún no hay productos guardados.</p>
+                          ) : (
+                            catalogoProductos.map(cp => (
+                              <div key={cp.id} className="flex items-center justify-between bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
+                                <span className="font-semibold text-slate-900 truncate pr-2">{cp.nombre}</span>
+                                <button type="button" onClick={(e) => eliminarProductoCatalogo(cp.id, e)} className="text-rose-600 hover:text-rose-800 text-[10px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer whitespace-nowrap">
+                                  🗑️ Borrar
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </details>
+                    </div>
+
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                      <details className="group">
+                        <summary className="text-xs font-bold text-sky-800 cursor-pointer flex items-center justify-between">
+                          <span>🏪 Catálogo Clientes ({catalogoClientes.length})</span>
+                          <span className="text-[10px] bg-white border border-slate-300 px-2 py-1 rounded-lg text-slate-700 group-open:rotate-180 transition">▼ Ver</span>
+                        </summary>
+                        <div className="max-h-36 overflow-y-auto space-y-1.5 mt-2 pr-1">
+                          {catalogoClientes.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic">Aún no hay clientes guardados.</p>
+                          ) : (
+                            catalogoClientes.map(cc => (
+                              <div key={cc.id} className="flex items-center justify-between bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
+                                <span className="font-semibold text-slate-900 truncate pr-2">{cc.nombre}</span>
+                                <button type="button" onClick={(e) => eliminarClienteCatalogo(cc.id, e)} className="text-rose-600 hover:text-rose-800 text-[10px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer whitespace-nowrap">
+                                  🗑️ Borrar
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </details>
+                    </div>
                   </div>
 
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
