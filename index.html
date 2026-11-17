@@ -44,31 +44,30 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    // LOGO OFICIAL PGB DISTRIBUTION CHILE SPA CON MAPA DE CHILE EXACTO PUNTO POR PUNTO
+    // LOGO OFICIAL PGB DISTRIBUTION CHILE SPA (MATRIZ IDÉNTICA A LA IMAGEN ORIGINAL)
     const LogoPGB = ({ className = "h-14 w-auto max-w-full" }) => {
       const dots = useMemo(() => {
-        // Matriz exacta de 12 filas x 60 columnas replicando la silueta horizontal de Chile del logo oficial
-        // 'B' = Turquesa intenso (#1FB6E3), 'L' = Celeste claro (#A6E8F7), '.' = vacío
+        // Matriz de puntos idéntica al diseño original proporcionado por el usuario
         const grid = [
-          "...........................................................L",
-          "........BB.................................................L",
-          "......BBBB.............................................BB.LL",
-          "..BBBBBBBBBBBBBB.......................................BBBBB",
-          ".BBBBBBBBBBBBBBBB......................................BBBBB",
-          "..BB.L..BBBBBBBBBBBBB..BBBB............................BBBBB",
-          "...............BBBBBBBBBBBBBBBBB.B.....................BBBBB",
-          "...................BB....BBBBBBBBBBBB...LLLLL..........BBBBB",
-          "...........................BBBBBBBBBBBBBBBBBBBBBL.....BBBBBB",
-          "................................BBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-          "......................................BB.BBBBBBBBBBBBBBBB.B.",
-          ".............................................LL.BB..BB......"
+          "..................................................................L",
+          "................................................................L.L",
+          "...............................................................BB.L",
+          ".............................................................BBBB..",
+          "...........................................................BBBB....",
+          ".B.......................................................BBBBB.....",
+          "BBB.....................................................BBBBB......",
+          ".BBBB..................................................BBBBB.......",
+          "...BBBBBB...........................................BBBBBB.........",
+          "......BBBBBBBBBBB............................BBBBBBBBBBBB..........",
+          "..........BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.............",
+          "..................BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB..................."
         ];
 
         const list = [];
-        const startX = 36;
-        const startY = 92;
-        const stepX = 12.2;
-        const stepY = 10.2;
+        const startX = 28;
+        const startY = 100;
+        const stepX = 11.2;
+        const stepY = 9.2;
 
         for (let r = 0; r < grid.length; r++) {
           const row = grid[r];
@@ -88,7 +87,7 @@
 
       return (
         <svg
-          viewBox="0 0 800 225"
+          viewBox="0 0 790 220"
           preserveAspectRatio="xMidYMid meet"
           className={className}
           xmlns="http://www.w3.org/2000/svg"
@@ -97,26 +96,26 @@
         >
           <text
             x="395"
-            y="58"
+            y="55"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
             fontStyle="italic"
             fontWeight="bold"
-            fontSize="55"
+            fontSize="54"
             letterSpacing="0.5"
           >
             PGB Distribution Chile SPA
           </text>
           <text
             x="475"
-            y="95"
+            y="92"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
             fontStyle="italic"
             fontWeight="bold"
-            fontSize="27"
+            fontSize="26"
             letterSpacing="0.3"
           >
             Distribuidor de Calidad y servicios
@@ -126,7 +125,7 @@
               key={idx}
               cx={d.cx}
               cy={d.cy}
-              r="4.1"
+              r="3.8"
               fill={d.light ? "#A6E8F7" : "#1FB6E3"}
             />
           ))}
@@ -1667,7 +1666,7 @@
                 </div>
               )}
 
-              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB SIN RECORTES */}
+              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB FIEL AL ORIGINAL */}
               <div className="light-card rounded-3xl p-6 sm:p-8 mb-6 relative overflow-hidden no-print">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
                   <div className="w-full">
@@ -2582,7 +2581,7 @@
                         </div>
                         <div>
                           <label className="text-[11px] font-bold text-slate-600 block mb-1">Cantidad *</label>
-                          <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 outline-none" required />
+                          <input type="number" min="1" value={cantidad} onChange={e => setCantidad(e.target.value)} className="w-full bg-white border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 outline-none" required />
                         </div>
                       </div>
                       <div>
@@ -3270,7 +3269,7 @@
                             {c.registros.map((r, i) => (
                               <div key={i} className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs flex justify-between items-center">
                                 <div>
-                                  <span className="font-bold text-amber-700">Fact #{r.factura}</span> • <span className="font-bold text-slate-900">{r.motivo}</span>: {r.cantidad} {r.unidad} de {r.producto}
+                                  <span className="font-bold text-amber-700">Fact #${r.factura}</span> • <span className="font-bold text-slate-900">{r.motivo}</span>: {r.cantidad} {r.unidad} de {r.producto}
                                 </div>
                                 <div className="text-slate-600">Armó: <strong className="text-slate-900">{r.armador}</strong> | Registró: {r.registradoPor}</div>
                               </div>
