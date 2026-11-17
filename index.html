@@ -44,31 +44,42 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    // COMPONENTE VECTORIAL CORREGIDO SIN RECORTES LATERALES
+    // LOGO OFICIAL PGB DISTRIBUTION CHILE SPA CON MAPA DE CHILE EXACTO PUNTO POR PUNTO
     const LogoPGB = ({ className = "h-14 w-auto max-w-full" }) => {
       const dots = useMemo(() => {
-        const list = [];
-        const cols = 64;
-        for (let c = 0; c < cols; c++) {
-          const x = 40 + c * 11.5;
-          let centerY = 136 + Math.sin(c * 0.085) * 14 + (c > 38 ? (c - 38) * 1.4 : 0);
-          let thickness = 3;
-          if (c >= 4 && c <= 11) thickness = 5;
-          else if (c > 26 && c < 52) thickness = 4;
-          else if (c >= 52) thickness = 6;
+        // Matriz exacta de 12 filas x 60 columnas replicando la silueta horizontal de Chile del logo oficial
+        // 'B' = Turquesa intenso (#1FB6E3), 'L' = Celeste claro (#A6E8F7), '.' = vacío
+        const grid = [
+          "...........................................................L",
+          "........BB.................................................L",
+          "......BBBB.............................................BB.LL",
+          "..BBBBBBBBBBBBBB.......................................BBBBB",
+          ".BBBBBBBBBBBBBBBB......................................BBBBB",
+          "..BB.L..BBBBBBBBBBBBB..BBBB............................BBBBB",
+          "...............BBBBBBBBBBBBBBBBB.B.....................BBBBB",
+          "...................BB....BBBBBBBBBBBB...LLLLL..........BBBBB",
+          "...........................BBBBBBBBBBBBBBBBBBBBBL.....BBBBBB",
+          "................................BBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "......................................BB.BBBBBBBBBBBBBBBB.B.",
+          ".............................................LL.BB..BB......"
+        ];
 
-          if (c >= 56) {
-            const extraRows = (c - 55) * 1.6;
-            for (let r = -extraRows; r <= 2; r++) {
-              const isLight = (c + Math.round(r)) % 5 === 0;
-              list.push({ cx: x, cy: centerY + r * 9.5, light: isLight });
-            }
-          } else {
-            const startR = -Math.floor(thickness / 2);
-            const endR = Math.ceil(thickness / 2);
-            for (let r = startR; r <= endR; r++) {
-              const isLight = (c * 3 + r) % 7 === 0 || (r === startR && c % 3 === 0);
-              list.push({ cx: x, cy: centerY + r * 9.5, light: isLight });
+        const list = [];
+        const startX = 36;
+        const startY = 92;
+        const stepX = 12.2;
+        const stepY = 10.2;
+
+        for (let r = 0; r < grid.length; r++) {
+          const row = grid[r];
+          for (let c = 0; c < row.length; c++) {
+            const ch = row[c];
+            if (ch === "B" || ch === "L") {
+              list.push({
+                cx: startX + c * stepX,
+                cy: startY + r * stepY,
+                light: ch === "L"
+              });
             }
           }
         }
@@ -77,7 +88,7 @@
 
       return (
         <svg
-          viewBox="0 0 820 215"
+          viewBox="0 0 800 225"
           preserveAspectRatio="xMidYMid meet"
           className={className}
           xmlns="http://www.w3.org/2000/svg"
@@ -85,27 +96,27 @@
           aria-label="PGB Distribution Chile SPA"
         >
           <text
-            x="410"
-            y="65"
+            x="395"
+            y="58"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
             fontStyle="italic"
             fontWeight="bold"
-            fontSize="56"
+            fontSize="55"
             letterSpacing="0.5"
           >
             PGB Distribution Chile SPA
           </text>
           <text
-            x="485"
-            y="102"
+            x="475"
+            y="95"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
             fontStyle="italic"
             fontWeight="bold"
-            fontSize="28"
+            fontSize="27"
             letterSpacing="0.3"
           >
             Distribuidor de Calidad y servicios
@@ -115,8 +126,8 @@
               key={idx}
               cx={d.cx}
               cy={d.cy}
-              r="3.8"
-              fill={d.light ? "#A5E8F7" : "#22B8E6"}
+              r="4.1"
+              fill={d.light ? "#A6E8F7" : "#1FB6E3"}
             />
           ))}
         </svg>
@@ -295,7 +306,6 @@
         }
       }, [rutaTipo, personalRutaActual]);
 
-      // CONEXIÓN ROBUSTA A FIREBASE: PRIMERO AUTENTICA Y LUEGO SUSCRIBE TODAS LAS COLECCIONES
       useEffect(() => {
         let unsubs = [];
 
@@ -350,7 +360,6 @@
             iniciarListeners();
           })
           .catch(() => {
-            // Si la autenticación anónima ya está activa o reglas permiten lectura directa, inicia igual
             iniciarListeners();
           });
 
@@ -1668,7 +1677,7 @@
                         {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
                       </span>
                       <div className="w-full sm:w-auto max-w-full overflow-hidden">
-                        <LogoPGB className="h-14 sm:h-16 w-auto max-w-full" />
+                        <LogoPGB className="h-16 sm:h-20 w-auto max-w-full" />
                       </div>
                     </div>
                     <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
