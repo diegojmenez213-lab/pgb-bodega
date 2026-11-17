@@ -44,24 +44,21 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    // COMPONENTE VECTORIAL DE ALTA DEFINICIÓN DEL LOGO OFICIAL PGB DISTRIBUTION CHILE SPA
-    const LogoPGB = ({ className = "h-12 w-auto" }) => {
+    // COMPONENTE VECTORIAL CORREGIDO SIN RECORTES LATERALES
+    const LogoPGB = ({ className = "h-14 w-auto max-w-full" }) => {
       const dots = useMemo(() => {
         const list = [];
-        // Perfil horizontal punteado de Chile (Norte a Sur de izquierda a derecha)
-        const cols = 58;
+        const cols = 64;
         for (let c = 0; c < cols; c++) {
-          const x = 18 + c * 11;
-          // Curva orgánica que replica la silueta horizontal del logo oficial
-          let centerY = 128 + Math.sin(c * 0.09) * 14 + (c > 35 ? (c - 35) * 1.4 : 0);
+          const x = 40 + c * 11.5;
+          let centerY = 136 + Math.sin(c * 0.085) * 14 + (c > 38 ? (c - 38) * 1.4 : 0);
           let thickness = 3;
-          if (c >= 4 && c <= 10) thickness = 5;
-          else if (c > 25 && c < 48) thickness = 4;
-          else if (c >= 48) thickness = 6;
+          if (c >= 4 && c <= 11) thickness = 5;
+          else if (c > 26 && c < 52) thickness = 4;
+          else if (c >= 52) thickness = 6;
 
-          // Punta austral ascendente al extremo derecho
-          if (c >= 51) {
-            const extraRows = (c - 50) * 1.6;
+          if (c >= 56) {
+            const extraRows = (c - 55) * 1.6;
             for (let r = -extraRows; r <= 2; r++) {
               const isLight = (c + Math.round(r)) % 5 === 0;
               list.push({ cx: x, cy: centerY + r * 9.5, light: isLight });
@@ -79,29 +76,36 @@
       }, []);
 
       return (
-        <svg viewBox="0 0 680 195" className={className} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PGB Distribution Chile SPA">
+        <svg
+          viewBox="0 0 820 215"
+          preserveAspectRatio="xMidYMid meet"
+          className={className}
+          xmlns="http://www.w3.org/2000/svg"
+          role="img"
+          aria-label="PGB Distribution Chile SPA"
+        >
           <text
-            x="340"
-            y="62"
+            x="410"
+            y="65"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
             fontStyle="italic"
             fontWeight="bold"
-            fontSize="54"
+            fontSize="56"
             letterSpacing="0.5"
           >
             PGB Distribution Chile SPA
           </text>
           <text
-            x="405"
-            y="98"
+            x="485"
+            y="102"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
             fontStyle="italic"
             fontWeight="bold"
-            fontSize="27"
+            fontSize="28"
             letterSpacing="0.3"
           >
             Distribuidor de Calidad y servicios
@@ -291,52 +295,68 @@
         }
       }, [rutaTipo, personalRutaActual]);
 
+      // CONEXIÓN ROBUSTA A FIREBASE: PRIMERO AUTENTICA Y LUEGO SUSCRIBE TODAS LAS COLECCIONES
       useEffect(() => {
-        auth.signInAnonymously().catch(() => {});
-        
-        const unsubInc = db.collection("incidencias").onSnapshot((snap) => {
-          setConectado(true);
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          setIncidencias(lista);
-        }, () => {});
+        let unsubs = [];
 
-        const unsubIncBodega = db.collection("incidentes_bodega").onSnapshot((snap) => {
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          setIncidentesBodega(lista);
-        }, () => {});
+        const iniciarListeners = () => {
+          const unsubInc = db.collection("incidencias").onSnapshot((snap) => {
+            setConectado(true);
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setIncidencias(lista);
+          }, (err) => { console.error("Error incidencias:", err); });
 
-        const unsubCierres = db.collection("cierres_semanales").onSnapshot((snap) => {
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          lista.sort((a, b) => new Date(b.fechaCierre) - new Date(a.fechaCierre));
-          setCierres(lista);
-        });
+          const unsubIncBodega = db.collection("incidentes_bodega").onSnapshot((snap) => {
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setIncidentesBodega(lista);
+          }, (err) => { console.error("Error bodega:", err); });
 
-        const unsubCat = db.collection("catalogo_productos").onSnapshot((snap) => {
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
-          setCatalogoProductos(lista);
-        });
+          const unsubCierres = db.collection("cierres_semanales").onSnapshot((snap) => {
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            lista.sort((a, b) => new Date(b.fechaCierre) - new Date(a.fechaCierre));
+            setCierres(lista);
+          }, (err) => { console.error("Error cierres:", err); });
 
-        const unsubCatClientes = db.collection("catalogo_clientes").onSnapshot((snap) => {
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
-          setCatalogoClientes(lista);
-        });
+          const unsubCat = db.collection("catalogo_productos").onSnapshot((snap) => {
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+            setCatalogoProductos(lista);
+          }, (err) => { console.error("Error cat prod:", err); });
 
-        const unsubHistInv = db.collection("historial_inventario").onSnapshot((snap) => {
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          setHistorialInventario(lista);
-        });
+          const unsubCatClientes = db.collection("catalogo_clientes").onSnapshot((snap) => {
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+            setCatalogoClientes(lista);
+          }, (err) => { console.error("Error cat cli:", err); });
 
-        const unsubConteo = db.collection("conteo_pendiente").onSnapshot((snap) => {
-          const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setConteoPendiente(lista);
-        });
+          const unsubHistInv = db.collection("historial_inventario").onSnapshot((snap) => {
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setHistorialInventario(lista);
+          }, (err) => { console.error("Error historial:", err); });
 
-        return () => { unsubInc(); unsubIncBodega(); unsubCierres(); unsubCat(); unsubCatClientes(); unsubHistInv(); unsubConteo(); };
+          const unsubConteo = db.collection("conteo_pendiente").onSnapshot((snap) => {
+            const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setConteoPendiente(lista);
+          }, (err) => { console.error("Error conteo:", err); });
+
+          unsubs = [unsubInc, unsubIncBodega, unsubCierres, unsubCat, unsubCatClientes, unsubHistInv, unsubConteo];
+        };
+
+        auth.signInAnonymously()
+          .then(() => {
+            iniciarListeners();
+          })
+          .catch(() => {
+            // Si la autenticación anónima ya está activa o reglas permiten lectura directa, inicia igual
+            iniciarListeners();
+          });
+
+        return () => {
+          unsubs.forEach(fn => { if (typeof fn === "function") fn(); });
+        };
       }, []);
 
       useEffect(() => {
@@ -1413,7 +1433,7 @@
               {modoImpresionReporte === 'general' && (
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
-                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA Y RUTAS</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
@@ -1446,7 +1466,7 @@
               {modoImpresionReporte === 'inventario' && (
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
-                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE CORRECCIÓN Y AUDITORÍA DE INVENTARIO</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
@@ -1485,7 +1505,7 @@
               {modoImpresionReporte === 'incidentes_bodega' && (
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
-                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE DE INCIDENTES Y MERMAS INTERNAS EN BODEGA</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
@@ -1523,7 +1543,7 @@
               {modoImpresionReporte === 'retornos_consolidado' && (
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
-                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE CONSOLIDADO DE RETORNOS A BODEGA (AGRUPADO POR RUTA)</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
@@ -1574,7 +1594,7 @@
               {modoImpresionReporte === 'individual' && facturaImprimirIndividual && (
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-4">
-                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE DE RECEPCIÓN DE RETORNO EN BODEGA</h2>
                     <p className="text-xs text-gray-600 mt-1">Factura #{facturaImprimirIndividual.factura} | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
@@ -1610,7 +1630,7 @@
               {modoImpresionReporte === 'hoja_conteo' && (
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-4">
-                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <LogoPGB className="h-24 w-auto mb-2" />
                     <p className="text-xs font-bold uppercase tracking-wider text-gray-800">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
                     <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
                   </div>
@@ -1638,17 +1658,17 @@
                 </div>
               )}
 
-              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB */}
+              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB SIN RECORTES */}
               <div className="light-card rounded-3xl p-6 sm:p-8 mb-6 relative overflow-hidden no-print">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3 mb-3">
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                  <div className="w-full">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 w-fit shrink-0">
                         <span className={`h-2 w-2 rounded-full ${conectado ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'}`}></span>
                         {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
                       </span>
-                      <div className="bg-white/80 rounded-xl px-1 py-0.5">
-                        <LogoPGB className="h-11 sm:h-14 w-auto" />
+                      <div className="w-full sm:w-auto max-w-full overflow-hidden">
+                        <LogoPGB className="h-14 sm:h-16 w-auto max-w-full" />
                       </div>
                     </div>
                     <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
