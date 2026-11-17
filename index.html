@@ -44,6 +44,81 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
+    // COMPONENTE VECTORIAL DE ALTA DEFINICIÓN DEL LOGO OFICIAL PGB DISTRIBUTION CHILE SPA
+    const LogoPGB = ({ className = "h-12 w-auto" }) => {
+      const dots = useMemo(() => {
+        const list = [];
+        // Perfil horizontal punteado de Chile (Norte a Sur de izquierda a derecha)
+        const cols = 58;
+        for (let c = 0; c < cols; c++) {
+          const x = 18 + c * 11;
+          // Curva orgánica que replica la silueta horizontal del logo oficial
+          let centerY = 128 + Math.sin(c * 0.09) * 14 + (c > 35 ? (c - 35) * 1.4 : 0);
+          let thickness = 3;
+          if (c >= 4 && c <= 10) thickness = 5;
+          else if (c > 25 && c < 48) thickness = 4;
+          else if (c >= 48) thickness = 6;
+
+          // Punta austral ascendente al extremo derecho
+          if (c >= 51) {
+            const extraRows = (c - 50) * 1.6;
+            for (let r = -extraRows; r <= 2; r++) {
+              const isLight = (c + Math.round(r)) % 5 === 0;
+              list.push({ cx: x, cy: centerY + r * 9.5, light: isLight });
+            }
+          } else {
+            const startR = -Math.floor(thickness / 2);
+            const endR = Math.ceil(thickness / 2);
+            for (let r = startR; r <= endR; r++) {
+              const isLight = (c * 3 + r) % 7 === 0 || (r === startR && c % 3 === 0);
+              list.push({ cx: x, cy: centerY + r * 9.5, light: isLight });
+            }
+          }
+        }
+        return list;
+      }, []);
+
+      return (
+        <svg viewBox="0 0 680 195" className={className} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PGB Distribution Chile SPA">
+          <text
+            x="340"
+            y="62"
+            textAnchor="middle"
+            fill="#52525B"
+            fontFamily="Georgia, 'Times New Roman', serif"
+            fontStyle="italic"
+            fontWeight="bold"
+            fontSize="54"
+            letterSpacing="0.5"
+          >
+            PGB Distribution Chile SPA
+          </text>
+          <text
+            x="405"
+            y="98"
+            textAnchor="middle"
+            fill="#52525B"
+            fontFamily="Georgia, 'Times New Roman', serif"
+            fontStyle="italic"
+            fontWeight="bold"
+            fontSize="27"
+            letterSpacing="0.3"
+          >
+            Distribuidor de Calidad y servicios
+          </text>
+          {dots.map((d, idx) => (
+            <circle
+              key={idx}
+              cx={d.cx}
+              cy={d.cy}
+              r="3.8"
+              fill={d.light ? "#A5E8F7" : "#22B8E6"}
+            />
+          ))}
+        </svg>
+      );
+    };
+
     const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
     const MOTIVOS = [
       { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)", fisico: true },
@@ -264,7 +339,6 @@
         return () => { unsubInc(); unsubIncBodega(); unsubCierres(); unsubCat(); unsubCatClientes(); unsubHistInv(); unsubConteo(); };
       }, []);
 
-      // SINCRONIZACIÓN AUTOMÁTICA: ASEGURA QUE TODA INCIDENCIA PENDIENTE DE AJUSTE DE INVENTARIO ESTÉ EN CONTEO CÍCLICO
       useEffect(() => {
         if (!conectado || sincronizandoRef.current) return;
 
@@ -1335,11 +1409,12 @@
                 </div>
               )}
 
+              {/* PLANTILLAS DE IMPRESIÓN PDF CON MEMBRETE CORPORATIVO Y LOGO */}
               {modoImpresionReporte === 'general' && (
                 <div className="print-only bg-white text-black p-8">
-                  <div className="text-center border-b pb-4 mb-6">
-                    <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
-                    <h2 className="text-sm font-semibold">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA Y RUTAS</h2>
+                  <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
+                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA Y RUTAS</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
 
@@ -1370,9 +1445,9 @@
 
               {modoImpresionReporte === 'inventario' && (
                 <div className="print-only bg-white text-black p-8">
-                  <div className="text-center border-b pb-4 mb-6">
-                    <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
-                    <h2 className="text-sm font-semibold">REPORTE OFICIAL DE CORRECCIÓN Y AUDITORÍA DE INVENTARIO</h2>
+                  <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
+                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE CORRECCIÓN Y AUDITORÍA DE INVENTARIO</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
 
@@ -1409,9 +1484,9 @@
 
               {modoImpresionReporte === 'incidentes_bodega' && (
                 <div className="print-only bg-white text-black p-8">
-                  <div className="text-center border-b pb-4 mb-6">
-                    <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
-                    <h2 className="text-sm font-semibold">REPORTE DE INCIDENTES Y MERMAS INTERNAS EN BODEGA</h2>
+                  <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
+                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE DE INCIDENTES Y MERMAS INTERNAS EN BODEGA</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
 
@@ -1447,9 +1522,9 @@
 
               {modoImpresionReporte === 'retornos_consolidado' && (
                 <div className="print-only bg-white text-black p-8">
-                  <div className="text-center border-b pb-4 mb-6">
-                    <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
-                    <h2 className="text-sm font-semibold">REPORTE CONSOLIDADO DE RETORNOS A BODEGA (AGRUPADO POR RUTA)</h2>
+                  <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
+                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE CONSOLIDADO DE RETORNOS A BODEGA (AGRUPADO POR RUTA)</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
 
@@ -1498,9 +1573,9 @@
 
               {modoImpresionReporte === 'individual' && facturaImprimirIndividual && (
                 <div className="print-only bg-white text-black p-8">
-                  <div className="text-center border-b pb-4 mb-4">
-                    <h1 className="text-2xl font-bold">PGB DISTRIBUTION CHILE SpA</h1>
-                    <h2 className="text-sm font-semibold">REPORTE DE RECEPCIÓN DE RETORNO EN BODEGA</h2>
+                  <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-4">
+                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE DE RECEPCIÓN DE RETORNO EN BODEGA</h2>
                     <p className="text-xs text-gray-600 mt-1">Factura #{facturaImprimirIndividual.factura} | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
 
@@ -1534,9 +1609,9 @@
 
               {modoImpresionReporte === 'hoja_conteo' && (
                 <div className="print-only bg-white text-black p-8">
-                  <div className="text-center border-b pb-4 mb-4">
-                    <h2 className="text-xl font-bold">PGB DISTRIBUTION CHILE SpA</h2>
-                    <p className="text-xs font-semibold">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
+                  <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-4">
+                    <LogoPGB className="h-20 w-auto mb-2" />
+                    <p className="text-xs font-bold uppercase tracking-wider text-gray-800">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
                     <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
                   </div>
                   <table className="w-full text-left text-xs border-collapse border border-gray-400 mt-4">
@@ -1563,16 +1638,18 @@
                 </div>
               )}
 
-              {/* ENCABEZADO BLANCO CORPORATIVO */}
+              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB */}
               <div className="light-card rounded-3xl p-6 sm:p-8 mb-6 relative overflow-hidden no-print">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
                   <div>
-                    <div className="flex items-center gap-2.5 mb-2 lg:hidden">
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3 mb-3">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                         <span className={`h-2 w-2 rounded-full ${conectado ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'}`}></span>
                         {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
                       </span>
-                      <span className="text-xs text-slate-500 font-semibold">PGB Distribution Chile SpA</span>
+                      <div className="bg-white/80 rounded-xl px-1 py-0.5">
+                        <LogoPGB className="h-11 sm:h-14 w-auto" />
+                      </div>
                     </div>
                     <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
                       CONTROL DE <span className="text-amber-500">BODEGA</span>
@@ -1594,7 +1671,7 @@
                     </button>
                   </div>
 
-                  <div className="hidden lg:block">
+                  <div className="hidden lg:block shrink-0">
                     <button onClick={() => { limpiarFormulario(); setVista("nuevo"); }} className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-sm px-6 py-3.5 rounded-2xl shadow-md transition cursor-pointer">
                       ➕ Registrar Nueva Incidencia
                     </button>
