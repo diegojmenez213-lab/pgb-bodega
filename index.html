@@ -48,25 +48,25 @@
     const LogoPGB = ({ className = "w-full h-auto" }) => {
       const dots = useMemo(() => {
         const grid = [
-          "..................................................................L",
-          "................................................................L.L",
-          "...............................................................BB.L",
-          ".............................................................BBBB..",
-          "...........................................................BBBB....",
-          ".B.......................................................BBBBB.....",
-          "BBB.....................................................BBBBB......",
-          ".BBBB..................................................BBBBB.......",
-          "...BBBBBB...........................................BBBBBB.........",
-          "......BBBBBBBBBBB............................BBBBBBBBBBBB..........",
-          "..........BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.............",
-          "..................BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB..................."
+          "................................................................................L",
+          "..............................................................................L.L",
+          ".............................................................................BB.L",
+          "...........................................................................BBBB..",
+          ".........................................................................BBBB....",
+          ".B.....................................................................BBBBB.....",
+          "BBB...................................................................BBBBB......",
+          ".BBBB................................................................BBBBB.......",
+          "...BBBBBB.........................................................BBBBBB.........",
+          "......BBBBBBBBBBB..........................................BBBBBBBBBBBB..........",
+          "..........BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB..............",
+          "..................BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB....................."
         ];
 
         const list = [];
-        const startX = 28;
-        const startY = 100;
+        const startX = 25;
+        const startY = 118;
         const stepX = 11.2;
-        const stepY = 9.2;
+        const stepY = 9.5;
 
         for (let r = 0; r < grid.length; r++) {
           const row = grid[r];
@@ -86,7 +86,7 @@
 
       return (
         <svg
-          viewBox="0 0 790 220"
+          viewBox="0 0 950 255"
           preserveAspectRatio="xMidYMid meet"
           className={className}
           xmlns="http://www.w3.org/2000/svg"
@@ -94,8 +94,8 @@
           aria-label="PGB Distribution Chile SPA"
         >
           <text
-            x="395"
-            y="55"
+            x="475"
+            y="58"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
@@ -107,8 +107,8 @@
             PGB Distribution Chile SPA
           </text>
           <text
-            x="475"
-            y="92"
+            x="565"
+            y="98"
             textAnchor="middle"
             fill="#52525B"
             fontFamily="Georgia, 'Times New Roman', serif"
@@ -1665,7 +1665,7 @@
                 </div>
               )}
 
-              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB EN TAMAÑO PERFECTO */}
+              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB EN PROPORCIÓN REAL */}
               <div className="light-card rounded-3xl p-6 sm:p-8 mb-6 relative overflow-hidden no-print">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
                   <div className="w-full">
@@ -1675,9 +1675,9 @@
                         {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
                       </span>
                     </div>
-                    {/* Contenedor optimizado y fluido para el logo */}
-                    <div className="w-full max-w-[360px] sm:max-w-[440px] my-2">
-                      <LogoPGB className="w-full h-auto max-h-[90px]" />
+                    {/* Contenedor optimizado y fluido con la proporción exacta del PNG */}
+                    <div className="w-full max-w-[320px] sm:max-w-[420px] my-2">
+                      <LogoPGB className="w-full h-auto" />
                     </div>
                     <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900 mt-2">
                       CONTROL DE <span className="text-amber-500">BODEGA</span>
@@ -2449,7 +2449,7 @@
                     </div>
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-1">Fecha</label>
-                      <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
+                      <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none" />
                     </div>
                   </div>
 
