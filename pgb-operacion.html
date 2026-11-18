@@ -45,49 +45,66 @@
     const db = firebase.firestore();
 
     const LogoPGB = ({ className = "w-full h-auto" }) => {
-  const [logoUrl, setLogoUrl] = useState("");
+      const [logoUrl, setLogoUrl] = useState("");
 
-  useEffect(() => {
-    const unsub = db.collection("saas_empresas").doc("769497226").onSnapshot((doc) => {
-      if (doc.exists && doc.data().logoBase64) {
-        setLogoUrl(doc.data().logoBase64);
-      } else {
-        setLogoUrl("");
+      useEffect(() => {
+        const unsub = db.collection("saas_empresas").doc("769497226").onSnapshot((doc) => {
+          if (doc.exists && doc.data().logoBase64) {
+            setLogoUrl(doc.data().logoBase64);
+          } else {
+            setLogoUrl("");
+          }
+        });
+        return () => unsub();
+      }, []);
+
+      if (logoUrl) {
+        return (
+          <img
+            src={logoUrl}
+            alt="PGB Distribution Chile SpA"
+            className={`${className} object-contain mx-auto`}
+          />
+        );
       }
-    });
-    return () => unsub();
-  }, []);
 
-  if (logoUrl) {
-    return (
-      <img
-        src={logoUrl}
-        alt="PGB Distribution Chile SpA"
-        className={`${className} object-contain mx-auto`}
-      />
-    );
-  }
-
-  return (
-    <div className="text-center py-2">
-      <span className="font-extrabold text-slate-800 text-lg tracking-tight">
-        PGB Distribution Chile SpA
-      </span>
-    </div>
-  );
-};
+      return (
+        <div className="text-center py-2">
+          <span className="font-extrabold text-slate-800 text-lg tracking-tight">
+            PGB Distribution Chile SpA
+          </span>
+        </div>
+      );
+    };
 
     const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
-    const MOTIVOS = [
+
+    const MOTIVOS_BODEGA = [
       { id: "Faltante", label: "Faltante en Ruta", desc: "No llegó al cliente (Sobra en bodega)", fisico: true },
       { id: "Sobrante", label: "Sobrante en Ruta", desc: "Fue de más en el furgón (Falta en bodega)", fisico: true },
       { id: "Cruce", label: "Cruce de Producto", desc: "Se facturó un producto pero se envió otro físico", fisico: true },
-      { id: "ErrorFacturacion", label: "Error de Facturación", desc: "Vendedor facturó mal; cliente rechaza y retorna", fisico: false },
       { id: "AceptadoPorCliente", label: "Aceptado por Cliente", desc: "Cliente acepta producto cruzado/alternativo", fisico: false },
       { id: "Rechazo", label: "Rechazo Cliente", desc: "Cliente devuelve o no recibe mercadería", fisico: true },
       { id: "Daño/Merma", label: "Daño / Merma", desc: "Producto roto, vencido o averiado", fisico: true }
     ];
+
+    const MOTIVOS_VENTAS = [
+      { id: "ErrorFacturacion", label: "Error de Facturación", desc: "Vendedor facturó mal; cliente rechaza y retorna", fisico: false },
+      { id: "RechazoNoPedido", label: "Rechazo por pedido no realizado", desc: "Cliente asegura no haber pedido este producto y lo devuelve", fisico: false },
+      { id: "CruceVentas", label: "Cruce de Producto", desc: "Cliente pidió un producto/medida y vendedor facturó otro", fisico: false }
+    ];
+
+    const MOTIVOS = [...MOTIVOS_BODEGA, ...MOTIVOS_VENTAS];
+
     const ARMADORES = ["Diego", "Nico", "Edwin", "Julio", "Horacio", "Sra. Rosa"];
+    const VENDEDORES = [
+      "Rafael Carmona",
+      "Carlos Sanchez",
+      "Maglys Pareja",
+      "José García",
+      "Felliand Millan"
+    ];
+
     const COLORES_ARMADORES = {
       "Diego": { hex: "#f59e0b", bg: "bg-amber-500", badge: "bg-amber-100 text-amber-900 border-amber-300" },
       "Nico": { hex: "#0284c7", bg: "bg-sky-600", badge: "bg-sky-100 text-sky-900 border-sky-300" },
@@ -97,7 +114,22 @@
       "Sra. Rosa": { hex: "#ec4899", bg: "bg-pink-500", badge: "bg-pink-100 text-pink-900 border-pink-300" }
     };
 
+    const COLORES_VENDEDORES = {
+      "Rafael Carmona": { hex: "#4f46e5", bg: "bg-indigo-600", badge: "bg-indigo-100 text-indigo-900 border-indigo-300" },
+      "Carlos Sanchez": { hex: "#0d9488", bg: "bg-teal-600", badge: "bg-teal-100 text-teal-900 border-teal-300" },
+      "Maglys Pareja": { hex: "#db2777", bg: "bg-pink-600", badge: "bg-pink-100 text-pink-900 border-pink-300" },
+      "José García": { hex: "#2563eb", bg: "bg-blue-600", badge: "bg-blue-100 text-blue-900 border-blue-300" },
+      "Felliand Millan": { hex: "#7c3aed", bg: "bg-violet-600", badge: "bg-violet-100 text-violet-900 border-violet-300" }
+    };
+
+    const COLORES_GLOBAL = { ...COLORES_ARMADORES, ...COLORES_VENDEDORES };
+
     const RUTAS_BASE = ["Ruta 1", "Ruta 2", "Ruta Alternativa"];
+    const SUBTITULOS_RUTA = {
+      "Ruta 1": "Juan / Julio",
+      "Ruta 2": "Carlos / Horacio",
+      "Ruta Alternativa": "Personalizada"
+    };
     const EQUIPO_RUTA_ALTERNATIVA = ["Pedro", "Juan", "Carlos", "Horacio", "Julio", "Nico", "Diego", "Edwin"];
     const JERARQUIA_CHOFERES = ["Pedro", "Juan", "Carlos", "Nico"];
 
@@ -128,6 +160,20 @@
     const normalizarTexto = (str) => {
       if (!str) return "";
       return str.trim().replace(/\s+/g, ' ').toUpperCase();
+    };
+
+    const esIncidenciaVentas = (item) => {
+      if (!item) return false;
+      if (item.areaResponsable === "ventas") return true;
+      return ["ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(item.motivo);
+    };
+
+    const obtenerLabelMotivo = (motivo) => {
+      if (motivo === "AceptadoPorCliente") return "ACEPTADO X CLIENTE";
+      if (motivo === "ErrorFacturacion") return "ERROR FACTURACIÓN";
+      if (motivo === "RechazoNoPedido") return "RECHAZO PEDIDO NO REALIZADO";
+      if (motivo === "CruceVentas") return "CRUCE DE PRODUCTO (VENTAS)";
+      return (motivo || "").toUpperCase();
     };
 
     const resolverRolesRutaAlternativa = (seleccionados) => {
@@ -191,13 +237,16 @@
       const hoy = new Date().toISOString().split("T")[0];
       const mesActualDefault = hoy.slice(0, 7);
       const [mesGrafico, setMesGrafico] = useState(mesActualDefault);
+      const [vistaGrafico, setVistaGrafico] = useState("armadores"); // "armadores" | "vendedores" | "global"
 
       const [factura, setFactura] = useState("");
       const [cliente, setCliente] = useState("");
       const [fecha, setFecha] = useState(hoy);
       const [rutaTipo, setRutaTipo] = useState("Ruta 1");
       const [equipoAlternativo, setEquipoAlternativo] = useState(["Pedro"]);
+      const [areaResponsable, setAreaResponsable] = useState("bodega"); // "bodega" | "ventas"
       const [armador, setArmador] = useState(ARMADORES[0]);
+      const [vendedor, setVendedor] = useState(VENDEDORES[0]);
       const [registradoPor, setRegistradoPor] = useState("Diego");
       const [motivo, setMotivo] = useState("Faltante");
 
@@ -323,7 +372,7 @@
               const motivoObj = MOTIVOS.find(m => m.id === inc.motivo);
               const esFisico = motivoObj ? motivoObj.fisico : true;
 
-              if (requiereAjuste && !yaAjustado && esFisico && inc.motivo !== "AceptadoPorCliente" && inc.motivo !== "ErrorFacturacion") {
+              if (requiereAjuste && !yaAjustado && esFisico && !["AceptadoPorCliente", "ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(inc.motivo)) {
                 const prodNorm = normalizarTexto(inc.producto);
                 const uniNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? inc.detalleDanio.unidadDanada : inc.unidad;
                 const cantNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? Number(inc.detalleDanio.cantidadDanada) : Number(inc.cantidad);
@@ -362,10 +411,21 @@
         return () => clearTimeout(timer);
       }, [incidencias, conteoPendiente, conectado]);
 
+      const cambiarAreaResponsable = (nuevaArea) => {
+        setAreaResponsable(nuevaArea);
+        if (nuevaArea === "ventas") {
+          seleccionarMotivo("ErrorFacturacion");
+        } else {
+          seleccionarMotivo("Faltante");
+        }
+      };
+
       const seleccionarMotivo = (nuevoMotivo) => {
         setMotivo(nuevoMotivo);
-        if (nuevoMotivo === "ErrorFacturacion") {
+        if (nuevoMotivo === "ErrorFacturacion" || nuevoMotivo === "RechazoNoPedido") {
           setAccionesSeleccionadas(["Chofer Retorna Producto a Bodega", "Nota de Crédito (Tributaria)"]);
+        } else if (nuevoMotivo === "CruceVentas") {
+          setAccionesSeleccionadas(["Chofer Retorna Producto a Bodega", "Enviar / Reponer Producto al Cliente"]);
         } else if (!editandoId) {
           setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
         }
@@ -378,6 +438,10 @@
         setNotas(""); setEditandoId(null);
         setRutaTipo("Ruta 1");
         setEquipoAlternativo(["Pedro"]);
+        setAreaResponsable("bodega");
+        setArmador(ARMADORES[0]);
+        setVendedor(VENDEDORES[0]);
+        setMotivo("Faltante");
         setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
         setCausaDanio(CAUSAS_DANIO_RUTA[0]);
         setDanioTotalForm(true);
@@ -480,9 +544,22 @@
       const guardarIncidencia = async (e) => {
         e.preventDefault();
         if (!factura.trim()) return alert("Completa el Nº de Factura.");
-        if (motivo !== "ErrorFacturacion" && !producto.trim()) return alert("Completa el Producto.");
-        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && !productoCruce.trim()) return alert("Indica el producto alternativo o enviado por error.");
-        if (motivo === "ErrorFacturacion" && !productoMalFacturado.trim()) return alert("Indica qué producto se envió mal facturado por el vendedor.");
+
+        const esMalFacturadoUnico = motivo === "ErrorFacturacion" || motivo === "RechazoNoPedido";
+        const esCruceVentas = motivo === "CruceVentas";
+
+        if (esMalFacturadoUnico) {
+          if (!productoMalFacturado.trim()) return alert("Indica qué producto facturó el vendedor.");
+        } else if (esCruceVentas) {
+          if (!productoMalFacturado.trim()) return alert("Indica qué producto y medida facturó el vendedor.");
+          if (!productoCruce.trim()) return alert("Indica qué producto y medida pidió realmente el cliente.");
+        } else {
+          if (!producto.trim()) return alert("Completa el Producto.");
+          if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && !productoCruce.trim()) {
+            return alert("Indica el producto alternativo o enviado por error.");
+          }
+        }
+
         if (rutaTipo === "Ruta Alternativa" && !equipoAlternativo.some(n => JERARQUIA_CHOFERES.includes(n))) {
           return alert("Selecciona al menos un chofer válido en la Ruta Alternativa.");
         }
@@ -502,14 +579,17 @@
         }
 
         const clienteNorm = normalizarTexto(cliente);
-        const prodPrincipal = motivo === "ErrorFacturacion" ? normalizarTexto(productoMalFacturado) : normalizarTexto(producto);
-        const cantPrincipal = motivo === "ErrorFacturacion" ? Number(cantidadMalFacturada) : Number(cantidad);
-        const uniPrincipal = motivo === "ErrorFacturacion" ? unidadMalFacturada : unidad;
+        const usaMalFacturado = esMalFacturadoUnico || esCruceVentas;
+        const prodPrincipal = usaMalFacturado ? normalizarTexto(productoMalFacturado) : normalizarTexto(producto);
+        const cantPrincipal = usaMalFacturado ? Number(cantidadMalFacturada) : Number(cantidad);
+        const uniPrincipal = usaMalFacturado ? unidadMalFacturada : unidad;
         const prodCruceNorm = productoCruce ? normalizarTexto(productoCruce) : null;
 
         if (clienteNorm) await registrarClienteEnCatalogo(clienteNorm);
         await registrarProductoEnCatalogo(prodPrincipal);
-        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente") && prodCruceNorm) await registrarProductoEnCatalogo(prodCruceNorm);
+        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente" || esCruceVentas) && prodCruceNorm) {
+          await registrarProductoEnCatalogo(prodCruceNorm);
+        }
 
         const motivoObj = MOTIVOS.find(m => m.id === motivo);
         const requiereFisico = motivoObj ? motivoObj.fisico : true;
@@ -537,7 +617,7 @@
           }
         }
 
-        if (requiereFisico && requiereAjusteInv && motivo !== "AceptadoPorCliente" && motivo !== "ErrorFacturacion") {
+        if (requiereFisico && requiereAjusteInv && !["AceptadoPorCliente", "ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(motivo)) {
           await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim());
         }
         if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
@@ -549,6 +629,8 @@
           checksIniciales[ac] = { completado: false, por: "", fechaHora: "" };
         });
 
+        const tieneSecundario = motivo === "Cruce" || motivo === "AceptadoPorCliente" || esCruceVentas;
+
         const datos = {
           factura: factura.trim(),
           cliente: clienteNorm,
@@ -556,15 +638,17 @@
           ruta: rutaTextoFinal,
           rutaTipo,
           integrantesRuta,
-          armador,
+          areaResponsable,
+          armador: areaResponsable === "bodega" ? armador : "",
+          vendedor: areaResponsable === "ventas" ? vendedor : "",
           registradoPor,
           motivo,
           producto: prodPrincipal,
           cantidad: cantPrincipal,
           unidad: uniPrincipal,
-          productoCruce: prodCruceNorm,
-          cantidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? Number(cantidadCruce) : null,
-          unidadCruce: (motivo === "Cruce" || motivo === "AceptadoPorCliente") ? unidadCruce : null,
+          productoCruce: tieneSecundario ? prodCruceNorm : null,
+          cantidadCruce: tieneSecundario ? Number(cantidadCruce) : null,
+          unidadCruce: tieneSecundario ? unidadCruce : null,
           detalleDanio: infoDanioObj,
           acciones: accionesSeleccionadas,
           checksAcciones: checksIniciales,
@@ -688,7 +772,7 @@
       const abrirFormRetorno = (item) => {
         setRecibiendoRetornoId(item.id);
         let listaItems = [{ nombre: item.producto, cantidad: item.cantidad, unidad: item.unidad, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: "Ninguno (Golpe accidental en furgón)", danioTotal: false, cantFalta: 1, detalle: "" }];
-        if (item.productoCruce) {
+        if (item.productoCruce && item.motivo !== "CruceVentas") {
           listaItems.push({ nombre: item.productoCruce, cantidad: item.cantidadCruce, unidad: item.unidadCruce, recibido: true, motivoFalta: "Se partió / rompió en el trayecto", responsableRuta: "Ninguno (Golpe accidental en furgón)", danioTotal: false, cantFalta: 1, detalle: "" });
         }
         if (item.retornoBodegaInfo && item.retornoBodegaInfo.itemsDetalle) {
@@ -989,10 +1073,14 @@
           setRutaTipo("Ruta 1");
         }
 
+        const esVentas = esIncidenciaVentas(item);
+        setAreaResponsable(esVentas ? "ventas" : "bodega");
         setArmador(item.armador || ARMADORES[0]);
-        setRegistradoPor(item.registradoPor || "Diego"); setMotivo(item.motivo || "Faltante");
+        setVendedor(item.vendedor || VENDEDORES[0]);
+        setRegistradoPor(item.registradoPor || "Diego");
+        setMotivo(item.motivo || (esVentas ? "ErrorFacturacion" : "Faltante"));
         
-        if (item.motivo === "ErrorFacturacion") {
+        if (["ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(item.motivo)) {
           setProductoMalFacturado(item.producto || "");
           setCantidadMalFacturada(item.cantidad || 1);
           setUnidadMalFacturada(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
@@ -1002,8 +1090,10 @@
           setUnidad(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
         }
 
-        if (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") {
-          setProductoCruce(item.productoCruce || ""); setCantidadCruce(item.cantidadCruce || 1); setUnidadCruce(UNIDADES.includes(item.unidadCruce) ? item.unidadCruce : UNIDADES[0]);
+        if (["Cruce", "AceptadoPorCliente", "CruceVentas"].includes(item.motivo)) {
+          setProductoCruce(item.productoCruce || "");
+          setCantidadCruce(item.cantidadCruce || 1);
+          setUnidadCruce(UNIDADES.includes(item.unidadCruce) ? item.unidadCruce : UNIDADES[0]);
         }
         if (item.motivo === "Daño/Merma" && item.detalleDanio) {
           setCausaDanio(item.detalleDanio.causa || CAUSAS_DANIO_RUTA[0]);
@@ -1072,16 +1162,18 @@
         incidencias.forEach((i, idx) => {
           const estado = i.resuelto ? "✅ RESUELTO" : "⏳ PENDIENTE";
           const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
-          const labelMotivo = i.motivo === "ErrorFacturacion" ? "Error de Facturación" : i.motivo;
+          const labelMotivo = obtenerLabelMotivo(i.motivo);
+          const esVentas = esIncidenciaVentas(i);
+          const respStr = esVentas ? `Vendedor: ${i.vendedor || "Ventas"}` : `Armó: ${i.armador}`;
           texto += `*${idx + 1}. Fact #${i.factura}* (${labelMotivo}) - ${estado}\n`;
           texto += `   • Prod: ${i.cantidad} ${i.unidad} de ${i.producto}\n`;
           if (i.motivo === "Daño/Merma" && i.detalleDanio) {
             texto += `   • Daño: ${i.detalleDanio.causa} (Resp: ${i.detalleDanio.responsable}) - Dañado: ${i.detalleDanio.cantidadDanada} ${i.detalleDanio.unidadDanada}\n`;
           }
-          if ((i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente") && i.productoCruce) {
-            texto += `   • Alt/Error: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
+          if (["Cruce", "AceptadoPorCliente", "CruceVentas"].includes(i.motivo) && i.productoCruce) {
+            texto += `   • ${i.motivo === "CruceVentas" ? "Pedido real cliente" : "Alt/Error"}: ${i.cantidadCruce} ${i.unidadCruce} de ${i.productoCruce}\n`;
           }
-          texto += `   • Ruta: ${i.ruta} | Armó: ${i.armador}\n`;
+          texto += `   • Ruta: ${i.ruta} | ${respStr}\n`;
           texto += `   • Acciones: ${acs}\n\n`;
         });
         navigator.clipboard.writeText(texto);
@@ -1092,17 +1184,14 @@
         total: incidencias.length + incidentesBodega.length,
         pendientes: incidencias.filter(i => !i.resuelto).length + incidentesBodega.filter(ib => !ib.ajustado).length,
         resueltas: incidencias.filter(i => i.resuelto).length + incidentesBodega.filter(ib => ib.ajustado).length,
-        cruces: incidencias.filter(i => i.motivo === "Cruce" || i.motivo === "AceptadoPorCliente" || i.motivo === "ErrorFacturacion").length
+        cruces: incidencias.filter(i => ["Cruce", "AceptadoPorCliente", "ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(i.motivo)).length
       }), [incidencias, incidentesBodega]);
 
       const conteosListosParaAjustar = useMemo(() => {
         return conteoPendiente.filter(cp => cp.conteoFisicoHecho && !cp.ajusteSistemaHecho);
       }, [conteoPendiente]);
 
-      const estadisticasArmadoresMes = useMemo(() => {
-        const conteo = {};
-        ARMADORES.forEach(a => { conteo[a] = 0; });
-
+      const estadisticasMes = useMemo(() => {
         const todosLosRegistros = [...incidencias];
         cierres.forEach(c => {
           if (Array.isArray(c.registros)) {
@@ -1114,26 +1203,65 @@
           }
         });
 
-        let totalMes = 0;
+        const conteoArmadores = {};
+        ARMADORES.forEach(a => { conteoArmadores[a] = 0; });
+
+        const conteoVendedores = {};
+        VENDEDORES.forEach(v => { conteoVendedores[v] = 0; });
+
+        let totalBodegaMes = 0;
+        let totalVentasMes = 0;
+
         todosLosRegistros.forEach(item => {
-          if (item.motivo === "ErrorFacturacion") return;
-          if (item.fecha && item.fecha.startsWith(mesGrafico)) {
+          if (!item.fecha || !item.fecha.startsWith(mesGrafico)) return;
+
+          if (esIncidenciaVentas(item)) {
+            const vend = item.vendedor || "Ventas (Sin asignar)";
+            conteoVendedores[vend] = (conteoVendedores[vend] || 0) + 1;
+            totalVentasMes++;
+          } else {
             const arm = item.armador;
             if (arm) {
-              conteo[arm] = (conteo[arm] || 0) + 1;
-              totalMes++;
+              conteoArmadores[arm] = (conteoArmadores[arm] || 0) + 1;
+              totalBodegaMes++;
             }
           }
         });
 
-        const lista = Object.entries(conteo)
-          .map(([nombre, errores]) => {
-            const pctExacto = totalMes > 0 ? (errores / totalMes) * 100 : 0;
+        const totalGlobalMes = totalBodegaMes + totalVentasMes;
+        const pctGlobalBodega = totalGlobalMes > 0 ? Math.round((totalBodegaMes / totalGlobalMes) * 1000) / 10 : 0;
+        const pctGlobalVentas = totalGlobalMes > 0 ? Math.round((totalVentasMes / totalGlobalMes) * 1000) / 10 : 0;
+
+        let mapaActivo = {};
+        let totalActivo = 0;
+
+        if (vistaGrafico === "armadores") {
+          mapaActivo = conteoArmadores;
+          totalActivo = totalBodegaMes;
+        } else if (vistaGrafico === "vendedores") {
+          mapaActivo = conteoVendedores;
+          totalActivo = totalVentasMes;
+        } else {
+          Object.entries(conteoArmadores).forEach(([k, v]) => {
+            mapaActivo[k] = { errores: v, area: "Bodega" };
+          });
+          Object.entries(conteoVendedores).forEach(([k, v]) => {
+            mapaActivo[k] = { errores: v, area: "Ventas" };
+          });
+          totalActivo = totalGlobalMes;
+        }
+
+        const lista = Object.entries(mapaActivo)
+          .map(([nombre, val]) => {
+            const errores = typeof val === "object" ? val.errores : val;
+            const area = typeof val === "object" ? val.area : (vistaGrafico === "vendedores" ? "Ventas" : "Bodega");
+            const pctExacto = totalActivo > 0 ? (errores / totalActivo) * 100 : 0;
             return {
               nombre,
+              area,
               errores,
               pctExacto,
-              pctRedondeado: totalMes > 0 ? Math.round(pctExacto * 10) / 10 : 0
+              pctRedondeado: totalActivo > 0 ? Math.round(pctExacto * 10) / 10 : 0
             };
           })
           .sort((a, b) => b.errores - a.errores);
@@ -1145,7 +1273,7 @@
             const inicio = acumulado;
             const fin = acumulado + item.pctExacto;
             acumulado = fin;
-            const color = COLORES_ARMADORES[item.nombre]?.hex || "#94a3b8";
+            const color = COLORES_GLOBAL[item.nombre]?.hex || "#64748b";
             return `${color} ${inicio}% ${fin}%`;
           });
 
@@ -1153,14 +1281,33 @@
           ? `conic-gradient(${segmentosConic.join(", ")})`
           : "conic-gradient(#e2e8f0 0% 100%)";
 
-        return { lista, totalMes, conicGradient };
-      }, [incidencias, cierres, mesGrafico]);
+        return {
+          lista,
+          totalActivo,
+          totalBodegaMes,
+          totalVentasMes,
+          totalGlobalMes,
+          pctGlobalBodega,
+          pctGlobalVentas,
+          conicGradient
+        };
+      }, [incidencias, cierres, mesGrafico, vistaGrafico]);
 
       const incidenciasFiltradas = useMemo(() => {
         return incidencias.filter(item => {
-          const coincideTexto = item.factura?.toLowerCase().includes(busqueda.toLowerCase()) || item.producto?.toLowerCase().includes(busqueda.toLowerCase()) || item.cliente?.toLowerCase().includes(busqueda.toLowerCase()) || item.registradoPor?.toLowerCase().includes(busqueda.toLowerCase()) || item.armador?.toLowerCase().includes(busqueda.toLowerCase()) || item.ruta?.toLowerCase().includes(busqueda.toLowerCase());
+          const coincideTexto = item.factura?.toLowerCase().includes(busqueda.toLowerCase()) ||
+            item.producto?.toLowerCase().includes(busqueda.toLowerCase()) ||
+            item.cliente?.toLowerCase().includes(busqueda.toLowerCase()) ||
+            item.registradoPor?.toLowerCase().includes(busqueda.toLowerCase()) ||
+            item.armador?.toLowerCase().includes(busqueda.toLowerCase()) ||
+            item.vendedor?.toLowerCase().includes(busqueda.toLowerCase()) ||
+            item.ruta?.toLowerCase().includes(busqueda.toLowerCase());
           const coincideEstado = filtroEstado === "todos" ? true : filtroEstado === "pendientes" ? !item.resuelto : item.resuelto;
-          const coincideArmador = filtroArmador === "todos" ? true : item.armador === filtroArmador;
+          const coincideArmador = filtroArmador === "todos"
+            ? true
+            : filtroArmador === "__VENTAS__"
+              ? esIncidenciaVentas(item)
+              : (item.armador === filtroArmador || item.vendedor === filtroArmador);
           const coincideRuta = filtroRuta === "todos" ? true : (item.rutaTipo === filtroRuta || item.ruta?.startsWith(filtroRuta));
           
           let coincideFecha = true;
@@ -1222,6 +1369,8 @@
 
         return Object.values(mapa);
       }, [incidencias, incidentesBodega]);
+
+      const motivosDisponiblesActuales = areaResponsable === "ventas" ? MOTIVOS_VENTAS : MOTIVOS_BODEGA;
 
       return (
         <div className="min-h-screen flex flex-col lg:flex-row">
@@ -1386,7 +1535,7 @@
                 <div className="print-only bg-white text-black p-8">
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
                     <LogoPGB className="h-24 w-auto mb-2" />
-                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA Y RUTAS</h2>
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA, VENTAS Y RUTAS</h2>
                     <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
                   </div>
 
@@ -1395,18 +1544,23 @@
                   </div>
 
                   <div className="space-y-4 text-xs">
-                    {incidencias.map((item, idx) => (
-                      <div key={item.id} className="border border-gray-400 p-3 rounded">
-                        <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Motivo:</strong> {item.motivo === "ErrorFacturacion" ? "ERROR DE FACTURACIÓN" : item.motivo.toUpperCase()} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
-                        <p><strong>Cliente:</strong> {item.cliente || "N/A"} | <strong>Ruta:</strong> {item.ruta} | <strong>Armó:</strong> {item.armador} | <strong>Registró:</strong> {item.registradoPor || "N/A"}</p>
-                        <p><strong>{item.motivo === "ErrorFacturacion" ? "Producto Mal Facturado (Retorna):" : "Producto Facturado:"}</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
-                        {item.motivo === "Daño/Merma" && item.detalleDanio && (
-                          <p><strong>Detalle Daño/Merma:</strong> {item.detalleDanio.causa} — <strong>Responsable/Origen:</strong> {item.detalleDanio.responsable} — <strong>Dañado:</strong> {item.detalleDanio.cantidadDanada} {item.detalleDanio.unidadDanada}</p>
-                        )}
-                        {(item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") && <p><strong>Producto Alternativo / Enviado:</strong> {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>}
-                        <p><strong>Acciones / Estatus:</strong> {item.acciones ? item.acciones.join(" + ") : "N/A"}</p>
-                      </div>
-                    ))}
+                    {incidencias.map((item, idx) => {
+                      const esVentas = esIncidenciaVentas(item);
+                      return (
+                        <div key={item.id} className="border border-gray-400 p-3 rounded">
+                          <p><strong>{idx + 1}. Factura #{item.factura}</strong> — <strong>Área:</strong> {esVentas ? "VENTAS" : "BODEGA"} — <strong>Motivo:</strong> {obtenerLabelMotivo(item.motivo)} — <strong>Estatus:</strong> {item.resuelto ? "RESUELTO" : "PENDIENTE"}</p>
+                          <p><strong>Cliente:</strong> {item.cliente || "N/A"} | <strong>Ruta:</strong> {item.ruta} | <strong>{esVentas ? "Vendedor:" : "Armó:"}</strong> {esVentas ? (item.vendedor || "Ventas") : item.armador} | <strong>Registró:</strong> {item.registradoPor || "N/A"}</p>
+                          <p><strong>{esVentas ? "Producto Facturado por Vendedor:" : "Producto Facturado:"}</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                          {item.motivo === "Daño/Merma" && item.detalleDanio && (
+                            <p><strong>Detalle Daño/Merma:</strong> {item.detalleDanio.causa} — <strong>Responsable/Origen:</strong> {item.detalleDanio.responsable} — <strong>Dañado:</strong> {item.detalleDanio.cantidadDanada} {item.detalleDanio.unidadDanada}</p>
+                          )}
+                          {["Cruce", "AceptadoPorCliente", "CruceVentas"].includes(item.motivo) && (
+                            <p><strong>{item.motivo === "CruceVentas" ? "Producto Pedido por Cliente:" : "Producto Alternativo / Enviado:"}</strong> {item.cantidadCruce} {item.unidadCruce} de {item.productoCruce}</p>
+                          )}
+                          <p><strong>Acciones / Estatus:</strong> {item.acciones ? item.acciones.join(" + ") : "N/A"}</p>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className="mt-12 pt-8 border-t text-xs">
@@ -1515,22 +1669,25 @@
                           🚚 {rutaNombre.toUpperCase()} ({itemsRuta.length} Facturas con Retorno)
                         </h3>
                         <div className="space-y-4">
-                          {itemsRuta.map((item, iIdx) => (
-                            <div key={item.id} className="border border-gray-400 p-3 rounded text-xs space-y-1">
-                              <p><strong>{iIdx + 1}. Factura #{item.factura}</strong> — <strong>Cliente:</strong> {item.cliente || "N/A"}</p>
-                              <p><strong>Armó:</strong> {item.armador} | <strong>Motivo:</strong> {item.motivo === "ErrorFacturacion" ? "ERROR DE FACTURACIÓN" : item.motivo.toUpperCase()}</p>
-                              <p><strong>Producto Esperado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
-                              {item.retornoBodegaInfo ? (
-                                <div className="mt-2 pt-2 border-t border-gray-300 bg-gray-50 p-2 rounded space-y-1">
-                                  <p><strong>Recepción Bodega:</strong> {item.retornoBodegaInfo.completo ? "Llegó Completo y Sano" : "Con Discrepancia / Problema"}</p>
-                                  <p><strong>Detalle de Recepción:</strong> {item.retornoBodegaInfo.discrepanciasTexto}</p>
-                                  <p><strong>Recibido por:</strong> {item.retornoBodegaInfo.recibidoPor} ({item.retornoBodegaInfo.fechaHoraRecibo})</p>
-                                </div>
-                              ) : (
-                                <p className="text-gray-500 italic">Pendiente de recepción en bodega.</p>
-                              )}
-                            </div>
-                          ))}
+                          {itemsRuta.map((item, iIdx) => {
+                            const esVentas = esIncidenciaVentas(item);
+                            return (
+                              <div key={item.id} className="border border-gray-400 p-3 rounded text-xs space-y-1">
+                                <p><strong>{iIdx + 1}. Factura #{item.factura}</strong> — <strong>Cliente:</strong> {item.cliente || "N/A"}</p>
+                                <p><strong>{esVentas ? "Vendedor:" : "Armó:"}</strong> {esVentas ? (item.vendedor || "Ventas") : item.armador} | <strong>Motivo:</strong> {obtenerLabelMotivo(item.motivo)}</p>
+                                <p><strong>Producto Esperado:</strong> {item.cantidad} {item.unidad} de {item.producto}</p>
+                                {item.retornoBodegaInfo ? (
+                                  <div className="mt-2 pt-2 border-t border-gray-300 bg-gray-50 p-2 rounded space-y-1">
+                                    <p><strong>Recepción Bodega:</strong> {item.retornoBodegaInfo.completo ? "Llegó Completo y Sano" : "Con Discrepancia / Problema"}</p>
+                                    <p><strong>Detalle de Recepción:</strong> {item.retornoBodegaInfo.discrepanciasTexto}</p>
+                                    <p><strong>Recibido por:</strong> {item.retornoBodegaInfo.recibidoPor} ({item.retornoBodegaInfo.fechaHoraRecibo})</p>
+                                  </div>
+                                ) : (
+                                  <p className="text-gray-500 italic">Pendiente de recepción en bodega.</p>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ));
@@ -1553,8 +1710,8 @@
 
                   <div className="mb-6 space-y-2 text-xs border p-4 rounded bg-gray-50">
                     <p><strong>Cliente / Local:</strong> {facturaImprimirIndividual.cliente || "N/A"}</p>
-                    <p><strong>Ruta:</strong> {facturaImprimirIndividual.ruta} | <strong>Armó:</strong> {facturaImprimirIndividual.armador}</p>
-                    <p><strong>Motivo de Incidencia:</strong> {facturaImprimirIndividual.motivo === "ErrorFacturacion" ? "ERROR DE FACTURACIÓN" : facturaImprimirIndividual.motivo.toUpperCase()}</p>
+                    <p><strong>Ruta:</strong> {facturaImprimirIndividual.ruta} | <strong>{esIncidenciaVentas(facturaImprimirIndividual) ? "Vendedor:" : "Armó:"}</strong> {esIncidenciaVentas(facturaImprimirIndividual) ? (facturaImprimirIndividual.vendedor || "Ventas") : facturaImprimirIndividual.armador}</p>
+                    <p><strong>Motivo de Incidencia:</strong> {obtenerLabelMotivo(facturaImprimirIndividual.motivo)}</p>
                     <p><strong>Producto Esperado de Retorno:</strong> {facturaImprimirIndividual.cantidad} {facturaImprimirIndividual.unidad} de {facturaImprimirIndividual.producto}</p>
                   </div>
 
@@ -1610,7 +1767,7 @@
                 </div>
               )}
 
-              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB EN PROPORCIÓN REAL */}
+              {/* ENCABEZADO BLANCO CORPORATIVO CON LOGO OFICIAL PGB */}
               <div className="light-card rounded-3xl p-6 sm:p-8 mb-6 relative overflow-hidden no-print">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative z-10">
                   <div className="w-full">
@@ -1620,7 +1777,6 @@
                         {conectado ? "EN VIVO • FIREBASE" : "CONECTANDO..."}
                       </span>
                     </div>
-                    {/* Contenedor optimizado y fluido con la proporción exacta del PNG */}
                     <div className="w-full max-w-[320px] sm:max-w-[420px] my-2">
                       <LogoPGB className="w-full h-auto" />
                     </div>
@@ -1849,7 +2005,7 @@
                 <div className="space-y-4 no-print">
                   <div className="light-card rounded-2xl p-4 space-y-4">
                     <div className="w-full">
-                      <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador o quién registró..." className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
+                      <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="🔍 Buscar por Nº Factura, producto, cliente, armador, vendedor o quién registró..." className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
                     </div>
 
                     <div className="hidden lg:grid lg:grid-cols-5 gap-3 pt-2 border-t border-slate-200">
@@ -1862,10 +2018,16 @@
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Armador:</label>
+                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Responsable:</label>
                         <select value={filtroArmador} onChange={e => setFiltroArmador(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none cursor-pointer">
-                          <option value="todos">Todos los armadores</option>
-                          {ARMADORES.map(a => <option key={a} value={a}>{a}</option>)}
+                          <option value="todos">Todos (Bodega y Ventas)</option>
+                          <option value="__VENTAS__">💼 Solo Errores Ventas</option>
+                          <optgroup label="Armadores Bodega">
+                            {ARMADORES.map(a => <option key={a} value={a}>{a}</option>)}
+                          </optgroup>
+                          <optgroup label="Vendedores">
+                            {VENDEDORES.map(v => <option key={v} value={v}>{v}</option>)}
+                          </optgroup>
                         </select>
                       </div>
                       <div>
@@ -1904,7 +2066,7 @@
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1.5">Filtrar por Armador:</label>
+                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1.5">Filtrar por Responsable:</label>
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                           <button
                             onClick={() => setFiltroArmador("todos")}
@@ -1913,6 +2075,14 @@
                             }`}
                           >
                             Todos
+                          </button>
+                          <button
+                            onClick={() => setFiltroArmador("__VENTAS__")}
+                            className={`py-2 px-1 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                              filtroArmador === "__VENTAS__" ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100"
+                            }`}
+                          >
+                            💼 Ventas
                           </button>
                           {ARMADORES.map(a => (
                             <button
@@ -1930,7 +2100,7 @@
 
                       <div>
                         <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1.5">Filtrar por Ruta:</label>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                           <button
                             onClick={() => setFiltroRuta("todos")}
                             className={`py-2 px-2 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
@@ -1992,6 +2162,7 @@
                         const checksMap = item.checksAcciones || {};
                         const incluyeRetorno = accionesLista.includes("Chofer Retorna Producto a Bodega");
                         const estaRecibiendo = recibiendoRetornoId === item.id;
+                        const esVentas = esIncidenciaVentas(item);
 
                         const choferesPosibles = item.integrantesRuta && item.integrantesRuta.length > 0
                           ? item.integrantesRuta
@@ -2002,22 +2173,22 @@
                               : EQUIPO_RUTA_ALTERNATIVA;
 
                         return (
-                          <div key={item.id} className={`light-card rounded-2xl p-5 border transition flex flex-col justify-between ${item.resuelto ? "border-emerald-300 bg-emerald-50/20 opacity-90" : "border-slate-200 hover:border-amber-400"}`}>
+                          <div key={item.id} className={`light-card rounded-2xl p-5 border transition flex flex-col justify-between ${item.resuelto ? "border-emerald-300 bg-emerald-50/20 opacity-90" : esVentas ? "border-indigo-200 hover:border-indigo-400" : "border-slate-200 hover:border-amber-400"}`}>
                             <div>
                               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="bg-amber-100 text-amber-900 border border-amber-300 font-black text-xs px-3 py-1 rounded-lg">
                                     FACT #{item.factura}
                                   </span>
-                                  <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg border ${
+                                  <span className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg border ${
                                     item.motivo === "Faltante" ? "bg-rose-50 text-rose-700 border-rose-200" :
                                     item.motivo === "Sobrante" ? "bg-sky-50 text-sky-700 border-sky-200" :
                                     item.motivo === "Cruce" ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                    item.motivo === "ErrorFacturacion" ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
+                                    esVentas ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
                                     item.motivo === "AceptadoPorCliente" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
                                     "bg-amber-50 text-amber-800 border-amber-300"
                                   }`}>
-                                    {item.motivo === "AceptadoPorCliente" ? "ACEPTADO X CLIENTE" : item.motivo === "ErrorFacturacion" ? "ERROR FACTURACIÓN" : item.motivo.toUpperCase()}
+                                    {obtenerLabelMotivo(item.motivo)}
                                   </span>
                                   {item.cliente && (
                                     <span className="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
@@ -2030,10 +2201,18 @@
 
                               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-3">
                                 <span className="text-[11px] font-bold uppercase text-slate-500 block mb-0.5">
-                                  {item.motivo === "ErrorFacturacion" ? "🧾 Producto Mal Facturado (Retorna a Bodega):" : (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") ? "Producto Facturado:" : "Producto Afectado:"}
+                                  {item.motivo === "ErrorFacturacion"
+                                    ? "🧾 Producto Mal Facturado por Vendedor (Retorna):"
+                                    : item.motivo === "RechazoNoPedido"
+                                      ? "🚫 Producto Facturado No Pedido por Cliente (Retorna):"
+                                      : item.motivo === "CruceVentas"
+                                        ? "🧾 Producto / Medida Facturado por Vendedor:"
+                                        : (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente")
+                                          ? "Producto Facturado:"
+                                          : "Producto Afectado:"}
                                 </span>
                                 <p className="text-base font-black text-slate-900">
-                                  {item.cantidad} {item.unidad} — <span className={item.motivo === "ErrorFacturacion" ? "text-indigo-700" : "text-amber-700"}>{item.producto}</span>
+                                  {item.cantidad} {item.unidad} — <span className={esVentas ? "text-indigo-700" : "text-amber-700"}>{item.producto}</span>
                                 </p>
 
                                 {item.motivo === "Daño/Merma" && item.detalleDanio && (
@@ -2047,10 +2226,14 @@
                                   </div>
                                 )}
 
-                                {(item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente") && item.productoCruce && (
+                                {["Cruce", "AceptadoPorCliente", "CruceVentas"].includes(item.motivo) && item.productoCruce && (
                                   <div className="mt-2.5 pt-2.5 border-t border-purple-200">
                                     <span className="text-[11px] font-bold uppercase text-purple-700 block mb-0.5">
-                                      {item.motivo === "AceptadoPorCliente" ? "✅ Producto Alternativo Aceptado (Mismo valor):" : "🔄 Enviado por error (Falta en bodega):"}
+                                      {item.motivo === "CruceVentas"
+                                        ? "🗣️ Producto / Medida que Pidió el Cliente:"
+                                        : item.motivo === "AceptadoPorCliente"
+                                          ? "✅ Producto Alternativo Aceptado (Mismo valor):"
+                                          : "🔄 Enviado por error (Falta en bodega):"}
                                     </span>
                                     <p className="text-sm font-black text-purple-900">
                                       {item.cantidadCruce} {item.unidadCruce} — {item.productoCruce}
@@ -2273,7 +2456,11 @@
                               )}
 
                               <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 mb-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                                <span>👷 Armó: <strong className="text-slate-900">{item.armador}</strong></span>
+                                {esVentas ? (
+                                  <span>💼 Vendedor: <strong className="text-indigo-800">{item.vendedor || "Ventas"}</strong></span>
+                                ) : (
+                                  <span>👷 Armó: <strong className="text-slate-900">{item.armador}</strong></span>
+                                )}
                                 <span>✍️ Registró: <strong className="text-amber-700">{item.registradoPor || 'N/A'}</strong></span>
                                 <span className="col-span-2">🚚 Ruta: <strong className="text-slate-900">{item.ruta}</strong></span>
                               </div>
@@ -2399,6 +2586,7 @@
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* RUTA / CHOFER CON NOMBRES VISIBLES */}
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-2">🚚 Ruta / Chofer</label>
                       <div className="grid grid-cols-3 gap-2">
@@ -2407,11 +2595,14 @@
                             type="button"
                             key={r}
                             onClick={() => setRutaTipo(r)}
-                            className={`py-2.5 px-2 rounded-xl text-xs font-black border text-center transition cursor-pointer ${
+                            className={`py-2 px-1.5 rounded-xl border text-center transition cursor-pointer flex flex-col items-center justify-center ${
                               rutaTipo === r ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm" : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
                             }`}
                           >
-                            {r}
+                            <span className="text-xs font-black leading-tight">{r}</span>
+                            <span className={`text-[10px] font-bold mt-0.5 leading-tight ${rutaTipo === r ? "text-slate-900" : "text-slate-500"}`}>
+                              {SUBTITULOS_RUTA[r]}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -2442,23 +2633,86 @@
                       )}
                     </div>
 
+                    {/* SELECTOR DOBLE: ARMADOR DE BODEGA vs VENTAS */}
                     <div>
-                      <label className="text-xs font-bold text-slate-700 block mb-2">👷 Armador de Bodega</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {ARMADORES.map(a => (
-                          <button type="button" key={a} onClick={() => setArmador(a)} className={`py-2 px-1 rounded-xl text-xs font-black border transition cursor-pointer ${armador === a ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm" : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"}`}>
-                            {a}
-                          </button>
-                        ))}
+                      <div className="grid grid-cols-2 gap-2 mb-2.5">
+                        <button
+                          type="button"
+                          onClick={() => cambiarAreaResponsable("bodega")}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                            areaResponsable === "bodega"
+                              ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm"
+                              : "bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200"
+                          }`}
+                        >
+                          👷 Armador de bodega
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cambiarAreaResponsable("ventas")}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                            areaResponsable === "ventas"
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                              : "bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200"
+                          }`}
+                        >
+                          💼 Ventas
+                        </button>
                       </div>
+
+                      {areaResponsable === "bodega" ? (
+                        <div className="grid grid-cols-3 gap-2">
+                          {ARMADORES.map(a => (
+                            <button
+                              type="button"
+                              key={a}
+                              onClick={() => setArmador(a)}
+                              className={`py-2 px-1 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                armador === a ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm" : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+                              }`}
+                            >
+                              {a}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          {VENDEDORES.map(v => (
+                            <button
+                              type="button"
+                              key={v}
+                              onClick={() => setVendedor(v)}
+                              className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                vendedor === v ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+                              }`}
+                            >
+                              {v}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
+                  {/* TIPO DE INCIDENCIA SEGÚN ÁREA (BODEGA O VENTAS) */}
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-2">⚠️ Tipo de Incidencia</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {MOTIVOS.map(m => (
-                        <button type="button" key={m.id} onClick={() => seleccionarMotivo(m.id)} className={`p-3 rounded-xl border text-left transition cursor-pointer ${motivo === m.id ? "bg-amber-100 border-amber-500 text-amber-950 shadow-sm" : "bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-100"}`}>
+                    <label className="text-xs font-bold text-slate-700 block mb-2">
+                      ⚠️ Tipo de Incidencia ({areaResponsable === "ventas" ? "Área Comercial / Ventas" : "Operación Bodega"})
+                    </label>
+                    <div className={`grid grid-cols-1 ${areaResponsable === "ventas" ? "sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3"} gap-2`}>
+                      {motivosDisponiblesActuales.map(m => (
+                        <button
+                          type="button"
+                          key={m.id}
+                          onClick={() => seleccionarMotivo(m.id)}
+                          className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                            motivo === m.id
+                              ? areaResponsable === "ventas"
+                                ? "bg-indigo-100 border-indigo-500 text-indigo-950 shadow-sm"
+                                : "bg-amber-100 border-amber-500 text-amber-950 shadow-sm"
+                              : "bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
                           <div className="text-xs font-black">{m.label}</div>
                           <div className="text-[10px] opacity-80 mt-0.5 leading-tight">{m.desc}</div>
                         </button>
@@ -2466,20 +2720,29 @@
                     </div>
                   </div>
 
-                  {motivo === "ErrorFacturacion" ? (
+                  {/* BLOQUES CONDICIONALES SEGÚN MOTIVO */}
+                  {(motivo === "ErrorFacturacion" || motivo === "RechazoNoPedido") ? (
                     <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 space-y-3">
                       <div className="flex justify-between items-center">
                         <p className="text-xs font-extrabold text-indigo-800 uppercase">
-                          🧾 Producto Mal Facturado por el Vendedor (Retorna con Chofer)
+                          {motivo === "RechazoNoPedido"
+                            ? "🚫 Producto Facturado por Vendedor que el Cliente NO Pidió (Retorna)"
+                            : "🧾 Producto Mal Facturado por el Vendedor (Retorna con Chofer)"}
                         </p>
                         <span className="text-[10px] text-indigo-600 font-semibold">💡 Retorno directo a bodega</span>
                       </div>
                       <p className="text-[11px] text-slate-700">
-                        Indica qué producto se llevó en la factura mal emitida por el vendedor y el cliente rechazó para que el chofer lo retorne:
+                        {motivo === "RechazoNoPedido"
+                          ? "Indica qué producto facturó el vendedor y el cliente aseguró no haber pedido para que el chofer lo devuelva:"
+                          : "Indica qué producto se llevó en la factura mal emitida por el vendedor y el cliente rechazó para que el chofer lo retorne:"}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="sm:col-span-2 relative">
-                          <label className="text-[11px] font-bold text-indigo-900 block mb-1">Producto enviado que debe retornar *</label>
+                          <label className="text-[11px] font-bold text-indigo-900 block mb-1">
+                            {motivo === "RechazoNoPedido"
+                              ? "¿Qué producto facturó el vendedor y el cliente no pidió? *"
+                              : "Producto enviado que debe retornar *"}
+                          </label>
                           <input type="text" list="lista-catalogo" value={productoMalFacturado} onChange={e => setProductoMalFacturado(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-white border border-indigo-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 outline-none" required />
                           <datalist id="lista-catalogo">
                             {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
@@ -2491,7 +2754,7 @@
                         </div>
                       </div>
                       <div>
-                        <label className="text-[11px] font-bold text-indigo-900 block mb-2">Unidad</label>
+                        <label className="text-[11px] font-bold text-indigo-900 block mb-2">Unidad / Medida</label>
                         <div className="grid grid-cols-3 gap-2">
                           {UNIDADES.map(u => (
                             <button
@@ -2505,6 +2768,79 @@
                               {u}
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : motivo === "CruceVentas" ? (
+                    <div className="space-y-4">
+                      {/* 1. Qué facturó el vendedor */}
+                      <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 space-y-3">
+                        <p className="text-xs font-extrabold text-indigo-800 uppercase">
+                          1️⃣ ¿Qué producto y medida facturó el vendedor?
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="sm:col-span-2 relative">
+                            <label className="text-[11px] font-bold text-indigo-900 block mb-1">Producto facturado por error *</label>
+                            <input type="text" list="lista-catalogo" value={productoMalFacturado} onChange={e => setProductoMalFacturado(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-white border border-indigo-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 outline-none" required />
+                            <datalist id="lista-catalogo">
+                              {catalogoProductos.map(p => <option key={p.id} value={p.nombre} />)}
+                            </datalist>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-bold text-indigo-900 block mb-1">Cantidad *</label>
+                            <input type="number" min="1" value={cantidadMalFacturada} onChange={e => setCantidadMalFacturada(e.target.value)} className="w-full bg-white border border-indigo-300 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 outline-none" required />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-indigo-900 block mb-2">Medida / Unidad Facturada</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {UNIDADES.map(u => (
+                              <button
+                                type="button"
+                                key={u}
+                                onClick={() => setUnidadMalFacturada(u)}
+                                className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                  unidadMalFacturada === u ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-white text-slate-700 border-slate-300"
+                                }`}
+                              >
+                                {u}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 2. Qué pidió realmente el cliente */}
+                      <div className="bg-purple-50 p-4 rounded-2xl border border-purple-200 space-y-3">
+                        <p className="text-xs font-extrabold text-purple-800 uppercase">
+                          2️⃣ ¿Qué producto y medida le pidió realmente el cliente?
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="sm:col-span-2 relative">
+                            <label className="text-[11px] font-bold text-purple-900 block mb-1">Producto solicitado por el cliente *</label>
+                            <input type="text" list="lista-catalogo" value={productoCruce} onChange={e => setProductoCruce(e.target.value)} placeholder="Escribe o selecciona..." className="w-full bg-white border border-purple-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 outline-none" required />
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-bold text-purple-900 block mb-1">Cantidad *</label>
+                            <input type="number" min="1" value={cantidadCruce} onChange={e => setCantidadCruce(e.target.value)} className="w-full bg-white border border-purple-300 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 outline-none" required />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-purple-900 block mb-2">Medida / Unidad Pedida</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {UNIDADES.map(u => (
+                              <button
+                                type="button"
+                                key={u}
+                                onClick={() => setUnidadCruce(u)}
+                                className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                  unidadCruce === u ? "bg-purple-600 text-white border-purple-600 shadow-sm" : "bg-white text-slate-700 border-slate-300"
+                                }`}
+                              >
+                                {u}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2660,7 +2996,7 @@
                     </div>
                   )}
 
-                  {/* ADMINISTRADORES DE CATÁLOGOS INTELIGENTES (PRODUCTOS Y CLIENTES) */}
+                  {/* ADMINISTRADORES DE CATÁLOGOS INTELIGENTES */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
                       <details className="group">
@@ -2735,7 +3071,7 @@
 
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">💬 Notas Opcionales</label>
-                    <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Vendedor digitó código equivocado..." className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
+                    <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Cliente indica que nunca pidió ese código..." className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
                   </div>
 
                   <button type="submit" className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer">
@@ -2747,16 +3083,25 @@
               {vista === "balance" && (
                 <div className="space-y-6 no-print">
 
-                  {/* GRÁFICO DE DISTRIBUCIÓN PORCENTUAL (100%) DE ERRORES POR ARMADOR AL MES */}
+                  {/* GRÁFICO DE DISTRIBUCIÓN PORCENTUAL CON 3 VISTAS: ARMADORES | VENDEDORES | GLOBAL */}
                   <div className="light-card rounded-3xl p-6 sm:p-8">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                       <div>
-                        <h2 className="text-xl font-black text-slate-900">📊 Distribución Porcentual (100%) de Errores por Armador</h2>
+                        <h2 className="text-xl font-black text-slate-900">
+                          📊 Distribución Porcentual (100%) de Errores —{" "}
+                          {vistaGrafico === "armadores"
+                            ? "Armadores Bodega"
+                            : vistaGrafico === "vendedores"
+                              ? "Vendedores"
+                              : "Global (Bodega + Ventas)"}
+                        </h2>
                         <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                          Cada armador ocupa el porcentaje proporcional respecto al 100% de errores cometidos en el mes.
+                          {vistaGrafico === "global"
+                            ? "Comparativa unificada de todas las incidencias del mes entre Bodega y Ventas."
+                            : `Cada integrante ocupa su porcentaje proporcional respecto al 100% de errores de ${vistaGrafico} en el mes.`}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2">
+                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 w-fit">
                         <span className="text-xs font-bold text-slate-600">📅 Mes:</span>
                         <input
                           type="month"
@@ -2767,30 +3112,87 @@
                       </div>
                     </div>
 
+                    {/* BOTONES DE CAMBIO DE VISTA DEL GRÁFICO */}
+                    <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 mb-6">
+                      <button
+                        type="button"
+                        onClick={() => setVistaGrafico("armadores")}
+                        className={`py-2.5 px-2 rounded-xl text-xs font-black transition cursor-pointer ${
+                          vistaGrafico === "armadores"
+                            ? "bg-amber-500 text-slate-950 shadow-sm"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        👷 Armadores ({estadisticasMes.totalBodegaMes})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVistaGrafico("vendedores")}
+                        className={`py-2.5 px-2 rounded-xl text-xs font-black transition cursor-pointer ${
+                          vistaGrafico === "vendedores"
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        💼 Vendedores ({estadisticasMes.totalVentasMes})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVistaGrafico("global")}
+                        className={`py-2.5 px-2 rounded-xl text-xs font-black transition cursor-pointer ${
+                          vistaGrafico === "global"
+                            ? "bg-slate-900 text-white shadow-sm"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        🌐 Global ({estadisticasMes.totalGlobalMes})
+                      </button>
+                    </div>
+
+                    {/* RESUMEN COMPARATIVO BODEGA VS VENTAS EN VISTA GLOBAL */}
+                    {vistaGrafico === "global" && (
+                      <div className="grid grid-cols-2 gap-3 mb-6">
+                        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 flex items-center justify-between">
+                          <div>
+                            <span className="text-[11px] font-extrabold uppercase text-amber-800 block">👷 Total Bodega</span>
+                            <span className="text-xs text-slate-600 font-semibold">{estadisticasMes.totalBodegaMes} errores en el mes</span>
+                          </div>
+                          <span className="text-xl font-black text-amber-700">{estadisticasMes.pctGlobalBodega}%</span>
+                        </div>
+                        <div className="bg-indigo-50 border border-indigo-300 rounded-2xl p-3.5 flex items-center justify-between">
+                          <div>
+                            <span className="text-[11px] font-extrabold uppercase text-indigo-800 block">💼 Total Ventas</span>
+                            <span className="text-xs text-slate-600 font-semibold">{estadisticasMes.totalVentasMes} errores en el mes</span>
+                          </div>
+                          <span className="text-xl font-black text-indigo-700">{estadisticasMes.pctGlobalVentas}%</span>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="mb-6">
                       <div className="flex justify-between text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">
                         <span>0%</span>
-                        <span>Distribución Total de Errores ({estadisticasArmadoresMes.totalMes} en el mes)</span>
+                        <span>Distribución Total de Errores ({estadisticasMes.totalActivo} en el mes)</span>
                         <span>100%</span>
                       </div>
                       <div className="w-full h-10 bg-slate-100 rounded-2xl overflow-hidden flex border border-slate-300 shadow-inner">
-                        {estadisticasArmadoresMes.totalMes === 0 ? (
+                        {estadisticasMes.totalActivo === 0 ? (
                           <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">
-                            Sin errores registrados en este mes (0%)
+                            Sin errores registrados en esta categoría este mes (0%)
                           </div>
                         ) : (
-                          estadisticasArmadoresMes.lista
-                            .filter(arm => arm.errores > 0)
-                            .map(arm => {
-                              const colorObj = COLORES_ARMADORES[arm.nombre] || { bg: "bg-slate-500" };
+                          estadisticasMes.lista
+                            .filter(item => item.errores > 0)
+                            .map(item => {
+                              const colorObj = COLORES_GLOBAL[item.nombre] || { bg: "bg-slate-500" };
                               return (
                                 <div
-                                  key={arm.nombre}
-                                  style={{ width: `${arm.pctExacto}%` }}
+                                  key={item.nombre}
+                                  style={{ width: `${item.pctExacto}%` }}
                                   className={`${colorObj.bg} h-full flex items-center justify-center text-white text-xs font-black transition-all duration-500 border-r border-white/30 last:border-r-0 px-1 truncate`}
-                                  title={`${arm.nombre}: ${arm.errores} errores (${arm.pctRedondeado}%)`}
+                                  title={`${item.nombre} (${item.area}): ${item.errores} errores (${item.pctRedondeado}%)`}
                                 >
-                                  {arm.pctRedondeado >= 8 ? `${arm.nombre} (${arm.pctRedondeado}%)` : `${arm.pctRedondeado}%`}
+                                  {item.pctRedondeado >= 8 ? `${item.nombre.split(" ")[0]} (${item.pctRedondeado}%)` : `${item.pctRedondeado}%`}
                                 </div>
                               );
                             })
@@ -2802,33 +3204,40 @@
                       <div className="flex flex-col items-center justify-center">
                         <div
                           className="w-44 h-44 rounded-full flex items-center justify-center shadow-md relative transition-all duration-500"
-                          style={{ background: estadisticasArmadoresMes.conicGradient }}
+                          style={{ background: estadisticasMes.conicGradient }}
                         >
                           <div className="w-28 h-28 bg-white rounded-full flex flex-col items-center justify-center shadow-inner border border-slate-100">
                             <span className="text-2xl font-black text-slate-900">100%</span>
                             <span className="text-[10px] font-bold text-slate-500 uppercase">
-                              {estadisticasArmadoresMes.totalMes} {estadisticasArmadoresMes.totalMes === 1 ? 'Error' : 'Errores'}
+                              {estadisticasMes.totalActivo} {estadisticasMes.totalActivo === 1 ? 'Error' : 'Errores'}
                             </span>
                           </div>
                         </div>
                       </div>
 
                       <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {estadisticasArmadoresMes.lista.map(arm => {
-                          const colorObj = COLORES_ARMADORES[arm.nombre] || { bg: "bg-slate-500", badge: "bg-slate-100 text-slate-800 border-slate-300" };
+                        {estadisticasMes.lista.map(item => {
+                          const colorObj = COLORES_GLOBAL[item.nombre] || { bg: "bg-slate-500", badge: "bg-slate-100 text-slate-800 border-slate-300" };
                           return (
-                            <div key={arm.nombre} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
-                              <div className="flex items-center gap-2.5">
-                                <span className={`w-3.5 h-3.5 rounded-full ${colorObj.bg} shadow-sm`}></span>
-                                <div>
-                                  <p className="text-xs font-black text-slate-900">{arm.nombre}</p>
+                            <div key={item.nombre} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${colorObj.bg} shadow-sm`}></span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-xs font-black text-slate-900 truncate">{item.nombre}</p>
+                                    {vistaGrafico === "global" && (
+                                      <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${item.area === "Ventas" ? "bg-indigo-100 text-indigo-800" : "bg-amber-100 text-amber-800"}`}>
+                                        {item.area}
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-[11px] text-slate-500 font-semibold">
-                                    {arm.errores} {arm.errores === 1 ? 'error registrado' : 'errores registrados'}
+                                    {item.errores} {item.errores === 1 ? 'error registrado' : 'errores registrados'}
                                   </p>
                                 </div>
                               </div>
-                              <span className={`text-xs font-black px-2.5 py-1 rounded-lg border ${colorObj.badge}`}>
-                                {arm.pctRedondeado}%
+                              <span className={`text-xs font-black px-2.5 py-1 rounded-lg border shrink-0 ml-2 ${colorObj.badge}`}>
+                                {item.pctRedondeado}%
                               </span>
                             </div>
                           );
@@ -3211,14 +3620,17 @@
 
                         {cierreExpandido === c.id && c.registros && (
                           <div className="mt-4 pt-3 border-t border-slate-200 space-y-2">
-                            {c.registros.map((r, i) => (
-                              <div key={i} className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs flex justify-between items-center">
-                                <div>
-                                  <span className="font-bold text-amber-700">Fact #${r.factura}</span> • <span className="font-bold text-slate-900">{r.motivo}</span>: {r.cantidad} {r.unidad} de {r.producto}
+                            {c.registros.map((r, i) => {
+                              const esVentas = esIncidenciaVentas(r);
+                              return (
+                                <div key={i} className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs flex justify-between items-center">
+                                  <div>
+                                    <span className="font-bold text-amber-700">Fact #{r.factura}</span> • <span className="font-bold text-slate-900">{obtenerLabelMotivo(r.motivo)}</span>: {r.cantidad} {r.unidad} de {r.producto}
+                                  </div>
+                                  <div className="text-slate-600">{esVentas ? "Vendedor:" : "Armó:"} <strong className="text-slate-900">{esVentas ? (r.vendedor || "Ventas") : r.armador}</strong> | Registró: {r.registradoPor}</div>
                                 </div>
-                                <div className="text-slate-600">Armó: <strong className="text-slate-900">{r.armador}</strong> | Registró: {r.registradoPor}</div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -3233,12 +3645,14 @@
     }
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-  </script> <button
-  onclick="localStorage.removeItem('nexus_empresa_rut'); window.location.href='index.html';"
-  style="position:fixed; bottom:14px; left:14px; z-index:9999; background:#0f172a; color:#94a3b8; border:1px solid #334155; padding:6px 12px; border-radius:999px; font-size:11px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3);"
->
-  ⇄ Salir
-</button>
+  </script>
+
+  <button
+    onclick="localStorage.removeItem('nexus_empresa_rut'); window.location.href='index.html';"
+    style="position:fixed; bottom:14px; left:14px; z-index:9999; background:#0f172a; color:#94a3b8; border:1px solid #334155; padding:6px 12px; border-radius:999px; font-size:11px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3);"
+  >
+    ⇄ Salir
+  </button>
 
 </body>
 </html>
