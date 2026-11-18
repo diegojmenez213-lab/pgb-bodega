@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="es" class="dark">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Consola Empresarial</title>
+  <title>NEXUS Cloud • Administración Empresarial</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -15,34 +15,32 @@
   <style>
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background-color: #09090b;
-      color: #f4f4f5;
+      background-color: #f8fafc;
+      color: #0f172a;
     }
-    .font-mono-tabular {
+    .font-mono-num {
       font-family: 'JetBrains Mono', monospace;
       font-variant-numeric: tabular-nums;
     }
-    .tabular-nums {
+    .tabular {
       font-variant-numeric: tabular-nums;
     }
-    .grid-bg {
-      background-size: 36px 36px;
-      background-image: 
-        linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    @keyframes slideInRight {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
     }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #09090b; }
-    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+    .animate-drawer {
+      animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
   </style>
 </head>
-<body class="min-h-screen antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+<body class="min-h-screen antialiased selection:bg-slate-900 selection:text-white">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // 1. CONEXIÓN FIREBASE
+    // 1. CONEXIÓN FIREBASE REAL
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
       authDomain: "pgb-bodegad.firebaseapp.com",
@@ -60,26 +58,22 @@
 
     const MASTER_KEY = "Diego0514*.";
 
-    // ICONOS VECTORIALES DE PRECISIÓN (ESTILO LUCIDE / LINEAR)
+    // ICONOS VECTORIALES CORPORATIVOS
     const Icon = ({ name, className = "w-4 h-4" }) => {
       const icons = {
-        shield: <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
-        truck: <><rect x="1" y="3" width="15" height="13" rx="2" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></>,
-        bag: <><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 0 1-8 0" /></>,
-        store: <><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></>,
-        scissors: <><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><line x1="20" y1="4" x2="8.12" y2="15.88" /><line x1="14.47" y1="14.48" x2="20" y2="20" /><line x1="8.12" y1="8.12" x2="12" y2="12" /></>,
+        shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+        layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
+        search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+        plus: <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>,
         sliders: <><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></>,
         external: <><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></>,
-        plus: <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>,
-        search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
         logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
-        building: <><rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><path d="M9 22v-4h6v4" /><line x1="8" y1="6" x2="8" y2="6.01" /><line x1="16" y1="6" x2="16" y2="6.01" /><line x1="12" y1="6" x2="12" y2="6.01" /><line x1="8" y1="10" x2="8" y2="10.01" /><line x1="16" y1="10" x2="16" y2="10.01" /><line x1="12" y1="10" x2="12" y2="10.01" /><line x1="8" y1="14" x2="8" y2="14.01" /><line x1="16" y1="14" x2="16" y2="14.01" /><line x1="12" y1="14" x2="12" y2="14.01" /></>,
-        layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
-        activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
-        lock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
-        upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></>,
+        x: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
         check: <polyline points="20 6 9 17 4 12" />,
-        x: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>
+        upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></>,
+        server: <><rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></>,
+        lock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
+        arrowRight: <><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></>
       };
       return (
         <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -100,7 +94,7 @@
     const PLANTILLAS_RUBRO = {
       distribuidora: {
         nombre: "Distribuidora y Logística",
-        iconName: "truck",
+        corto: "Distribución",
         tarifaUF: 6,
         modulos: {
           pickingBodega: true, incidenciasRetornos: true, conteoCiclico: true,
@@ -112,7 +106,7 @@
       },
       ecommerce: {
         nombre: "E-Commerce Omnicanal",
-        iconName: "bag",
+        corto: "E-Commerce",
         tarifaUF: 4,
         modulos: {
           pickingBodega: false, incidenciasRetornos: false, conteoCiclico: true,
@@ -123,8 +117,8 @@
         }
       },
       minimarket: {
-        nombre: "Retail / Minimarket",
-        iconName: "store",
+        nombre: "Retail y Minimarket",
+        corto: "Retail / POS",
         tarifaUF: 1.5,
         modulos: {
           pickingBodega: false, incidenciasRetornos: false, conteoCiclico: true,
@@ -136,7 +130,7 @@
       },
       barberia: {
         nombre: "Servicios y Estética",
-        iconName: "scissors",
+        corto: "Servicios",
         tarifaUF: 1.5,
         modulos: {
           pickingBodega: false, incidenciasRetornos: false, conteoCiclico: false,
@@ -199,7 +193,10 @@
       const [empresas, setEmpresas] = useState([]);
       const [empresaActiva, setEmpresaActiva] = useState(null);
       const [toquesSecretos, setToquesSecretos] = useState(0);
-      const [tabAdmin, setTabAdmin] = useState("empresas"); // empresas | infraestructura
+
+      // Navegación Admin
+      const [seccionAdmin, setSeccionAdmin] = useState("directorio"); // directorio | arquitectura
+      const [tabDrawer, setTabDrawer] = useState("general"); // general | marca | modulos
 
       const [rutInput, setRutInput] = useState("");
       const [claveInput, setClaveInput] = useState("");
@@ -210,7 +207,7 @@
       const [errorMaster, setErrorMaster] = useState("");
       const [busqueda, setBusqueda] = useState("");
       const [filtroEstado, setFiltroEstado] = useState("todos");
-      const [modalEmpresa, setModalEmpresa] = useState(null);
+      const [drawerEmpresa, setDrawerEmpresa] = useState(null);
       const [guardando, setGuardando] = useState(false);
 
       useEffect(() => {
@@ -310,19 +307,19 @@
           }
 
           if (!emp) {
-            setErrorLogin("RUT no registrado en el directorio de empresas.");
+            setErrorLogin("RUT no registrado en el directorio corporativo.");
             setIngresando(false);
             return;
           }
 
           if (emp.clave !== claveInput.trim()) {
-            setErrorLogin("Credenciales inválidas. Verifica tu clave.");
+            setErrorLogin("Clave incorrecta. Verifica tus credenciales.");
             setIngresando(false);
             return;
           }
 
           if (emp.estado === "suspendido") {
-            setErrorLogin("Instancia suspendida temporalmente. Contacta a administración.");
+            setErrorLogin("Instancia suspendida. Contacta a soporte administrativo.");
             setIngresando(false);
             return;
           }
@@ -337,7 +334,7 @@
           setEmpresaActiva(emp);
           setVista("cliente");
         } catch (err) {
-          setErrorLogin("Error de red al verificar credenciales.");
+          setErrorLogin("Error de conexión al validar identidad.");
         }
         setIngresando(false);
       };
@@ -350,7 +347,7 @@
           setMasterInput("");
           setVista("superadmin");
         } else {
-          setErrorMaster("Clave maestra incorrecta.");
+          setErrorMaster("Clave maestra inválida.");
         }
       };
 
@@ -368,8 +365,9 @@
         setVista("login");
       };
 
-      const abrirNuevaEmpresa = () => {
-        setModalEmpresa({
+      const abrirDrawerNueva = () => {
+        setTabDrawer("general");
+        setDrawerEmpresa({
           esNueva: true,
           rut: "",
           razonSocial: "",
@@ -385,10 +383,15 @@
         });
       };
 
-      const cambiarRubroModal = (nuevoRubro) => {
+      const abrirDrawerEditar = (emp, tabInicial = "general") => {
+        setTabDrawer(tabInicial);
+        setDrawerEmpresa({ ...emp, esNueva: false });
+      };
+
+      const cambiarRubroDrawer = (nuevoRubro) => {
         const plantilla = PLANTILLAS_RUBRO[nuevoRubro];
-        setModalEmpresa({
-          ...modalEmpresa,
+        setDrawerEmpresa({
+          ...drawerEmpresa,
           rubro: nuevoRubro,
           tarifaUF: plantilla.tarifaUF,
           modulos: { ...plantilla.modulos }
@@ -404,36 +407,36 @@
         }
         const reader = new FileReader();
         reader.onload = () => {
-          setModalEmpresa({ ...modalEmpresa, logoBase64: reader.result });
+          setDrawerEmpresa({ ...drawerEmpresa, logoBase64: reader.result });
         };
         reader.readAsDataURL(file);
       };
 
       const guardarEmpresa = async (e) => {
         e.preventDefault();
-        const rutClean = limpiarRut(modalEmpresa.rut);
-        if (!rutClean || !modalEmpresa.razonSocial.trim()) {
-          alert("RUT y Razón Social son campos obligatorios.");
+        const rutClean = limpiarRut(drawerEmpresa.rut);
+        if (!rutClean || !drawerEmpresa.razonSocial.trim()) {
+          alert("RUT y Razón Social son obligatorios.");
           return;
         }
         setGuardando(true);
         try {
           const payload = {
             rut: rutClean,
-            razonSocial: modalEmpresa.razonSocial.trim(),
-            clave: modalEmpresa.clave.trim() || "1234",
-            rubro: modalEmpresa.rubro,
-            estado: modalEmpresa.estado,
-            modoJerarquia: !!modalEmpresa.modoJerarquia,
-            tarifaUF: Number(modalEmpresa.tarifaUF) || 0,
-            sucursales: modalEmpresa.sucursales || ["Casa Matriz"],
-            logoBase64: modalEmpresa.logoBase64 || "",
-            rutaLegacy: modalEmpresa.rutaLegacy || "",
-            modulos: modalEmpresa.modulos,
+            razonSocial: drawerEmpresa.razonSocial.trim(),
+            clave: drawerEmpresa.clave.trim() || "1234",
+            rubro: drawerEmpresa.rubro,
+            estado: drawerEmpresa.estado,
+            modoJerarquia: !!drawerEmpresa.modoJerarquia,
+            tarifaUF: Number(drawerEmpresa.tarifaUF) || 0,
+            sucursales: drawerEmpresa.sucursales || ["Casa Matriz"],
+            logoBase64: drawerEmpresa.logoBase64 || "",
+            rutaLegacy: drawerEmpresa.rutaLegacy || "",
+            modulos: drawerEmpresa.modulos,
             actualizadoEn: firebase.firestore.FieldValue.serverTimestamp()
           };
           await db.collection("saas_empresas").doc(rutClean).set(payload, { merge: true });
-          setModalEmpresa(null);
+          setDrawerEmpresa(null);
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
@@ -451,84 +454,111 @@
         setVista("cliente");
       };
 
-      // PANTALLA DE CARGA MINIMALISTA
+      // PANTALLA DE CARGA
       if (vista === "cargando") {
         return (
-          <div className="min-h-screen flex flex-col items-center justify-center bg-[#09090b]">
-            <div className="w-8 h-8 border-2 border-zinc-700 border-t-emerald-400 rounded-full animate-spin mb-3"></div>
-            <p className="text-zinc-500 text-xs font-medium tracking-wider uppercase">Sincronizando entorno...</p>
+          <div className="min-h-screen flex items-center justify-center bg-slate-50">
+            <div className="flex items-center gap-3 text-slate-500 text-xs font-medium">
+              <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin"></div>
+              Cargando entorno empresarial...
+            </div>
           </div>
         );
       }
 
-      // 1. PORTAL DE ACCESO CORPORATIVO (ESTILO STRIPE / LINEAR)
+      // 1. PORTAL DE ACCESO CORPORATIVO (SPLIT-SCREEN INSTITUCIONAL)
       if (vista === "login") {
         return (
-          <div className="min-h-screen grid-bg flex flex-col justify-between p-6 relative overflow-hidden">
-            {/* Luz ambiental superior sutil */}
-            <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-emerald-500/10 blur-[120px] rounded-full"></div>
-
-            <div className="max-w-5xl w-full mx-auto flex items-center justify-between pt-2">
+          <div className="min-h-screen grid grid-cols-1 lg:grid-cols-12 bg-white">
+            {/* Columna Izquierda Institucional (Visible en Desktop) */}
+            <div className="hidden lg:flex lg:col-span-5 bg-slate-950 text-white p-12 flex-col justify-between relative overflow-hidden">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-zinc-900 border border-white/10 flex items-center justify-center text-emerald-400">
+                <div className="w-8 h-8 rounded bg-white text-slate-950 flex items-center justify-center">
                   <Icon name="layers" className="w-4 h-4" />
                 </div>
-                <span className="text-xs font-semibold tracking-widest uppercase text-zinc-400">
-                  NEXUS <span className="text-zinc-600">/</span> ERP CLOUD
-                </span>
+                <span className="text-sm font-bold tracking-wider uppercase">NEXUS ERP</span>
               </div>
-              <div className="flex items-center gap-2 text-[11px] text-zinc-500 font-mono-tabular">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                SII-CL OPERATIVO
+
+              <div className="space-y-4 max-w-sm">
+                <span className="inline-block text-[11px] font-mono-num uppercase tracking-widest text-emerald-400">
+                  Cloud Infrastructure • Chile
+                </span>
+                <h2 className="text-3xl font-semibold tracking-tight leading-tight">
+                  Gestión operativa, inventario y facturación SII en tiempo real.
+                </h2>
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Entornos aislados por RUT con sincronización continua y trazabilidad completa por sucursal.
+                </p>
+              </div>
+
+              <div className="border-t border-slate-800 pt-6 flex items-center justify-between text-xs text-slate-500 font-mono-num">
+                <span>SII DTE 33 / 39 / 61</span>
+                <span>LATENCIA &lt; 50ms</span>
               </div>
             </div>
 
-            <div className="w-full max-w-[380px] mx-auto my-auto py-8">
-              <div className="bg-zinc-950/90 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-7 shadow-2xl shadow-black/80">
-                <div className="mb-7">
+            {/* Columna Derecha Formulario Limpio */}
+            <div className="lg:col-span-7 flex flex-col justify-between p-6 sm:p-12 bg-slate-50/50">
+              <div className="flex items-center justify-between">
+                <div className="flex lg:hidden items-center gap-2">
+                  <div className="w-7 h-7 rounded bg-slate-900 text-white flex items-center justify-center">
+                    <Icon name="layers" className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-xs font-bold tracking-wider uppercase text-slate-900">NEXUS ERP</span>
+                </div>
+                <div className="ml-auto flex items-center gap-2 text-[11px] font-mono-num text-slate-500">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  SISTEMA EN LÍNEA
+                </div>
+              </div>
+
+              <div className="w-full max-w-[360px] mx-auto my-auto py-8">
+                <div className="mb-8">
                   <div
                     onClick={manejarToqueSecreto}
-                    className="w-10 h-10 rounded-xl bg-zinc-900 border border-white/10 flex items-center justify-center text-emerald-400 mb-5 cursor-pointer select-none hover:border-emerald-500/40 transition"
+                    className="w-10 h-10 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-900 mb-5 cursor-pointer select-none hover:border-slate-400 transition"
                   >
                     <Icon name="shield" className="w-5 h-5" />
                   </div>
-                  <h1 className="text-xl font-semibold tracking-tight text-white">Acceso Corporativo</h1>
-                  <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
-                    Autenticación por RUT de empresa para ingresar a tu espacio de trabajo.
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+                    Iniciar sesión
+                  </h1>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Ingresa el RUT de tu empresa para acceder a tu panel.
                   </p>
                 </div>
 
                 <form onSubmit={manejarLoginCliente} className="space-y-4">
                   <div>
-                    <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                      RUT Empresa
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      RUT Corporativo
                     </label>
                     <input
                       type="text"
                       value={rutInput}
                       onChange={(e) => setRutInput(e.target.value)}
                       placeholder="Sin puntos ni guion"
-                      className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900/80 border border-white/10 text-sm text-white font-mono-tabular placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition"
+                      className="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-300 text-sm text-slate-900 font-mono-num placeholder-slate-400 focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition"
                       autoComplete="username"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                      Clave de Seguridad
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      Clave de Acceso
                     </label>
                     <input
                       type="password"
                       value={claveInput}
                       onChange={(e) => setClaveInput(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900/80 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition"
+                      className="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition"
                       autoComplete="current-password"
                     />
                   </div>
 
                   {errorLogin && (
-                    <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">
+                    <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
                       {errorLogin}
                     </div>
                   )}
@@ -536,42 +566,43 @@
                   <button
                     type="submit"
                     disabled={ingresando}
-                    className="w-full py-2.5 px-4 rounded-lg bg-white hover:bg-zinc-200 text-zinc-950 font-semibold text-xs tracking-wide transition disabled:opacity-50 mt-2"
+                    className="w-full py-2.5 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
                   >
-                    {ingresando ? "Verificando identidad..." : "Continuar"}
+                    <span>{ingresando ? "Verificando..." : "Continuar al espacio"}</span>
+                    <Icon name="arrowRight" className="w-4 h-4" />
                   </button>
                 </form>
               </div>
-            </div>
 
-            <div className="max-w-5xl w-full mx-auto text-center pb-2">
-              <p className="text-[11px] text-zinc-600">
-                Infraestructura Multi-Tenant Aislada • Región Santiago (CL)
-              </p>
+              <div className="text-center text-[11px] text-slate-400">
+                Conexión cifrada TLS • Aislamiento de datos por organización
+              </div>
             </div>
           </div>
         );
       }
 
-      // 2. BÓVEDA SUPER ADMIN (#/comando) - LOGIN
+      // 2. ACCESO BÓVEDA SUPER ADMIN (#/comando)
       if (vista === "superadmin_login") {
         return (
-          <div className="min-h-screen grid-bg flex items-center justify-center p-4">
-            <div className="w-full max-w-[360px] bg-zinc-950 border border-white/10 rounded-2xl p-7 shadow-2xl">
-              <div className="flex items-center gap-2 text-amber-400 text-[11px] font-mono-tabular uppercase tracking-widest mb-4">
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+            <div className="w-full max-w-[360px] bg-slate-900 border border-slate-800 rounded-xl p-7 shadow-2xl">
+              <div className="flex items-center gap-2 text-amber-400 text-[11px] font-mono-num uppercase tracking-widest mb-3">
                 <Icon name="lock" className="w-3.5 h-3.5" />
-                Root Console
+                Root Administration
               </div>
-              <h2 className="text-lg font-semibold text-white">Autenticación Maestra</h2>
-              <p className="text-zinc-500 text-xs mt-1 mb-6">Consola de administración global del ecosistema.</p>
+              <h2 className="text-lg font-semibold text-white">Consola Maestra</h2>
+              <p className="text-xs text-slate-400 mt-1 mb-6">
+                Introduce la llave maestra para administrar instancias y licencias.
+              </p>
 
               <form onSubmit={manejarLoginMaster} className="space-y-4">
                 <input
                   type="password"
                   value={masterInput}
                   onChange={(e) => setMasterInput(e.target.value)}
-                  placeholder="Clave maestra"
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900 border border-white/10 text-sm text-white font-mono-tabular focus:outline-none focus:border-amber-500/60"
+                  placeholder="Llave maestra"
+                  className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-800 text-sm text-white font-mono-num focus:outline-none focus:border-amber-400"
                   autoFocus
                 />
                 {errorMaster && (
@@ -579,16 +610,16 @@
                 )}
                 <button
                   type="submit"
-                  className="w-full py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 font-semibold text-xs transition"
+                  className="w-full py-2.5 rounded-lg bg-white hover:bg-slate-200 text-slate-950 font-semibold text-xs transition"
                 >
-                  Desbloquear Consola
+                  Autenticar Root
                 </button>
                 <button
                   type="button"
                   onClick={() => { window.location.hash = ""; setVista("login"); }}
-                  className="w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition"
+                  className="w-full py-1.5 text-xs text-slate-500 hover:text-slate-300 transition"
                 >
-                  Volver al portal público
+                  Volver al acceso de clientes
                 </button>
               </form>
             </div>
@@ -596,7 +627,7 @@
         );
       }
 
-      // 3. CONSOLA EJECUTIVA SUPER ADMIN (CON SIDEBAR + TOPBAR)
+      // 3. CONSOLA ADMINISTRATIVA B2B (ESTILO STRIPE / SHOPIFY ADMIN - TABULAR)
       if (vista === "superadmin") {
         const activas = empresas.filter((e) => e.estado === "activo").length;
         const mrrUF = empresas
@@ -612,501 +643,531 @@
         });
 
         return (
-          <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col md:flex-row">
-            {/* SIDEBAR LATERAL EJECUTIVO */}
-            <aside className="w-full md:w-64 bg-zinc-950 border-b md:border-b-0 md:border-r border-white/[0.08] flex flex-col justify-between shrink-0">
-              <div>
-                {/* Marca Consola */}
-                <div className="h-14 px-5 border-b border-white/[0.08] flex items-center justify-between">
+          <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
+            {/* BARRA SUPERIOR OSCURA DE COMANDO (TOPBAR) */}
+            <header className="bg-slate-950 text-white border-b border-slate-800 sticky top-0 z-30">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-6">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400">
+                    <div className="w-7 h-7 rounded bg-white text-slate-950 flex items-center justify-center">
                       <Icon name="layers" className="w-4 h-4" />
                     </div>
-                    <div>
-                      <span className="text-xs font-bold tracking-wider uppercase text-white block leading-none">
-                        NEXUS ROOT
-                      </span>
-                      <span className="text-[10px] text-zinc-500 font-mono-tabular">v2.4 Enterprise</span>
-                    </div>
+                    <span className="text-xs font-bold tracking-wider uppercase">NEXUS ADMIN</span>
                   </div>
+
+                  {/* Navegación Horizontal de Consola */}
+                  <nav className="flex items-center gap-1 border-l border-slate-800 pl-4">
+                    <button
+                      onClick={() => setSeccionAdmin("directorio")}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                        seccionAdmin === "directorio"
+                          ? "bg-slate-800 text-white"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Organizaciones ({empresas.length})
+                    </button>
+                    <button
+                      onClick={() => setSeccionAdmin("arquitectura")}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                        seccionAdmin === "arquitectura"
+                          ? "bg-slate-800 text-white"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Infraestructura
+                    </button>
+                  </nav>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-mono-num text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2.5 py-1 rounded">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    pgb-bodegad
+                  </span>
                   <button
                     onClick={salirSuperAdmin}
-                    className="md:hidden p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-400 hover:text-white hover:bg-slate-900 transition"
                     title="Cerrar consola"
                   >
-                    <Icon name="logout" className="w-4 h-4" />
+                    <Icon name="logout" className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Salir</span>
                   </button>
                 </div>
-
-                {/* Navegación Sidebar */}
-                <nav className="p-3 flex md:flex-col gap-1 overflow-x-auto">
-                  <button
-                    onClick={() => setTabAdmin("empresas")}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                      tabAdmin === "empresas"
-                        ? "bg-zinc-900 text-white border border-white/[0.08]"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
-                    }`}
-                  >
-                    <Icon name="building" className="w-4 h-4 text-emerald-400" />
-                    Directorio Empresas
-                    <span className="ml-auto text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
-                      {empresas.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setTabAdmin("infraestructura")}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-                      tabAdmin === "infraestructura"
-                        ? "bg-zinc-900 text-white border border-white/[0.08]"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
-                    }`}
-                  >
-                    <Icon name="activity" className="w-4 h-4 text-amber-400" />
-                    Telemetría y Nodos
-                  </button>
-                </nav>
               </div>
+            </header>
 
-              {/* Pie Sidebar Desktop */}
-              <div className="hidden md:block p-4 border-t border-white/[0.08] space-y-3">
-                <div className="flex items-center gap-2.5 px-2">
-                  <div className="w-7 h-7 rounded-full bg-zinc-800 border border-white/10 flex items-center justify-center text-[11px] font-bold text-zinc-200">
-                    DJ
-                  </div>
-                  <div className="overflow-hidden">
-                    <p className="text-xs font-medium text-white truncate">Diego Jiménez</p>
-                    <p className="text-[10px] text-zinc-500 truncate">Arquitecto / Super Admin</p>
-                  </div>
-                </div>
-                <button
-                  onClick={salirSuperAdmin}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/[0.06] text-xs font-medium text-zinc-400 hover:text-white transition"
-                >
-                  <Icon name="logout" className="w-3.5 h-3.5" />
-                  Cerrar Sesión Root
-                </button>
-              </div>
-            </aside>
-
-            {/* ÁREA PRINCIPAL DE TRABAJO */}
-            <div className="flex-1 flex flex-col min-w-0">
-              {/* Topbar */}
-              <header className="h-14 px-6 border-b border-white/[0.08] bg-zinc-950/60 backdrop-blur-md flex items-center justify-between sticky top-0 z-20">
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <span>Consola</span>
-                  <span className="text-zinc-600">/</span>
-                  <span className="text-white font-medium">
-                    {tabAdmin === "empresas" ? "Gestión de Inquilinos (Tenants)" : "Estado de Servicios"}
-                  </span>
+            {/* CONTENIDO PRINCIPAL */}
+            <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+              {/* Encabezado de Página + Botón Primario */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h1 className="text-xl font-semibold tracking-tight text-slate-900">
+                    {seccionAdmin === "directorio" ? "Directorio de Empresas" : "Arquitectura y Nodos"}
+                  </h1>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Administración centralizada de instancias, licenciamiento y módulos operativos.
+                  </p>
                 </div>
 
                 <button
-                  onClick={abrirNuevaEmpresa}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs transition shadow-sm"
+                  onClick={abrirDrawerNueva}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs shadow-sm transition"
                 >
                   <Icon name="plus" className="w-3.5 h-3.5" />
-                  Nueva Empresa
+                  Registrar Empresa
                 </button>
-              </header>
+              </div>
 
-              <main className="p-6 max-w-6xl w-full mx-auto space-y-6">
-                {/* KPIs Ejecutivos */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-zinc-950 border border-white/[0.08] rounded-xl p-4">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      Instancias Activas
-                    </span>
-                    <div className="mt-2 flex items-baseline justify-between">
-                      <span className="text-2xl font-semibold text-white tabular-nums">{activas}</span>
-                      <span className="text-[11px] text-emerald-400 font-mono-tabular">100% online</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-zinc-950 border border-white/[0.08] rounded-xl p-4">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      Ingreso Recurrente (MRR)
-                    </span>
-                    <div className="mt-2 flex items-baseline justify-between">
-                      <span className="text-2xl font-semibold text-white tabular-nums">{mrrUF} UF</span>
-                      <span className="text-[11px] text-zinc-500 font-mono-tabular">/ mes</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-zinc-950 border border-white/[0.08] rounded-xl p-4">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      Total Carteras
-                    </span>
-                    <div className="mt-2 flex items-baseline justify-between">
-                      <span className="text-2xl font-semibold text-white tabular-nums">{empresas.length}</span>
-                      <span className="text-[11px] text-zinc-500">RUTs aislados</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-zinc-950 border border-white/[0.08] rounded-xl p-4">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      Motor SII / Cloud
-                    </span>
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                      <span className="text-sm font-medium text-zinc-200">Operativo 24/7</span>
-                    </div>
+              {/* FRANJA UNIFICADA DE MÉTRICAS (KPI STRIP - NO TARJETAS APILADAS) */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-xs grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 overflow-hidden">
+                <div className="p-4 sm:px-6">
+                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                    Instancias Activas
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold text-slate-900 tabular">{activas}</span>
+                    <span className="text-xs text-emerald-600 font-medium">operativas</span>
                   </div>
                 </div>
 
-                {tabAdmin === "empresas" ? (
-                  <>
-                    {/* Barra de Filtro y Búsqueda */}
-                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-                      <div className="relative flex-1 max-w-md">
-                        <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-zinc-500">
-                          <Icon name="search" className="w-4 h-4" />
-                        </div>
-                        <input
-                          type="text"
-                          value={busqueda}
-                          onChange={(e) => setBusqueda(e.target.value)}
-                          placeholder="Filtrar por razón social o RUT..."
-                          className="w-full pl-9 pr-3.5 py-2 rounded-lg bg-zinc-950 border border-white/[0.08] text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/25"
-                        />
-                      </div>
+                <div className="p-4 sm:px-6">
+                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                    Facturación Mensual
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-1.5">
+                    <span className="text-2xl font-semibold text-slate-900 tabular">{mrrUF}</span>
+                    <span className="text-xs font-mono-num text-slate-500">UF / mes</span>
+                  </div>
+                </div>
 
-                      <div className="flex items-center gap-1 bg-zinc-950 border border-white/[0.08] p-1 rounded-lg">
-                        {["todos", "activo", "aviso", "suspendido"].map((est) => (
-                          <button
-                            key={est}
-                            onClick={() => setFiltroEstado(est)}
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition ${
-                              filtroEstado === est
-                                ? "bg-zinc-800 text-white"
-                                : "text-zinc-500 hover:text-zinc-300"
-                            }`}
-                          >
-                            {est}
-                          </button>
-                        ))}
+                <div className="p-4 sm:px-6">
+                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                    Cartera Total
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold text-slate-900 tabular">{empresas.length}</span>
+                    <span className="text-xs text-slate-500">RUTs registrados</span>
+                  </div>
+                </div>
+
+                <div className="p-4 sm:px-6">
+                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+                    Motor Tributario
+                  </span>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span className="text-sm font-semibold text-slate-900">SII 24/7 Activo</span>
+                  </div>
+                </div>
+              </div>
+
+              {seccionAdmin === "directorio" ? (
+                /* TABLA ADMINISTRATIVA REAL (DATA TABLE) */
+                <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                  {/* Barra de herramientas de tabla */}
+                  <div className="p-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/60">
+                    <div className="relative flex-1 max-w-sm">
+                      <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
+                        <Icon name="search" className="w-3.5 h-3.5" />
                       </div>
+                      <input
+                        type="text"
+                        value={busqueda}
+                        onChange={(e) => setBusqueda(e.target.value)}
+                        placeholder="Buscar empresa o RUT..."
+                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-400"
+                      />
                     </div>
 
-                    {/* Grid de Empresas (Diseño Tarjeta Ejecutiva Limpia) */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {filtradas.map((emp) => {
-                        const infoRubro = PLANTILLAS_RUBRO[emp.rubro] || PLANTILLAS_RUBRO.minimarket;
-                        const modulosActivos = Object.values(emp.modulos || {}).filter(Boolean).length;
-
-                        return (
-                          <div
-                            key={emp.rut}
-                            className="bg-zinc-950 border border-white/[0.08] hover:border-white/[0.16] rounded-xl p-5 flex flex-col justify-between gap-5 transition"
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex items-center gap-3.5 min-w-0">
-                                {emp.logoBase64 ? (
-                                  <img
-                                    src={emp.logoBase64}
-                                    alt={emp.razonSocial}
-                                    className="w-11 h-11 object-contain rounded-lg bg-white p-1.5 shrink-0"
-                                  />
-                                ) : (
-                                  <div className="w-11 h-11 rounded-lg bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-300 shrink-0">
-                                    <Icon name={infoRubro.iconName} className="w-5 h-5" />
-                                  </div>
-                                )}
-                                <div className="min-w-0">
-                                  <h3 className="font-semibold text-white text-sm truncate">
-                                    {emp.razonSocial}
-                                  </h3>
-                                  <p className="text-xs text-zinc-500 font-mono-tabular mt-0.5">
-                                    {formatearRutVisual(emp.rut)}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <span
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${
-                                  emp.estado === "activo"
-                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                    : emp.estado === "aviso"
-                                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                                }`}
-                              >
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    emp.estado === "activo"
-                                      ? "bg-emerald-400"
-                                      : emp.estado === "aviso"
-                                      ? "bg-amber-400"
-                                      : "bg-rose-400"
-                                  }`}
-                                ></span>
-                                <span className="capitalize">{emp.estado}</span>
-                              </span>
-                            </div>
-
-                            {/* Metadatos técnicos */}
-                            <div className="grid grid-cols-3 gap-2 py-3 px-3.5 rounded-lg bg-zinc-900/60 border border-white/[0.04] text-xs">
-                              <div>
-                                <span className="text-[10px] text-zinc-500 block">Rubro</span>
-                                <span className="text-zinc-300 font-medium truncate block">
-                                  {infoRubro.nombre.split(" ")[0]}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] text-zinc-500 block">Módulos</span>
-                                <span className="text-zinc-300 font-mono-tabular">{modulosActivos} activos</span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] text-zinc-500 block">Plan</span>
-                                <span className="text-zinc-300 font-mono-tabular">{emp.tarifaUF} UF/mes</span>
-                              </div>
-                            </div>
-
-                            {/* Barra de acciones */}
-                            <div className="flex items-center justify-between pt-1">
-                              <span className="text-[11px] text-zinc-500 font-mono-tabular">
-                                PIN: <span className="text-zinc-300">{emp.clave}</span> •{" "}
-                                {emp.modoJerarquia ? "Roles" : "General"}
-                              </span>
-
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => setModalEmpresa({ ...emp, esNueva: false })}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs font-medium text-zinc-200 transition"
-                                >
-                                  <Icon name="sliders" className="w-3.5 h-3.5 text-zinc-400" />
-                                  Configurar
-                                </button>
-                                <button
-                                  onClick={() => entrarComoAdmin(emp)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-semibold transition"
-                                >
-                                  Abrir
-                                  <Icon name="external" className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  /* VISTA TELEMETRÍA Y NODOS */
-                  <div className="bg-zinc-950 border border-white/[0.08] rounded-xl p-6 space-y-4">
-                    <h3 className="text-sm font-semibold text-white">Arquitectura de Despliegue</h3>
-                    <div className="divide-y divide-white/[0.06] text-xs">
-                      <div className="py-3 flex items-center justify-between">
-                        <span className="text-zinc-400">Orquestador Principal</span>
-                        <span className="font-mono-tabular text-zinc-200">index.html (React 18 + Firestore)</span>
-                      </div>
-                      <div className="py-3 flex items-center justify-between">
-                        <span className="text-zinc-400">Nodo Dedicado PGB</span>
-                        <span className="font-mono-tabular text-emerald-400">pgb-operacion.html (Aislado)</span>
-                      </div>
-                      <div className="py-3 flex items-center justify-between">
-                        <span className="text-zinc-400">Base de Datos Cloud</span>
-                        <span className="font-mono-tabular text-zinc-200">pgb-bodegad • Tiempo Real</span>
-                      </div>
+                    <div className="flex items-center gap-1">
+                      {["todos", "activo", "aviso", "suspendido"].map((est) => (
+                        <button
+                          key={est}
+                          onClick={() => setFiltroEstado(est)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition ${
+                            filtroEstado === est
+                              ? "bg-slate-900 text-white"
+                              : "text-slate-600 hover:bg-slate-200/60"
+                          }`}
+                        >
+                          {est}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                )}
-              </main>
-            </div>
 
-            {/* MODAL CONFIGURADOR DE INQUILINO */}
-            {modalEmpresa && (
-              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
-                <div className="bg-zinc-950 border border-white/15 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
-                  <div className="px-6 py-4 border-b border-white/[0.08] flex items-center justify-between sticky top-0 bg-zinc-950 z-10">
+                  {/* Contenedor Tabla con Scroll Horizontal Limpio */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                          <th className="py-3 px-4">Organización</th>
+                          <th className="py-3 px-4">RUT / Acceso</th>
+                          <th className="py-3 px-4">Rubro</th>
+                          <th className="py-3 px-4">Módulos</th>
+                          <th className="py-3 px-4">Estado</th>
+                          <th className="py-3 px-4 text-right">Plan</th>
+                          <th className="py-3 px-4 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 text-xs">
+                        {filtradas.map((emp) => {
+                          const infoRubro = PLANTILLAS_RUBRO[emp.rubro] || PLANTILLAS_RUBRO.minimarket;
+                          const modulosActivos = Object.values(emp.modulos || {}).filter(Boolean).length;
+
+                          return (
+                            <tr key={emp.rut} className="hover:bg-slate-50/80 transition">
+                              {/* Columna Organización + Logo PNG */}
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <div className="flex items-center gap-3">
+                                  {emp.logoBase64 ? (
+                                    <img
+                                      src={emp.logoBase64}
+                                      alt={emp.razonSocial}
+                                      className="w-8 h-8 object-contain rounded border border-slate-200 bg-white p-0.5 shrink-0"
+                                    />
+                                  ) : (
+                                    <div className="w-8 h-8 rounded border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-[11px] shrink-0">
+                                      {emp.razonSocial.substring(0, 2).toUpperCase()}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="font-semibold text-slate-900">{emp.razonSocial}</div>
+                                    <div className="text-[11px] text-slate-400">
+                                      {emp.rutaLegacy ? "Nodo dedicado" : "Instancia estándar"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Columna RUT + PIN */}
+                              <td className="py-3.5 px-4 whitespace-nowrap font-mono-num">
+                                <div className="text-slate-900 font-medium">{formatearRutVisual(emp.rut)}</div>
+                                <div className="text-[11px] text-slate-400">
+                                  PIN: {emp.clave} • {emp.modoJerarquia ? "Roles" : "General"}
+                                </div>
+                              </td>
+
+                              {/* Columna Rubro */}
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium text-[11px]">
+                                  {infoRubro.corto}
+                                </span>
+                              </td>
+
+                              {/* Columna Módulos */}
+                              <td className="py-3.5 px-4 whitespace-nowrap font-mono-num text-slate-600">
+                                {modulosActivos} / 14
+                              </td>
+
+                              {/* Columna Estado */}
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                                    emp.estado === "activo"
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                      : emp.estado === "aviso"
+                                      ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                      : "bg-rose-50 text-rose-700 border border-rose-200"
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      emp.estado === "activo"
+                                        ? "bg-emerald-500"
+                                        : emp.estado === "aviso"
+                                        ? "bg-amber-500"
+                                        : "bg-rose-500"
+                                    }`}
+                                  ></span>
+                                  <span className="capitalize">{emp.estado}</span>
+                                </span>
+                              </td>
+
+                              {/* Columna Plan UF */}
+                              <td className="py-3.5 px-4 whitespace-nowrap text-right font-mono-num font-semibold text-slate-900">
+                                {emp.tarifaUF} UF
+                              </td>
+
+                              {/* Columna Acciones */}
+                              <td className="py-3.5 px-4 whitespace-nowrap text-right">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => abrirDrawerEditar(emp, "general")}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium transition"
+                                  >
+                                    <Icon name="sliders" className="w-3.5 h-3.5 text-slate-500" />
+                                    Configurar
+                                  </button>
+                                  <button
+                                    onClick={() => entrarComoAdmin(emp)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white font-medium transition"
+                                  >
+                                    Entrar
+                                    <Icon name="external" className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                /* TABLA DE ARQUITECTURA */
+                <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                  <div className="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+                    <Icon name="server" className="w-4 h-4 text-slate-500" />
+                    <h2 className="text-sm font-semibold text-slate-900">Topología de Despliegue</h2>
+                  </div>
+                  <div className="divide-y divide-slate-200 text-xs">
+                    <div className="px-5 py-3.5 flex items-center justify-between">
+                      <span className="text-slate-600 font-medium">Orquestador Principal y Consola</span>
+                      <span className="font-mono-num text-slate-900">index.html</span>
+                    </div>
+                    <div className="px-5 py-3.5 flex items-center justify-between">
+                      <span className="text-slate-600 font-medium">Operación Dedicada PGB</span>
+                      <span className="font-mono-num text-emerald-700">pgb-operacion.html (Aislado)</span>
+                    </div>
+                    <div className="px-5 py-3.5 flex items-center justify-between">
+                      <span className="text-slate-600 font-medium">Motor Cloud Firestore</span>
+                      <span className="font-mono-num text-slate-900">pgb-bodegad • Tiempo Real</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </main>
+
+            {/* PANEL LATERAL DESLIZANTE (SLIDE-OVER INSPECTOR DRAWER) */}
+            {drawerEmpresa && (
+              <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40 backdrop-blur-[2px]">
+                <div className="w-full max-w-lg bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col animate-drawer">
+                  {/* Cabecera Drawer */}
+                  <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
                     <div>
-                      <h2 className="text-sm font-semibold text-white">
-                        {modalEmpresa.esNueva ? "Alta de Nueva Empresa" : modalEmpresa.razonSocial}
+                      <span className="text-[11px] font-mono-num uppercase tracking-wider text-slate-400">
+                        {drawerEmpresa.esNueva ? "Alta de Inquilino" : formatearRutVisual(drawerEmpresa.rut)}
+                      </span>
+                      <h2 className="text-base font-semibold text-slate-900">
+                        {drawerEmpresa.esNueva ? "Nueva Organización" : drawerEmpresa.razonSocial}
                       </h2>
-                      <p className="text-[11px] text-zinc-500">Parámetros de instancia, marca y módulos activos</p>
                     </div>
                     <button
-                      onClick={() => setModalEmpresa(null)}
-                      className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900"
+                      onClick={() => setDrawerEmpresa(null)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100"
                     >
                       <Icon name="x" className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <form onSubmit={guardarEmpresa} className="p-6 space-y-6">
-                    {/* Identificación */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                          RUT Empresa (sin puntos/guion)
-                        </label>
-                        <input
-                          type="text"
-                          disabled={!modalEmpresa.esNueva}
-                          value={modalEmpresa.rut}
-                          onChange={(e) => setModalEmpresa({ ...modalEmpresa, rut: e.target.value })}
-                          placeholder="Ej: 775280425"
-                          className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-xs text-white font-mono-tabular disabled:opacity-50"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                          Razón Social
-                        </label>
-                        <input
-                          type="text"
-                          value={modalEmpresa.razonSocial}
-                          onChange={(e) => setModalEmpresa({ ...modalEmpresa, razonSocial: e.target.value })}
-                          placeholder="Nombre legal o comercial"
-                          className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-xs text-white"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                          Clave de Acceso
-                        </label>
-                        <input
-                          type="text"
-                          value={modalEmpresa.clave}
-                          onChange={(e) => setModalEmpresa({ ...modalEmpresa, clave: e.target.value })}
-                          className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-xs text-white font-mono-tabular"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                          Estado Operativo
-                        </label>
-                        <select
-                          value={modalEmpresa.estado}
-                          onChange={(e) => setModalEmpresa({ ...modalEmpresa, estado: e.target.value })}
-                          className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-xs text-white"
-                        >
-                          <option value="activo">Activo (Operación normal)</option>
-                          <option value="aviso">Aviso de Pago (Banner preventivo)</option>
-                          <option value="suspendido">Suspendido (Acceso bloqueado)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Identidad Visual (Logo PNG) */}
-                    <div className="bg-zinc-900/50 border border-white/[0.08] rounded-xl p-4 flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-xs font-medium text-white flex items-center gap-1.5">
-                          <Icon name="upload" className="w-3.5 h-3.5 text-emerald-400" />
-                          Identidad Corporativa (Logo PNG)
-                        </p>
-                        <p className="text-[11px] text-zinc-500 mt-0.5">
-                          Se renderiza en encabezado, portal y documentos PDF sin pérdida.
-                        </p>
-                        <input
-                          type="file"
-                          accept="image/png,image/webp,image/jpeg"
-                          onChange={manejarSubidaLogo}
-                          className="mt-2.5 text-[11px] text-zinc-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border file:border-white/10 file:text-[11px] file:font-medium file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700"
-                        />
-                      </div>
-                      {modalEmpresa.logoBase64 && (
-                        <div className="flex flex-col items-center gap-1.5 shrink-0">
-                          <img
-                            src={modalEmpresa.logoBase64}
-                            alt="Logo"
-                            className="w-14 h-14 object-contain bg-white rounded-lg p-1.5"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setModalEmpresa({ ...modalEmpresa, logoBase64: "" })}
-                            className="text-[10px] text-rose-400 hover:underline"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Plantilla por Rubro */}
-                    <div>
-                      <label className="block text-[11px] font-medium text-zinc-400 mb-2">
-                        Perfil Pre-configurado por Industria
-                      </label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {Object.entries(PLANTILLAS_RUBRO).map(([key, info]) => (
-                          <button
-                            type="button"
-                            key={key}
-                            onClick={() => cambiarRubroModal(key)}
-                            className={`p-3 rounded-xl border text-left transition ${
-                              modalEmpresa.rubro === key
-                                ? "bg-emerald-500/10 border-emerald-500/40 text-white"
-                                : "bg-zinc-900/40 border-white/[0.06] text-zinc-400 hover:border-white/15"
-                            }`}
-                          >
-                            <Icon
-                              name={info.iconName}
-                              className={`w-4 h-4 mb-2 ${
-                                modalEmpresa.rubro === key ? "text-emerald-400" : "text-zinc-500"
-                              }`}
-                            />
-                            <div className="text-[11px] font-medium leading-snug">{info.nombre}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Control Jerárquico */}
-                    <div className="flex items-center justify-between bg-zinc-900/50 border border-white/[0.08] rounded-xl p-3.5">
-                      <div>
-                        <p className="text-xs font-medium text-white">Control de Acceso por Roles</p>
-                        <p className="text-[11px] text-zinc-500">
-                          {modalEmpresa.modoJerarquia
-                            ? "Activado: Permisos diferenciados por perfil operativo"
-                            : "Estándar: Ingreso unificado con clave corporativa"}
-                        </p>
-                      </div>
+                  {/* Pestañas Internas del Drawer */}
+                  <div className="px-6 border-b border-slate-200 flex gap-5 bg-slate-50/70">
+                    {[
+                      { id: "general", label: "General y Plan" },
+                      { id: "marca", label: "Identidad PNG" },
+                      { id: "modulos", label: "Módulos (14)" }
+                    ].map((t) => (
                       <button
+                        key={t.id}
                         type="button"
-                        onClick={() =>
-                          setModalEmpresa({ ...modalEmpresa, modoJerarquia: !modalEmpresa.modoJerarquia })
-                        }
-                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition ${
-                          modalEmpresa.modoJerarquia
-                            ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
-                            : "bg-zinc-900 border-white/10 text-zinc-400"
+                        onClick={() => setTabDrawer(t.id)}
+                        className={`py-2.5 text-xs font-medium border-b-2 transition ${
+                          tabDrawer === t.id
+                            ? "border-slate-900 text-slate-900"
+                            : "border-transparent text-slate-500 hover:text-slate-700"
                         }`}
                       >
-                        {modalEmpresa.modoJerarquia ? "Por Roles" : "Unificado"}
+                        {t.label}
                       </button>
-                    </div>
+                    ))}
+                  </div>
 
-                    {/* Switches de Módulos */}
-                    <div>
-                      <label className="block text-[11px] font-medium text-zinc-400 mb-2">
-                        Módulos Habilitados en Instancia
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Cuerpo del Drawer */}
+                  <form onSubmit={guardarEmpresa} className="flex-1 overflow-y-auto p-6 space-y-5">
+                    {tabDrawer === "general" && (
+                      <>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              RUT Empresa (sin puntos ni guion)
+                            </label>
+                            <input
+                              type="text"
+                              disabled={!drawerEmpresa.esNueva}
+                              value={drawerEmpresa.rut}
+                              onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, rut: e.target.value })}
+                              placeholder="Ej: 775280425"
+                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 font-mono-num disabled:bg-slate-100 disabled:text-slate-500"
+                              required
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              Razón Social
+                            </label>
+                            <input
+                              type="text"
+                              value={drawerEmpresa.razonSocial}
+                              onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, razonSocial: e.target.value })}
+                              placeholder="Nombre legal de la empresa"
+                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900"
+                              required
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Clave de Acceso
+                              </label>
+                              <input
+                                type="text"
+                                value={drawerEmpresa.clave}
+                                onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, clave: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 font-mono-num"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Tarifa Mensual (UF)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.5"
+                                value={drawerEmpresa.tarifaUF}
+                                onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, tarifaUF: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 font-mono-num"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              Estado Operativo
+                            </label>
+                            <select
+                              value={drawerEmpresa.estado}
+                              onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, estado: e.target.value })}
+                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900"
+                            >
+                              <option value="activo">Activo — Operación normal</option>
+                              <option value="aviso">Aviso — Banner preventivo de pago</option>
+                              <option value="suspendido">Suspendido — Acceso bloqueado</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                              Plantilla de Industria (Auto-configura módulos)
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {Object.entries(PLANTILLAS_RUBRO).map(([key, info]) => (
+                                <button
+                                  type="button"
+                                  key={key}
+                                  onClick={() => cambiarRubroDrawer(key)}
+                                  className={`px-3 py-2 rounded-lg border text-left text-xs font-medium transition ${
+                                    drawerEmpresa.rubro === key
+                                      ? "bg-slate-900 border-slate-900 text-white"
+                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  {info.nombre}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+                            <div>
+                              <p className="text-xs font-medium text-slate-900">Jerarquía por Roles</p>
+                              <p className="text-[11px] text-slate-500">
+                                Separa permisos entre administradores y operarios.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDrawerEmpresa({ ...drawerEmpresa, modoJerarquia: !drawerEmpresa.modoJerarquia })
+                              }
+                              className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                                drawerEmpresa.modoJerarquia
+                                  ? "bg-slate-900 border-slate-900 text-white"
+                                  : "bg-white border-slate-300 text-slate-700"
+                              }`}
+                            >
+                              {drawerEmpresa.modoJerarquia ? "Activado" : "Estándar"}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {tabDrawer === "marca" && (
+                      <div className="space-y-4">
+                        <div className="border border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50/50">
+                          {drawerEmpresa.logoBase64 ? (
+                            <div className="space-y-3">
+                              <img
+                                src={drawerEmpresa.logoBase64}
+                                alt="Logo"
+                                className="max-h-24 mx-auto object-contain bg-white p-2 rounded-lg border border-slate-200"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setDrawerEmpresa({ ...drawerEmpresa, logoBase64: "" })}
+                                className="text-xs text-rose-600 font-medium hover:underline"
+                              >
+                                Quitar logotipo actual
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center mx-auto text-slate-500">
+                                <Icon name="upload" className="w-4 h-4" />
+                              </div>
+                              <p className="text-xs font-medium text-slate-900">
+                                Subir logotipo original (PNG transparente)
+                              </p>
+                              <p className="text-[11px] text-slate-500">
+                                Se aplicará en el portal, cabecera operativa y reportes PDF.
+                              </p>
+                            </div>
+                          )}
+
+                          <input
+                            type="file"
+                            accept="image/png,image/webp,image/jpeg"
+                            onChange={manejarSubidaLogo}
+                            className="mt-4 text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-medium file:bg-white file:text-slate-800 hover:file:bg-slate-100"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {tabDrawer === "modulos" && (
+                      <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
                         {Object.entries(ETIQUETAS_MODULOS).map(([modKey, label]) => {
-                          const activo = !!modalEmpresa.modulos?.[modKey];
+                          const activo = !!drawerEmpresa.modulos?.[modKey];
                           return (
                             <div
                               key={modKey}
                               onClick={() =>
-                                setModalEmpresa({
-                                  ...modalEmpresa,
-                                  modulos: { ...modalEmpresa.modulos, [modKey]: !activo }
+                                setDrawerEmpresa({
+                                  ...drawerEmpresa,
+                                  modulos: { ...drawerEmpresa.modulos, [modKey]: !activo }
                                 })
                               }
-                              className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${
-                                activo
-                                  ? "bg-zinc-900 border-white/15 text-zinc-100"
-                                  : "bg-zinc-950 border-white/[0.05] text-zinc-500 hover:border-white/10"
-                              }`}
+                              className="flex items-center justify-between px-4 py-3 bg-white hover:bg-slate-50 cursor-pointer transition"
                             >
-                              <span className="text-xs pr-2">{label}</span>
+                              <span className="text-xs font-medium text-slate-800">{label}</span>
                               <div
                                 className={`w-8 h-4 rounded-full p-0.5 transition shrink-0 ${
-                                  activo ? "bg-emerald-500" : "bg-zinc-800"
+                                  activo ? "bg-slate-900" : "bg-slate-200"
                                 }`}
                               >
                                 <div
@@ -1119,22 +1180,23 @@
                           );
                         })}
                       </div>
-                    </div>
+                    )}
 
-                    <div className="flex justify-end gap-2.5 pt-4 border-t border-white/[0.08]">
+                    {/* Pie Fijo Drawer */}
+                    <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => setModalEmpresa(null)}
-                        className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium"
+                        onClick={() => setDrawerEmpresa(null)}
+                        className="px-4 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-medium hover:bg-slate-50"
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
                         disabled={guardando}
-                        className="px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-semibold"
+                        className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
                       >
-                        {guardando ? "Aplicando cambios..." : "Guardar Configuración"}
+                        {guardando ? "Guardando..." : "Guardar Cambios"}
                       </button>
                     </div>
                   </form>
@@ -1151,69 +1213,68 @@
         const activos = Object.entries(empresaActiva.modulos || {}).filter(([, val]) => val);
 
         return (
-          <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col">
+          <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
             {empresaActiva.estado === "aviso" && (
-              <div className="bg-amber-500/15 border-b border-amber-500/30 text-amber-300 text-xs text-center py-2 px-4">
-                Aviso administrativo: Existe un saldo de suscripción pendiente de regularización.
+              <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs font-medium text-center py-2 px-4">
+                Aviso administrativo: Existe un saldo pendiente en tu suscripción mensual.
               </div>
             )}
 
-            <header className="h-16 bg-zinc-950 border-b border-white/[0.08] px-6 flex items-center justify-between">
-              <div className="flex items-center gap-3.5">
+            <header className="h-14 bg-white border-b border-slate-200 px-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
                 {empresaActiva.logoBase64 ? (
                   <img
                     src={empresaActiva.logoBase64}
                     alt={empresaActiva.razonSocial}
-                    className="w-9 h-9 object-contain bg-white rounded-lg p-1"
+                    className="w-8 h-8 object-contain rounded border border-slate-200 p-0.5"
                   />
                 ) : (
-                  <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-white/10 flex items-center justify-center text-emerald-400">
-                    <Icon name={infoRubro.iconName} className="w-4 h-4" />
+                  <div className="w-8 h-8 rounded bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
+                    {empresaActiva.razonSocial.substring(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <h1 className="font-semibold text-white text-sm leading-tight">
+                  <h1 className="font-semibold text-slate-900 text-sm leading-tight">
                     {empresaActiva.razonSocial}
                   </h1>
-                  <p className="text-[11px] text-zinc-500 font-mono-tabular">
-                    RUT {formatearRutVisual(empresaActiva.rut)} • {infoRubro.nombre}
+                  <p className="text-[11px] text-slate-500 font-mono-num">
+                    {formatearRutVisual(empresaActiva.rut)} • {infoRubro.nombre}
                   </p>
                 </div>
               </div>
 
               <button
                 onClick={cerrarSesionCliente}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs font-medium text-zinc-300 transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700 transition"
               >
                 <Icon name="logout" className="w-3.5 h-3.5" />
-                Salir
+                Cerrar sesión
               </button>
             </header>
 
             <main className="max-w-5xl w-full mx-auto px-6 py-8 space-y-6">
-              <div className="bg-zinc-950 border border-white/[0.08] rounded-2xl p-6">
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium mb-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  Entorno Dedicado Activo
+              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-900">
+                      Módulos Activos de la Organización
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Instancia aislada y configurada desde la consola central.
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    En línea
+                  </span>
                 </div>
-                <h2 className="text-lg font-semibold text-white">
-                  Módulos Operativos de {empresaActiva.razonSocial}
-                </h2>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Arquitectura aislada gobernada en tiempo real desde la consola central.
-                </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-6">
+                <div className="divide-y divide-slate-200">
                   {activos.map(([key]) => (
-                    <div
-                      key={key}
-                      className="p-3.5 rounded-xl bg-zinc-900/60 border border-white/[0.08] flex items-center gap-3"
-                    >
-                      <div className="w-6 h-6 rounded-md bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                        <Icon name="check" className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-medium text-zinc-200">
-                        {ETIQUETAS_MODULOS[key] || key}
+                    <div key={key} className="px-6 py-3.5 flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-800">{ETIQUETAS_MODULOS[key] || key}</span>
+                      <span className="font-mono-num text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                        Habilitado
                       </span>
                     </div>
                   ))}
