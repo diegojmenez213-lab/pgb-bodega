@@ -44,93 +44,38 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    // LOGO VECTORIAL DE ALTA DEFINICIÓN (PROPORCIÓN EXACTA AL PNG ORIGINAL)
     const LogoPGB = ({ className = "w-full h-auto" }) => {
-      const dots = useMemo(() => {
-        const grid = [
-          "................................................................................L",
-          "..............................................................................L.L",
-          ".............................................................................BB.L",
-          "...........................................................................BBBB..",
-          ".........................................................................BBBB....",
-          ".B.....................................................................BBBBB.....",
-          "BBB...................................................................BBBBB......",
-          ".BBBB................................................................BBBBB.......",
-          "...BBBBBB.........................................................BBBBBB.........",
-          "......BBBBBBBBBBB..........................................BBBBBBBBBBBB..........",
-          "..........BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB..............",
-          "..................BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB....................."
-        ];
+  const [logoUrl, setLogoUrl] = useState("");
 
-        const list = [];
-        const startX = 25;
-        const startY = 118;
-        const stepX = 11.2;
-        const stepY = 9.5;
+  useEffect(() => {
+    const unsub = db.collection("saas_empresas").doc("769497226").onSnapshot((doc) => {
+      if (doc.exists && doc.data().logoBase64) {
+        setLogoUrl(doc.data().logoBase64);
+      } else {
+        setLogoUrl("");
+      }
+    });
+    return () => unsub();
+  }, []);
 
-        for (let r = 0; r < grid.length; r++) {
-          const row = grid[r];
-          for (let c = 0; c < row.length; c++) {
-            const ch = row[c];
-            if (ch === "B" || ch === "L") {
-              list.push({
-                cx: startX + c * stepX,
-                cy: startY + r * stepY,
-                light: ch === "L"
-              });
-            }
-          }
-        }
-        return list;
-      }, []);
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt="PGB Distribution Chile SpA"
+        className={`${className} object-contain mx-auto`}
+      />
+    );
+  }
 
-      return (
-        <svg
-          viewBox="0 0 950 255"
-          preserveAspectRatio="xMidYMid meet"
-          className={className}
-          xmlns="http://www.w3.org/2000/svg"
-          role="img"
-          aria-label="PGB Distribution Chile SPA"
-        >
-          <text
-            x="475"
-            y="58"
-            textAnchor="middle"
-            fill="#52525B"
-            fontFamily="Georgia, 'Times New Roman', serif"
-            fontStyle="italic"
-            fontWeight="bold"
-            fontSize="54"
-            letterSpacing="0.5"
-          >
-            PGB Distribution Chile SPA
-          </text>
-          <text
-            x="565"
-            y="98"
-            textAnchor="middle"
-            fill="#52525B"
-            fontFamily="Georgia, 'Times New Roman', serif"
-            fontStyle="italic"
-            fontWeight="bold"
-            fontSize="26"
-            letterSpacing="0.3"
-          >
-            Distribuidor de Calidad y servicios
-          </text>
-          {dots.map((d, idx) => (
-            <circle
-              key={idx}
-              cx={d.cx}
-              cy={d.cy}
-              r="3.8"
-              fill={d.light ? "#A6E8F7" : "#1FB6E3"}
-            />
-          ))}
-        </svg>
-      );
-    };
+  return (
+    <div className="text-center py-2">
+      <span className="font-extrabold text-slate-800 text-lg tracking-tight">
+        PGB Distribution Chile SpA
+      </span>
+    </div>
+  );
+};
 
     const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
     const MOTIVOS = [
