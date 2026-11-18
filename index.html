@@ -3,44 +3,37 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS Cloud • Administración Empresarial</title>
+  <title>NEXUS ERP Chile • Plataforma Empresarial Universal</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background-color: #f8fafc;
-      color: #0f172a;
-    }
-    .font-mono-num {
-      font-family: 'JetBrains Mono', monospace;
-      font-variant-numeric: tabular-nums;
-    }
-    .tabular {
-      font-variant-numeric: tabular-nums;
-    }
-    @keyframes slideInRight {
-      from { transform: translateX(100%); }
-      to { transform: translateX(0); }
-    }
-    .animate-drawer {
-      animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-    }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05); }
   </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
 </head>
-<body class="min-h-screen antialiased selection:bg-slate-900 selection:text-white">
+<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-amber-400 selection:text-slate-950">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useMemo } = React;
 
-    // 1. CONEXIÓN FIREBASE REAL
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
       authDomain: "pgb-bodegad.firebaseapp.com",
@@ -50,1246 +43,914 @@
       appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
     };
 
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    const MASTER_KEY = "Diego0514*.";
-
-    // ICONOS VECTORIALES CORPORATIVOS
-    const Icon = ({ name, className = "w-4 h-4" }) => {
-      const icons = {
-        shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
-        layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
-        search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
-        plus: <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>,
-        sliders: <><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></>,
-        external: <><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></>,
-        logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
-        x: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
-        check: <polyline points="20 6 9 17 4 12" />,
-        upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></>,
-        server: <><rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></>,
-        lock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
-        arrowRight: <><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></>
-      };
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-          {icons[name] || icons.layers}
-        </svg>
-      );
+    const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+    const formatearRut = (r) => {
+      const c = limpiarRut(r);
+      if (c.length < 2) return c;
+      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      return `${cuerpo}-${c.slice(-1)}`;
     };
 
-    const limpiarRut = (val) => (val || "").replace(/[^0-9kK]/g, "").toUpperCase();
-    const formatearRutVisual = (rut) => {
-      const clean = limpiarRut(rut);
-      if (clean.length < 2) return clean;
-      const cuerpo = clean.slice(0, -1);
-      const dv = clean.slice(-1);
-      return `${cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}-${dv}`;
-    };
-
-    const PLANTILLAS_RUBRO = {
-      distribuidora: {
-        nombre: "Distribuidora y Logística",
-        corto: "Distribución",
-        tarifaUF: 6,
-        modulos: {
-          pickingBodega: true, incidenciasRetornos: true, conteoCiclico: true,
-          cuarentenaRuta: true, rendicionChoferes: true, comprasXML: true,
-          sugeridoProveedor: true, puntoEquilibrio: true, ecommerce247: false,
-          bandejasLotes: false, posRapido: false, agendaServicios: false,
-          multiSucursal: false, autoCAF: false
-        }
-      },
-      ecommerce: {
-        nombre: "E-Commerce Omnicanal",
-        corto: "E-Commerce",
-        tarifaUF: 4,
-        modulos: {
-          pickingBodega: false, incidenciasRetornos: false, conteoCiclico: true,
-          cuarentenaRuta: false, rendicionChoferes: false, comprasXML: true,
-          sugeridoProveedor: true, puntoEquilibrio: true, ecommerce247: true,
-          bandejasLotes: true, posRapido: false, agendaServicios: false,
-          multiSucursal: false, autoCAF: true
-        }
-      },
-      minimarket: {
-        nombre: "Retail y Minimarket",
-        corto: "Retail / POS",
-        tarifaUF: 1.5,
-        modulos: {
-          pickingBodega: false, incidenciasRetornos: false, conteoCiclico: true,
-          cuarentenaRuta: false, rendicionChoferes: false, comprasXML: true,
-          sugeridoProveedor: true, puntoEquilibrio: true, ecommerce247: false,
-          bandejasLotes: false, posRapido: true, agendaServicios: false,
-          multiSucursal: false, autoCAF: false
-        }
-      },
-      barberia: {
-        nombre: "Servicios y Estética",
-        corto: "Servicios",
-        tarifaUF: 1.5,
-        modulos: {
-          pickingBodega: false, incidenciasRetornos: false, conteoCiclico: false,
-          cuarentenaRuta: false, rendicionChoferes: false, comprasXML: false,
-          sugeridoProveedor: false, puntoEquilibrio: true, ecommerce247: false,
-          bandejasLotes: false, posRapido: true, agendaServicios: true,
-          multiSucursal: false, autoCAF: false
-        }
-      }
-    };
-
-    const ETIQUETAS_MODULOS = {
-      pickingBodega: "Control Picking y Armadores",
-      incidenciasRetornos: "Incidencias y Retornos en Ruta",
-      conteoCiclico: "Inventario y Conteo Cíclico",
-      cuarentenaRuta: "Cuarentena Fuera de Ruta",
-      rendicionChoferes: "Rendición de Choferes y Créditos",
-      ecommerce247: "Facturación SII 24/7 + Marketplaces",
-      bandejasLotes: "Bandejas Impresión (Líder / General)",
-      posRapido: "Punto de Venta Rápido (POS)",
-      agendaServicios: "Agenda Horas y Comisiones",
-      comprasXML: "Carga Compras XML / Foto IA",
-      sugeridoProveedor: "Sugerido Compras por Proveedor",
-      puntoEquilibrio: "Punto de Equilibrio Neto Vivo",
-      multiSucursal: "Modo Cadena Multi-Sucursal (18+)",
-      autoCAF: "Add-on Auto-CAF Folios SII"
-    };
-
-    const EMPRESAS_SEMILLA = [
-      {
-        rut: "769497226",
-        razonSocial: "PGB Distribution Chile SpA",
-        clave: "1234",
-        rubro: "distribuidora",
-        estado: "activo",
-        modoJerarquia: false,
-        tarifaUF: 6,
-        sucursales: ["Casa Matriz Macul (Av. Exequiel Fernández 3397)"],
-        logoBase64: "",
-        rutaLegacy: "pgb-operacion.html",
-        modulos: PLANTILLAS_RUBRO.distribuidora.modulos
-      },
-      {
-        rut: "775280425",
-        razonSocial: "Tecnoshop Company SpA",
-        clave: "1234",
-        rubro: "ecommerce",
-        estado: "activo",
-        modoJerarquia: false,
-        tarifaUF: 4,
-        sucursales: ["Bodega Central Santiago"],
-        logoBase64: "",
-        rutaLegacy: "",
-        modulos: PLANTILLAS_RUBRO.ecommerce.modulos
-      }
+    const CATALOGO_18_MODULOS = [
+      { id: "m1_empresa", num: 1, grupo: "Núcleo", nombre: "Multi-Empresa y Perfil", desc: "Identidad corporativa, logo y aislamiento por RUT.", archivo: "#config_empresa", icono: "🏢", listo: true },
+      { id: "m2_jerarquia", num: 2, grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Crea jefes, vendedores, bodegueros y choferes.", archivo: "#config_equipo", icono: "👥", listo: true },
+      { id: "m3_catalogo", num: 3, grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga Excel (.xlsx) vinculado a inventario y ventas.", archivo: "#config_catalogo", icono: "📚", listo: true },
+      { id: "m4_apis", num: 4, grupo: "Núcleo", nombre: "Conexiones API (MeLi / SII)", desc: "Llaves para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis", icono: "🔌", listo: true },
+      { id: "m5_inv_general", num: 5, grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Selección masiva o por marca para toma de stock.", archivo: "pgb-inventario.html", icono: "📦", listo: true },
+      { id: "m6_conteo_ciclico", num: 6, grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde celular.", archivo: "pgb-inventario.html", icono: "📱", listo: true },
+      { id: "m7_auditoria_inv", num: 7, grupo: "Inventario", nombre: "Auditoría Acumulativa Stock", desc: "Aprobación de Jefatura e historial de correcciones.", archivo: "pgb-operacion.html", icono: "⚖️", listo: true },
+      { id: "m8_omnicanal", num: 8, grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes en vivo de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html", icono: "🛒", listo: false },
+      { id: "m9_stock_sync", num: 9, grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento automático multi-canal sin sobreventas.", archivo: "ecommerce-sii.html", icono: "🔄", listo: false },
+      { id: "m10_sii_dte", num: 10, grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Boleta o Factura automática + monitor de folios CAF.", archivo: "ecommerce-sii.html", icono: "🧾", listo: false },
+      { id: "m11_colas_print", num: 11, grupo: "E-Commerce & SII", nombre: "Colas de Impresión Etiquetas", desc: "Lote general MeLi/Falabella + cola exclusiva Lider.", archivo: "ecommerce-sii.html", icono: "🖨️", listo: false },
+      { id: "m12_ruta_inc", num: 12, grupo: "Logística", nombre: "Tablero Incidencias y Ruta", desc: "Faltantes, cruces, rechazos y errores de facturación.", archivo: "pgb-operacion.html", icono: "🚚", listo: true },
+      { id: "m13_retornos_merma", num: 13, grupo: "Logística", nombre: "Retornos y Mermas Bodega", desc: "Recepción de devoluciones, roturas y compras personal.", archivo: "pgb-operacion.html", icono: "📥", listo: true },
+      { id: "m14_analitica_err", num: 14, grupo: "Logística", nombre: "Analítica 100% Bodega/Ventas", desc: "Gráficos mensuales de desempeño por colaborador.", archivo: "pgb-operacion.html", icono: "📊", listo: true },
+      { id: "m15_pos_ventas", num: 15, grupo: "Comercial", nombre: "Punto de Venta (POS) Rápido", desc: "Ventas presenciales, mesón y cotizaciones al instante.", archivo: "ventas-pos.html", icono: "💳", listo: false },
+      { id: "m16_caja_cobros", num: 16, grupo: "Comercial", nombre: "Cuentas por Cobrar y Caja", desc: "Fiados, abonos parciales y arqueo de billetes.", archivo: "ventas-pos.html", icono: "💵", listo: false },
+      { id: "m17_compras_prov", num: 17, grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición inteligente según stock mínimo y marca.", archivo: "compras-finanzas.html", icono: "📋", listo: false },
+      { id: "m18_finanzas_bi", num: 18, grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Utilidad neta, gastos operativos y reportes ejecutivos.", archivo: "compras-finanzas.html", icono: "📈", listo: false }
     ];
 
+    const ROLES_JERARQUIA = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
+
     function App() {
-      const [vista, setVista] = useState("cargando");
-      const [empresas, setEmpresas] = useState([]);
-      const [empresaActiva, setEmpresaActiva] = useState(null);
-      const [toquesSecretos, setToquesSecretos] = useState(0);
+      const [rutActivo, setRutActivo] = useState(() => localStorage.getItem("nexus_empresa_rut") || "");
+      const [modoSuperAdmin, setModoSuperAdmin] = useState(() => window.location.hash === "#/comando");
+      const [pinAdmin, setPinAdmin] = useState("");
+      const [adminAutenticado, setAdminAutenticado] = useState(false);
 
-      // Navegación Admin
-      const [seccionAdmin, setSeccionAdmin] = useState("directorio"); // directorio | arquitectura
-      const [tabDrawer, setTabDrawer] = useState("general"); // general | marca | modulos
-
+      // Login / Registro
+      const [tabAuth, setTabAuth] = useState("ingresar");
       const [rutInput, setRutInput] = useState("");
-      const [claveInput, setClaveInput] = useState("");
-      const [errorLogin, setErrorLogin] = useState("");
-      const [ingresando, setIngresando] = useState(false);
+      const [nombreReg, setNombreReg] = useState("");
+      const [rubroReg, setRubroReg] = useState("Distribuidora / Comercio");
+      const [jefeReg, setJefeReg] = useState("");
+      const [cargandoAuth, setCargandoAuth] = useState(false);
 
-      const [masterInput, setMasterInput] = useState("");
-      const [errorMaster, setErrorMaster] = useState("");
-      const [busqueda, setBusqueda] = useState("");
-      const [filtroEstado, setFiltroEstado] = useState("todos");
-      const [drawerEmpresa, setDrawerEmpresa] = useState(null);
-      const [guardando, setGuardando] = useState(false);
+      // Datos empresa activa
+      const [empresa, setEmpresa] = useState(null);
+      const [todasEmpresas, setTodasEmpresas] = useState([]);
+      const [tabPanel, setTabPanel] = useState("modulos"); // modulos | equipo | catalogo | apis
+
+      // Formularios Jefe
+      const [nuevoNombreMiembro, setNuevoNombreMiembro] = useState("");
+      const [nuevoRolMiembro, setNuevoRolMiembro] = useState(ROLES_JERARQUIA[1]);
+
+      const [catalogoLocal, setCatalogoLocal] = useState([]);
+      const [busquedaCat, setBusquedaCat] = useState("");
+      const [importandoXlsx, setImportandoXlsx] = useState(false);
+      const [prodManualCod, setProdManualCod] = useState("");
+      const [prodManualNom, setProdManualNom] = useState("");
+      const [prodManualProv, setProdManualProv] = useState("");
+
+      // APIs e Integraciones
+      const [apisForm, setApisForm] = useState({
+        meliClientId: "",
+        meliSecret: "",
+        falabellaUser: "",
+        falabellaApiKey: "",
+        liderApiKey: "",
+        siiProveedor: "OpenFactura (Haulmer)",
+        siiApiKey: "",
+        siiAmbiente: "Producción"
+      });
+      const [guardandoApis, setGuardandoApis] = useState(false);
 
       useEffect(() => {
-        const checkHash = () => {
-          if (window.location.hash === "#/comando") {
-            const saAuth = sessionStorage.getItem("nexus_sa_auth");
-            setVista(saAuth === "OK" ? "superadmin" : "superadmin_login");
-          }
-        };
-        checkHash();
-        window.addEventListener("hashchange", checkHash);
-        return () => window.removeEventListener("hashchange", checkHash);
+        const onHash = () => setModoSuperAdmin(window.location.hash === "#/comando");
+        window.addEventListener("hashchange", onHash);
+        auth.signInAnonymously().catch(() => {});
+        return () => window.removeEventListener("hashchange", onHash);
       }, []);
 
+      // Escuchar todas las empresas si está en Super Admin
       useEffect(() => {
-        let unsubscribe = null;
+        if (!modoSuperAdmin) return;
+        const unsub = db.collection("saas_empresas").onSnapshot((snap) => {
+          setTodasEmpresas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        });
+        return () => unsub();
+      }, [modoSuperAdmin]);
 
-        const iniciarSistema = async () => {
-          try {
-            if (!auth.currentUser) {
-              await auth.signInAnonymously().catch(() => {});
-            }
-
-            for (const emp of EMPRESAS_SEMILLA) {
-              const ref = db.collection("saas_empresas").doc(emp.rut);
-              const snap = await ref.get();
-              if (!snap.exists) {
-                await ref.set({
-                  ...emp,
-                  creadoEn: firebase.firestore.FieldValue.serverTimestamp()
-                });
-              }
-            }
-
-            unsubscribe = db.collection("saas_empresas").onSnapshot((snapshot) => {
-              const lista = [];
-              snapshot.forEach((doc) => lista.push({ id: doc.id, ...doc.data() }));
-              setEmpresas(lista);
-
-              if (window.location.hash === "#/comando") {
-                const saAuth = sessionStorage.getItem("nexus_sa_auth");
-                setVista(saAuth === "OK" ? "superadmin" : "superadmin_login");
-                return;
-              }
-
-              const sesionGuardada = localStorage.getItem("nexus_empresa_rut");
-              if (sesionGuardada) {
-                const encontrada = lista.find((e) => e.rut === sesionGuardada);
-                if (encontrada && encontrada.estado !== "suspendido") {
-                  if (encontrada.rutaLegacy) {
-                    window.location.href = encontrada.rutaLegacy;
-                    return;
-                  }
-                  setEmpresaActiva(encontrada);
-                  setVista("cliente");
-                  return;
-                }
-              }
-              setVista("login");
-            });
-          } catch (err) {
-            setVista("login");
-          }
-        };
-
-        iniciarSistema();
-        return () => { if (unsubscribe) unsubscribe(); };
-      }, []);
-
-      const manejarToqueSecreto = () => {
-        const nuevo = toquesSecretos + 1;
-        if (nuevo >= 5) {
-          setToquesSecretos(0);
-          window.location.hash = "#/comando";
-        } else {
-          setToquesSecretos(nuevo);
-        }
-      };
-
-      const manejarLoginCliente = async (e) => {
-        e.preventDefault();
-        setErrorLogin("");
-        setIngresando(true);
-
-        const rutLimpio = limpiarRut(rutInput);
-        if (!rutLimpio || !claveInput) {
-          setErrorLogin("Ingresa el RUT corporativo y la clave de acceso.");
-          setIngresando(false);
+      // Escuchar empresa activa
+      useEffect(() => {
+        const rutClean = limpiarRut(rutActivo);
+        if (!rutClean) {
+          setEmpresa(null);
           return;
         }
-
-        try {
-          let emp = empresas.find((x) => x.rut === rutLimpio);
-          if (!emp) {
-            const docSnap = await db.collection("saas_empresas").doc(rutLimpio).get();
-            if (docSnap.exists) emp = docSnap.data();
+        const unsub = db.collection("saas_empresas").doc(rutClean).onSnapshot((doc) => {
+          if (doc.exists) {
+            const data = { id: doc.id, ...doc.data() };
+            setEmpresa(data);
+            if (data.apis) {
+              setApisForm((prev) => ({ ...prev, ...data.apis }));
+            }
+          } else {
+            // Auto-crear ficha base si el RUT ya existía en sesión
+            const base = {
+              rut: formatearRut(rutClean),
+              nombre: rutClean === "769497226" ? "PGB Distribution Chile SpA" : rutClean === "775280425" ? "Tecnoshop Company SpA" : `Empresa ${formatearRut(rutClean)}`,
+              rubro: "Comercio y Distribución",
+              activa: true,
+              equipo: [],
+              modulosActivos: CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {}),
+              creadoEn: new Date().toISOString()
+            };
+            db.collection("saas_empresas").doc(rutClean).set(base, { merge: true });
           }
+        });
 
-          if (!emp) {
-            setErrorLogin("RUT no registrado en el directorio corporativo.");
-            setIngresando(false);
-            return;
-          }
+        // Catálogo: PGB usa colección histórica compartida; empresas nuevas usan su propio catálogo aislado
+        const colCat = rutClean === "769497226"
+          ? db.collection("catalogo_productos")
+          : db.collection("saas_empresas").doc(rutClean).collection("catalogo");
 
-          if (emp.clave !== claveInput.trim()) {
-            setErrorLogin("Clave incorrecta. Verifica tus credenciales.");
-            setIngresando(false);
-            return;
-          }
+        const unsubCat = colCat.onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+          setCatalogoLocal(lista);
+        });
 
-          if (emp.estado === "suspendido") {
-            setErrorLogin("Instancia suspendida. Contacta a soporte administrativo.");
-            setIngresando(false);
-            return;
-          }
+        return () => {
+          unsub();
+          unsubCat();
+        };
+      }, [rutActivo]);
 
-          localStorage.setItem("nexus_empresa_rut", emp.rut);
-
-          if (emp.rutaLegacy) {
-            window.location.href = emp.rutaLegacy;
-            return;
-          }
-
-          setEmpresaActiva(emp);
-          setVista("cliente");
-        } catch (err) {
-          setErrorLogin("Error de conexión al validar identidad.");
-        }
-        setIngresando(false);
-      };
-
-      const manejarLoginMaster = (e) => {
+      const ingresarConRut = async (e) => {
         e.preventDefault();
-        if (masterInput === MASTER_KEY) {
-          sessionStorage.setItem("nexus_sa_auth", "OK");
-          setErrorMaster("");
-          setMasterInput("");
-          setVista("superadmin");
-        } else {
-          setErrorMaster("Clave maestra inválida.");
+        const rutClean = limpiarRut(rutInput);
+        if (rutClean.length < 7) return alert("Ingresa un RUT válido (Ej: 77.528.042-5).");
+        setCargandoAuth(true);
+        try {
+          const docRef = db.collection("saas_empresas").doc(rutClean);
+          const snap = await docRef.get();
+          if (!snap.exists) {
+            alert("Este RUT aún no está registrado. Completa el registro rápido en la pestaña 'Crear Empresa Nueva'.");
+            setTabAuth("registrar");
+            setCargandoAuth(false);
+            return;
+          }
+          if (snap.data().activa === false) {
+            alert("Esta cuenta se encuentra pausada. Contacta a soporte NEXUS.");
+            setCargandoAuth(false);
+            return;
+          }
+          localStorage.setItem("nexus_empresa_rut", rutClean);
+          setRutActivo(rutClean);
+        } catch (err) {
+          alert("Error de conexión: " + err.message);
         }
+        setCargandoAuth(false);
       };
 
-      const cerrarSesionCliente = () => {
+      const registrarNuevaEmpresa = async (e) => {
+        e.preventDefault();
+        const rutClean = limpiarRut(rutInput);
+        if (rutClean.length < 7 || !nombreReg.trim() || !jefeReg.trim()) {
+          return alert("Completa RUT, Razón Social y Nombre del Jefe Administrador.");
+        }
+        setCargandoAuth(true);
+        try {
+          const modulosTodos = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {});
+          await db.collection("saas_empresas").doc(rutClean).set({
+            rut: formatearRut(rutClean),
+            nombre: nombreReg.trim(),
+            rubro: rubroReg,
+            activa: true,
+            equipo: [{ id: Date.now().toString(), nombre: jefeReg.trim(), rol: "Jefatura / Admin" }],
+            modulosActivos: modulosTodos,
+            creadoEn: new Date().toISOString()
+          }, { merge: true });
+
+          localStorage.setItem("nexus_empresa_rut", rutClean);
+          setRutActivo(rutClean);
+          setTabPanel("equipo");
+        } catch (err) {
+          alert("Error al crear empresa: " + err.message);
+        }
+        setCargandoAuth(false);
+      };
+
+      const cerrarSesion = () => {
         localStorage.removeItem("nexus_empresa_rut");
-        setEmpresaActiva(null);
-        setRutInput("");
-        setClaveInput("");
-        setVista("login");
+        setRutActivo("");
+        setEmpresa(null);
       };
 
-      const salirSuperAdmin = () => {
-        sessionStorage.removeItem("nexus_sa_auth");
-        window.location.hash = "";
-        setVista("login");
+      // GESTIÓN DE JERARQUÍA Y EQUIPO POR EL JEFE
+      const agregarMiembroEquipo = async (e) => {
+        e.preventDefault();
+        if (!nuevoNombreMiembro.trim() || !empresa) return;
+        const actual = Array.isArray(empresa.equipo) ? empresa.equipo : [];
+        const actualizado = [
+          ...actual,
+          { id: Date.now().toString(), nombre: nuevoNombreMiembro.trim(), rol: nuevoRolMiembro }
+        ];
+        await db.collection("saas_empresas").doc(empresa.id).update({ equipo: actualizado });
+        setNuevoNombreMiembro("");
       };
 
-      const abrirDrawerNueva = () => {
-        setTabDrawer("general");
-        setDrawerEmpresa({
-          esNueva: true,
-          rut: "",
-          razonSocial: "",
-          clave: "1234",
-          rubro: "minimarket",
-          estado: "activo",
-          modoJerarquia: false,
-          tarifaUF: 1.5,
-          sucursales: ["Casa Matriz"],
-          logoBase64: "",
-          rutaLegacy: "",
-          modulos: { ...PLANTILLAS_RUBRO.minimarket.modulos }
-        });
+      const eliminarMiembroEquipo = async (idMiembro) => {
+        if (!empresa) return;
+        const actualizado = (empresa.equipo || []).filter((m) => m.id !== idMiembro);
+        await db.collection("saas_empresas").doc(empresa.id).update({ equipo: actualizado });
       };
 
-      const abrirDrawerEditar = (emp, tabInicial = "general") => {
-        setTabDrawer(tabInicial);
-        setDrawerEmpresa({ ...emp, esNueva: false });
+      // GESTIÓN DE CATÁLOGO MAESTRO (.XLSX Y MANUAL)
+      const getColeccionCatalogo = () => {
+        const rutClean = limpiarRut(rutActivo);
+        return rutClean === "769497226"
+          ? db.collection("catalogo_productos")
+          : db.collection("saas_empresas").doc(rutClean).collection("catalogo");
       };
 
-      const cambiarRubroDrawer = (nuevoRubro) => {
-        const plantilla = PLANTILLAS_RUBRO[nuevoRubro];
-        setDrawerEmpresa({
-          ...drawerEmpresa,
-          rubro: nuevoRubro,
-          tarifaUF: plantilla.tarifaUF,
-          modulos: { ...plantilla.modulos }
-        });
-      };
-
-      const manejarSubidaLogo = (e) => {
+      const subirExcelCatalogo = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        if (file.size > 750000) {
-          alert("El archivo supera los 750 KB. Comprime el PNG antes de subirlo.");
-          return;
+        setImportandoXlsx(true);
+        try {
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf, { type: "array" });
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+          const normKey = (k) => String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          const normVal = (v) => String(v || "").trim().replace(/\s+/g, " ").toUpperCase();
+
+          const existentes = new Set(catalogoLocal.map((p) => normVal(p.nombre)));
+          const nuevos = [];
+
+          rows.forEach((row) => {
+            const keys = Object.keys(row);
+            let cod = "", nom = "", prov = "";
+            keys.forEach((k) => {
+              const kn = normKey(k);
+              if (!cod && (kn.includes("cod") || kn.includes("sku") || kn === "id")) cod = normVal(row[k]);
+              else if (!nom && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art"))) nom = normVal(row[k]);
+              else if (!prov && (kn.includes("prov") || kn.includes("marc"))) prov = normVal(row[k]);
+            });
+            if (!nom && keys.length >= 2) {
+              cod = normVal(row[keys[0]]);
+              nom = normVal(row[keys[1]]);
+              if (keys.length >= 3) prov = normVal(row[keys[2]]);
+            } else if (!nom && keys.length === 1) {
+              nom = normVal(row[keys[0]]);
+            }
+            if (nom && !existentes.has(nom)) {
+              existentes.add(nom);
+              nuevos.push({ codigo: cod, nombre: nom, proveedor: prov });
+            }
+          });
+
+          const col = getColeccionCatalogo();
+          for (let i = 0; i < nuevos.length; i += 400) {
+            const batch = db.batch();
+            nuevos.slice(i, i + 400).forEach((item) => batch.set(col.doc(), item));
+            await batch.commit();
+          }
+          alert(`✅ Catálogo inteligente actualizado: ${nuevos.length} productos nuevos cargados.`);
+        } catch (err) {
+          alert("Error leyendo Excel: " + err.message);
         }
-        const reader = new FileReader();
-        reader.onload = () => {
-          setDrawerEmpresa({ ...drawerEmpresa, logoBase64: reader.result });
-        };
-        reader.readAsDataURL(file);
+        setImportandoXlsx(false);
+        e.target.value = "";
       };
 
-      const guardarEmpresa = async (e) => {
+      const agregarProductoManual = async (e) => {
         e.preventDefault();
-        const rutClean = limpiarRut(drawerEmpresa.rut);
-        if (!rutClean || !drawerEmpresa.razonSocial.trim()) {
-          alert("RUT y Razón Social son obligatorios.");
-          return;
-        }
-        setGuardando(true);
+        if (!prodManualNom.trim()) return;
+        const col = getColeccionCatalogo();
+        await col.add({
+          codigo: prodManualCod.trim().toUpperCase(),
+          nombre: prodManualNom.trim().toUpperCase(),
+          proveedor: prodManualProv.trim().toUpperCase()
+        });
+        setProdManualCod("");
+        setProdManualNom("");
+        setProdManualProv("");
+      };
+
+      const borrarProductoCat = async (id) => {
+        await getColeccionCatalogo().doc(id).delete();
+      };
+
+      // GUARDAR LLAVES API
+      const guardarConfigApis = async (e) => {
+        e.preventDefault();
+        if (!empresa) return;
+        setGuardandoApis(true);
         try {
-          const payload = {
-            rut: rutClean,
-            razonSocial: drawerEmpresa.razonSocial.trim(),
-            clave: drawerEmpresa.clave.trim() || "1234",
-            rubro: drawerEmpresa.rubro,
-            estado: drawerEmpresa.estado,
-            modoJerarquia: !!drawerEmpresa.modoJerarquia,
-            tarifaUF: Number(drawerEmpresa.tarifaUF) || 0,
-            sucursales: drawerEmpresa.sucursales || ["Casa Matriz"],
-            logoBase64: drawerEmpresa.logoBase64 || "",
-            rutaLegacy: drawerEmpresa.rutaLegacy || "",
-            modulos: drawerEmpresa.modulos,
-            actualizadoEn: firebase.firestore.FieldValue.serverTimestamp()
-          };
-          await db.collection("saas_empresas").doc(rutClean).set(payload, { merge: true });
-          setDrawerEmpresa(null);
+          await db.collection("saas_empresas").doc(empresa.id).update({ apis: apisForm });
+          alert("✅ Credenciales API y parámetros SII guardados de forma segura.");
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
-        setGuardando(false);
+        setGuardandoApis(false);
       };
 
-      const entrarComoAdmin = (emp) => {
-        localStorage.setItem("nexus_empresa_rut", emp.rut);
-        window.location.hash = "";
-        if (emp.rutaLegacy) {
-          window.location.href = emp.rutaLegacy;
+      // SUPER ADMIN TOGGLE DE MÓDULOS POR EMPRESA
+      const toggleModuloEmpresa = async (emp, modId) => {
+        const actuales = emp.modulosActivos || {};
+        const nuevoValor = actuales[modId] === false ? true : false;
+        await db.collection("saas_empresas").doc(emp.id).update({
+          [`modulosActivos.${modId}`]: nuevoValor
+        });
+      };
+
+      const catalogoFiltrado = useMemo(() => {
+        const q = busquedaCat.trim().toLowerCase();
+        if (!q) return catalogoLocal;
+        return catalogoLocal.filter((p) =>
+          (p.nombre || "").toLowerCase().includes(q) ||
+          (p.codigo || "").toLowerCase().includes(q) ||
+          (p.proveedor || "").toLowerCase().includes(q)
+        );
+      }, [catalogoLocal, busquedaCat]);
+
+      const abrirModulo = (mod) => {
+        if (mod.archivo.startsWith("#config_")) {
+          const destino = mod.archivo.replace("#config_", "");
+          setTabPanel(destino === "empresa" ? "equipo" : destino);
           return;
         }
-        setEmpresaActiva(emp);
-        setVista("cliente");
+        if (!mod.listo) {
+          return alert(`🚧 Módulo ${mod.num} (${mod.nombre}): Espacios API y base de datos ya están creados. En el siguiente paso desplegaremos su interfaz (${mod.archivo}).`);
+        }
+        window.location.href = mod.archivo;
       };
 
-      // PANTALLA DE CARGA
-      if (vista === "cargando") {
+      // VISTA CONSOLA SUPER ADMIN (#/comando)
+      if (modoSuperAdmin) {
+        if (!adminAutenticado) {
+          return (
+            <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
+              <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-7 space-y-4">
+                <span className="text-xs font-extrabold uppercase tracking-widest text-amber-400">NEXUS MASTER CONSOLE</span>
+                <h1 className="text-xl font-black">Acceso Fundador</h1>
+                <input
+                  type="password"
+                  value={pinAdmin}
+                  onChange={(e) => setPinAdmin(e.target.value)}
+                  placeholder="PIN Maestro (Ej: 2026)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-400"
+                />
+                <button
+                  onClick={() => (pinAdmin === "2026" ? setAdminAutenticado(true) : alert("PIN incorrecto"))}
+                  className="w-full bg-amber-500 text-slate-950 font-black py-3 rounded-xl text-sm cursor-pointer"
+                >
+                  Entrar al Centro de Control
+                </button>
+                <a href="#" className="block text-center text-xs text-slate-400 pt-2">← Volver al Portal Empresas</a>
+              </div>
+            </div>
+          );
+        }
+
         return (
-          <div className="min-h-screen flex items-center justify-center bg-slate-50">
-            <div className="flex items-center gap-3 text-slate-500 text-xs font-medium">
-              <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin"></div>
-              Cargando entorno empresarial...
+          <div className="min-h-screen bg-slate-950 text-white p-4 sm:p-8">
+            <div className="max-w-5xl mx-auto space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div>
+                  <span className="text-[11px] font-extrabold text-amber-400 uppercase tracking-widest">NEXUS SaaS • SUPER ADMIN</span>
+                  <h1 className="text-2xl font-black">Control Global de Empresas y 18 Módulos</h1>
+                </div>
+                <a href="#" className="bg-slate-800 hover:bg-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">
+                  ← Salir de Super Admin
+                </a>
+              </div>
+
+              {todasEmpresas.map((emp) => (
+                <div key={emp.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h2 className="text-lg font-black text-amber-400">{emp.nombre}</h2>
+                      <p className="text-xs text-slate-400">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        localStorage.setItem("nexus_empresa_rut", emp.id);
+                        setRutActivo(emp.id);
+                        window.location.hash = "";
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2 rounded-xl cursor-pointer"
+                    >
+                      Entrar como esta empresa ➔
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                    {CATALOGO_18_MODULOS.map((m) => {
+                      const encendido = emp.modulosActivos?.[m.id] !== false;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => toggleModuloEmpresa(emp, m.id)}
+                          className={`p-2 rounded-xl border text-left text-[11px] font-bold transition cursor-pointer ${
+                            encendido ? "bg-emerald-950/60 border-emerald-500/50 text-emerald-300" : "bg-slate-950 border-slate-800 text-slate-500"
+                          }`}
+                        >
+                          <span className="block">{m.icono} M{m.num}</span>
+                          <span className="truncate block">{m.nombre}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         );
       }
 
-      // 1. PORTAL DE ACCESO CORPORATIVO (SPLIT-SCREEN INSTITUCIONAL)
-      if (vista === "login") {
+      // PANTALLA DE LOGIN / AUTO-REGISTRO UNIVERSAL
+      if (!rutActivo || !empresa) {
         return (
-          <div className="min-h-screen grid grid-cols-1 lg:grid-cols-12 bg-white">
-            {/* Columna Izquierda Institucional (Visible en Desktop) */}
-            <div className="hidden lg:flex lg:col-span-5 bg-slate-950 text-white p-12 flex-col justify-between relative overflow-hidden">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded bg-white text-slate-950 flex items-center justify-center">
-                  <Icon name="layers" className="w-4 h-4" />
-                </div>
-                <span className="text-sm font-bold tracking-wider uppercase">NEXUS ERP</span>
-              </div>
-
-              <div className="space-y-4 max-w-sm">
-                <span className="inline-block text-[11px] font-mono-num uppercase tracking-widest text-emerald-400">
-                  Cloud Infrastructure • Chile
+          <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center p-4">
+            <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+              <div className="text-center space-y-1">
+                <span className="inline-block px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                  NEXUS ERP CHILE • 18 MÓDULOS
                 </span>
-                <h2 className="text-3xl font-semibold tracking-tight leading-tight">
-                  Gestión operativa, inventario y facturación SII en tiempo real.
-                </h2>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Entornos aislados por RUT con sincronización continua y trazabilidad completa por sucursal.
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight pt-1">
+                  Sistema Operativo <span className="text-amber-400">Empresarial</span>
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Inventario inteligente, logística, ventas POS, marketplaces y facturación SII en un solo lugar.
                 </p>
               </div>
 
-              <div className="border-t border-slate-800 pt-6 flex items-center justify-between text-xs text-slate-500 font-mono-num">
-                <span>SII DTE 33 / 39 / 61</span>
-                <span>LATENCIA &lt; 50ms</span>
-              </div>
-            </div>
-
-            {/* Columna Derecha Formulario Limpio */}
-            <div className="lg:col-span-7 flex flex-col justify-between p-6 sm:p-12 bg-slate-50/50">
-              <div className="flex items-center justify-between">
-                <div className="flex lg:hidden items-center gap-2">
-                  <div className="w-7 h-7 rounded bg-slate-900 text-white flex items-center justify-center">
-                    <Icon name="layers" className="w-3.5 h-3.5" />
-                  </div>
-                  <span className="text-xs font-bold tracking-wider uppercase text-slate-900">NEXUS ERP</span>
-                </div>
-                <div className="ml-auto flex items-center gap-2 text-[11px] font-mono-num text-slate-500">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  SISTEMA EN LÍNEA
-                </div>
+              <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setTabAuth("ingresar")}
+                  className={`py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${tabAuth === "ingresar" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}
+                >
+                  🔑 Ingresar con RUT
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTabAuth("registrar")}
+                  className={`py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${tabAuth === "registrar" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}
+                >
+                  ✨ Crear Empresa Nueva
+                </button>
               </div>
 
-              <div className="w-full max-w-[360px] mx-auto my-auto py-8">
-                <div className="mb-8">
-                  <div
-                    onClick={manejarToqueSecreto}
-                    className="w-10 h-10 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-900 mb-5 cursor-pointer select-none hover:border-slate-400 transition"
-                  >
-                    <Icon name="shield" className="w-5 h-5" />
-                  </div>
-                  <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-                    Iniciar sesión
-                  </h1>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Ingresa el RUT de tu empresa para acceder a tu panel.
-                  </p>
-                </div>
-
-                <form onSubmit={manejarLoginCliente} className="space-y-4">
+              {tabAuth === "ingresar" ? (
+                <form onSubmit={ingresarConRut} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                      RUT Corporativo
-                    </label>
+                    <label className="text-xs font-bold text-slate-300 block mb-1.5">RUT de tu Empresa *</label>
                     <input
                       type="text"
                       value={rutInput}
                       onChange={(e) => setRutInput(e.target.value)}
-                      placeholder="Sin puntos ni guion"
-                      className="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-300 text-sm text-slate-900 font-mono-num placeholder-slate-400 focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition"
-                      autoComplete="username"
+                      placeholder="Ej: 77.528.042-5"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-3.5 text-base font-black text-white outline-none"
+                      required
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                      Clave de Acceso
-                    </label>
-                    <input
-                      type="password"
-                      value={claveInput}
-                      onChange={(e) => setClaveInput(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition"
-                      autoComplete="current-password"
-                    />
-                  </div>
-
-                  {errorLogin && (
-                    <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-                      {errorLogin}
-                    </div>
-                  )}
-
                   <button
                     type="submit"
-                    disabled={ingresando}
-                    className="w-full py-2.5 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
+                    disabled={cargandoAuth}
+                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-xl text-sm shadow-lg transition cursor-pointer"
                   >
-                    <span>{ingresando ? "Verificando..." : "Continuar al espacio"}</span>
-                    <Icon name="arrowRight" className="w-4 h-4" />
+                    {cargandoAuth ? "Verificando..." : "Entrar a mi Espacio de Trabajo ➔"}
                   </button>
                 </form>
-              </div>
-
-              <div className="text-center text-[11px] text-slate-400">
-                Conexión cifrada TLS • Aislamiento de datos por organización
-              </div>
+              ) : (
+                <form onSubmit={registrarNuevaEmpresa} className="space-y-3.5">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">RUT Empresa *</label>
+                    <input
+                      type="text"
+                      value={rutInput}
+                      onChange={(e) => setRutInput(e.target.value)}
+                      placeholder="Ej: 77.528.042-5"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Razón Social / Nombre Comercial *</label>
+                    <input
+                      type="text"
+                      value={nombreReg}
+                      onChange={(e) => setNombreReg(e.target.value)}
+                      placeholder="Ej: Tecnoshop Company SpA"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Rubro Principal</label>
+                    <select
+                      value={rubroReg}
+                      onChange={(e) => setRubroReg(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
+                    >
+                      <option>Distribuidora / Mayorista</option>
+                      <option>E-Commerce / Retail Omnicanal</option>
+                      <option>Minimarket / Almacén</option>
+                      <option>Ferretería / Materiales</option>
+                      <option>Otro Rubro Comercial</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Tu Nombre (Jefe / Administrador) *</label>
+                    <input
+                      type="text"
+                      value={jefeReg}
+                      onChange={(e) => setJefeReg(e.target.value)}
+                      placeholder="Ej: Director General"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={cargandoAuth}
+                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-3.5 rounded-xl text-sm shadow-lg transition cursor-pointer mt-2"
+                  >
+                    {cargandoAuth ? "Creando ecosistema..." : "🚀 Activar Empresa con 18 Módulos Liberados"}
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         );
       }
 
-      // 2. ACCESO BÓVEDA SUPER ADMIN (#/comando)
-      if (vista === "superadmin_login") {
-        return (
-          <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-            <div className="w-full max-w-[360px] bg-slate-900 border border-slate-800 rounded-xl p-7 shadow-2xl">
-              <div className="flex items-center gap-2 text-amber-400 text-[11px] font-mono-num uppercase tracking-widest mb-3">
-                <Icon name="lock" className="w-3.5 h-3.5" />
-                Root Administration
-              </div>
-              <h2 className="text-lg font-semibold text-white">Consola Maestra</h2>
-              <p className="text-xs text-slate-400 mt-1 mb-6">
-                Introduce la llave maestra para administrar instancias y licencias.
-              </p>
+      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA
+      const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] !== false);
+      const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
+      const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
 
-              <form onSubmit={manejarLoginMaster} className="space-y-4">
+      return (
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-6">
+          {/* CABECERA CORPORATIVA */}
+          <div className="card-clean rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-extrabold px-3 py-1 rounded-full">
+                  ● RUT {empresa.rut}
+                </span>
+                <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-extrabold px-3 py-1 rounded-full">
+                  {modulosHabilitados.length} de 18 Módulos Liberados
+                </span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900">{empresa.nombre}</h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Centro de Mando Universal • Configura tu equipo, sube tu catálogo y opera todos tus canales.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={cerrarSesion}
+                className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
+              >
+                ⇄ Cambiar Empresa
+              </button>
+            </div>
+          </div>
+
+          {/* GUÍA RÁPIDA INTUITIVA PARA EL JEFE (CHECKLIST AUTOEXPLICATIVO) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              onClick={() => setTabPanel("equipo")}
+              className="card-clean rounded-2xl p-4 text-left hover:border-amber-400 transition cursor-pointer flex items-center justify-between"
+            >
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-amber-700 block">Paso 1 • Jerarquía</span>
+                <p className="text-sm font-black text-slate-900 mt-0.5">
+                  {equipoLista.length > 0 ? `${equipoLista.length} Colaboradores Creados` : "Crear Jefes, Ventas y Bodega"}
+                </p>
+              </div>
+              <span className="text-xl">{equipoLista.length > 0 ? "✅" : "👥"}</span>
+            </button>
+
+            <button
+              onClick={() => setTabPanel("catalogo")}
+              className="card-clean rounded-2xl p-4 text-left hover:border-amber-400 transition cursor-pointer flex items-center justify-between"
+            >
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-emerald-700 block">Paso 2 • Catálogo Inteligente</span>
+                <p className="text-sm font-black text-slate-900 mt-0.5">
+                  {catalogoLocal.length > 0 ? `${catalogoLocal.length} Productos Sincronizados` : "Subir Excel (.xlsx) Maestro"}
+                </p>
+              </div>
+              <span className="text-xl">{catalogoLocal.length > 0 ? "✅" : "📚"}</span>
+            </button>
+
+            <button
+              onClick={() => setTabPanel("apis")}
+              className="card-clean rounded-2xl p-4 text-left hover:border-amber-400 transition cursor-pointer flex items-center justify-between"
+            >
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-indigo-700 block">Paso 3 • E-Commerce y SII</span>
+                <p className="text-sm font-black text-slate-900 mt-0.5">
+                  {tieneApis ? "APIs Conectadas" : "Conectar MeLi / OpenFactura"}
+                </p>
+              </div>
+              <span className="text-xl">{tieneApis ? "✅" : "🔌"}</span>
+            </button>
+          </div>
+
+          {/* NAVEGACIÓN DE PESTAÑAS DEL NÚCLEO */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+            <button
+              onClick={() => setTabPanel("modulos")}
+              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "modulos" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+            >
+              🧩 Los 18 Módulos ({modulosHabilitados.length})
+            </button>
+            <button
+              onClick={() => setTabPanel("equipo")}
+              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "equipo" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+            >
+              👥 Jerarquía y Equipo ({equipoLista.length})
+            </button>
+            <button
+              onClick={() => setTabPanel("catalogo")}
+              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "catalogo" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+            >
+              📚 Catálogo Inteligente ({catalogoLocal.length})
+            </button>
+            <button
+              onClick={() => setTabPanel("apis")}
+              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "apis" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+            >
+              🔌 APIs MeLi / SII
+            </button>
+          </div>
+
+          {/* VISTA 1: LANZADOR DE LOS 18 MÓDULOS */}
+          {tabPanel === "modulos" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {modulosHabilitados.map((mod) => (
+                <div
+                  key={mod.id}
+                  onClick={() => abrirModulo(mod)}
+                  className="card-clean rounded-2xl p-5 hover:border-amber-400 transition cursor-pointer flex flex-col justify-between gap-4"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-600">
+                        Módulo {mod.num} • {mod.grupo}
+                      </span>
+                      <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${mod.listo ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-800 border border-amber-200"}`}>
+                        {mod.listo ? "● Operativo" : "⚡ Listo para Conectar"}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                      <span>{mod.icono}</span>
+                      <span>{mod.nombre}</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">{mod.desc}</p>
+                  </div>
+
+                  <div className="text-xs font-extrabold text-amber-700 flex items-center justify-between pt-2 border-t border-slate-100">
+                    <span>Abrir módulo</span>
+                    <span>➔</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* VISTA 2: JERARQUÍA Y EQUIPO EDITABLE POR EL JEFE */}
+          {tabPanel === "equipo" && (
+            <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">👥 Estructura y Jerarquía de tu Empresa</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Agrega aquí a tus jefes, vendedores, bodegueros y choferes. Todo el sistema (rutas, ventas, compras internas y gráficos) tomará automáticamente estos nombres.
+                </p>
+              </div>
+
+              <form onSubmit={agregarMiembroEquipo} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                 <input
-                  type="password"
-                  value={masterInput}
-                  onChange={(e) => setMasterInput(e.target.value)}
-                  placeholder="Llave maestra"
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-800 text-sm text-white font-mono-num focus:outline-none focus:border-amber-400"
-                  autoFocus
+                  type="text"
+                  value={nuevoNombreMiembro}
+                  onChange={(e) => setNuevoNombreMiembro(e.target.value)}
+                  placeholder="Nombre del colaborador..."
+                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:border-amber-500"
+                  required
                 />
-                {errorMaster && (
-                  <p className="text-rose-400 text-xs">{errorMaster}</p>
-                )}
-                <button
-                  type="submit"
-                  className="w-full py-2.5 rounded-lg bg-white hover:bg-slate-200 text-slate-950 font-semibold text-xs transition"
+                <select
+                  value={nuevoRolMiembro}
+                  onChange={(e) => setNuevoRolMiembro(e.target.value)}
+                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-bold outline-none"
                 >
-                  Autenticar Root
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { window.location.hash = ""; setVista("login"); }}
-                  className="w-full py-1.5 text-xs text-slate-500 hover:text-slate-300 transition"
-                >
-                  Volver al acceso de clientes
+                  {ROLES_JERARQUIA.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2.5 px-4 rounded-xl text-xs sm:text-sm cursor-pointer">
+                  ➕ Agregar a Jerarquía
                 </button>
               </form>
-            </div>
-          </div>
-        );
-      }
 
-      // 3. CONSOLA ADMINISTRATIVA B2B (ESTILO STRIPE / SHOPIFY ADMIN - TABULAR)
-      if (vista === "superadmin") {
-        const activas = empresas.filter((e) => e.estado === "activo").length;
-        const mrrUF = empresas
-          .filter((e) => e.estado === "activo")
-          .reduce((acc, e) => acc + (Number(e.tarifaUF) || 0), 0);
-
-        const filtradas = empresas.filter((e) => {
-          const matchTexto =
-            e.razonSocial.toLowerCase().includes(busqueda.toLowerCase()) ||
-            e.rut.includes(limpiarRut(busqueda));
-          const matchEstado = filtroEstado === "todos" || e.estado === filtroEstado;
-          return matchTexto && matchEstado;
-        });
-
-        return (
-          <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
-            {/* BARRA SUPERIOR OSCURA DE COMANDO (TOPBAR) */}
-            <header className="bg-slate-950 text-white border-b border-slate-800 sticky top-0 z-30">
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-6">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded bg-white text-slate-950 flex items-center justify-center">
-                      <Icon name="layers" className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold tracking-wider uppercase">NEXUS ADMIN</span>
-                  </div>
-
-                  {/* Navegación Horizontal de Consola */}
-                  <nav className="flex items-center gap-1 border-l border-slate-800 pl-4">
-                    <button
-                      onClick={() => setSeccionAdmin("directorio")}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                        seccionAdmin === "directorio"
-                          ? "bg-slate-800 text-white"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Organizaciones ({empresas.length})
-                    </button>
-                    <button
-                      onClick={() => setSeccionAdmin("arquitectura")}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                        seccionAdmin === "arquitectura"
-                          ? "bg-slate-800 text-white"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Infraestructura
-                    </button>
-                  </nav>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-mono-num text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2.5 py-1 rounded">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    pgb-bodegad
-                  </span>
-                  <button
-                    onClick={salirSuperAdmin}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-400 hover:text-white hover:bg-slate-900 transition"
-                    title="Cerrar consola"
-                  >
-                    <Icon name="logout" className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Salir</span>
-                  </button>
-                </div>
-              </div>
-            </header>
-
-            {/* CONTENIDO PRINCIPAL */}
-            <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-              {/* Encabezado de Página + Botón Primario */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-                    {seccionAdmin === "directorio" ? "Directorio de Empresas" : "Arquitectura y Nodos"}
-                  </h1>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Administración centralizada de instancias, licenciamiento y módulos operativos.
-                  </p>
-                </div>
-
-                <button
-                  onClick={abrirDrawerNueva}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs shadow-sm transition"
-                >
-                  <Icon name="plus" className="w-3.5 h-3.5" />
-                  Registrar Empresa
-                </button>
-              </div>
-
-              {/* FRANJA UNIFICADA DE MÉTRICAS (KPI STRIP - NO TARJETAS APILADAS) */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-xs grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 overflow-hidden">
-                <div className="p-4 sm:px-6">
-                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-                    Instancias Activas
-                  </span>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold text-slate-900 tabular">{activas}</span>
-                    <span className="text-xs text-emerald-600 font-medium">operativas</span>
-                  </div>
-                </div>
-
-                <div className="p-4 sm:px-6">
-                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-                    Facturación Mensual
-                  </span>
-                  <div className="mt-1 flex items-baseline gap-1.5">
-                    <span className="text-2xl font-semibold text-slate-900 tabular">{mrrUF}</span>
-                    <span className="text-xs font-mono-num text-slate-500">UF / mes</span>
-                  </div>
-                </div>
-
-                <div className="p-4 sm:px-6">
-                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-                    Cartera Total
-                  </span>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold text-slate-900 tabular">{empresas.length}</span>
-                    <span className="text-xs text-slate-500">RUTs registrados</span>
-                  </div>
-                </div>
-
-                <div className="p-4 sm:px-6">
-                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-                    Motor Tributario
-                  </span>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span className="text-sm font-semibold text-slate-900">SII 24/7 Activo</span>
-                  </div>
-                </div>
-              </div>
-
-              {seccionAdmin === "directorio" ? (
-                /* TABLA ADMINISTRATIVA REAL (DATA TABLE) */
-                <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                  {/* Barra de herramientas de tabla */}
-                  <div className="p-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/60">
-                    <div className="relative flex-1 max-w-sm">
-                      <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
-                        <Icon name="search" className="w-3.5 h-3.5" />
-                      </div>
-                      <input
-                        type="text"
-                        value={busqueda}
-                        onChange={(e) => setBusqueda(e.target.value)}
-                        placeholder="Buscar empresa o RUT..."
-                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-400"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      {["todos", "activo", "aviso", "suspendido"].map((est) => (
-                        <button
-                          key={est}
-                          onClick={() => setFiltroEstado(est)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition ${
-                            filtroEstado === est
-                              ? "bg-slate-900 text-white"
-                              : "text-slate-600 hover:bg-slate-200/60"
-                          }`}
-                        >
-                          {est}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Contenedor Tabla con Scroll Horizontal Limpio */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                          <th className="py-3 px-4">Organización</th>
-                          <th className="py-3 px-4">RUT / Acceso</th>
-                          <th className="py-3 px-4">Rubro</th>
-                          <th className="py-3 px-4">Módulos</th>
-                          <th className="py-3 px-4">Estado</th>
-                          <th className="py-3 px-4 text-right">Plan</th>
-                          <th className="py-3 px-4 text-right">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 text-xs">
-                        {filtradas.map((emp) => {
-                          const infoRubro = PLANTILLAS_RUBRO[emp.rubro] || PLANTILLAS_RUBRO.minimarket;
-                          const modulosActivos = Object.values(emp.modulos || {}).filter(Boolean).length;
-
-                          return (
-                            <tr key={emp.rut} className="hover:bg-slate-50/80 transition">
-                              {/* Columna Organización + Logo PNG */}
-                              <td className="py-3.5 px-4 whitespace-nowrap">
-                                <div className="flex items-center gap-3">
-                                  {emp.logoBase64 ? (
-                                    <img
-                                      src={emp.logoBase64}
-                                      alt={emp.razonSocial}
-                                      className="w-8 h-8 object-contain rounded border border-slate-200 bg-white p-0.5 shrink-0"
-                                    />
-                                  ) : (
-                                    <div className="w-8 h-8 rounded border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-[11px] shrink-0">
-                                      {emp.razonSocial.substring(0, 2).toUpperCase()}
-                                    </div>
-                                  )}
-                                  <div>
-                                    <div className="font-semibold text-slate-900">{emp.razonSocial}</div>
-                                    <div className="text-[11px] text-slate-400">
-                                      {emp.rutaLegacy ? "Nodo dedicado" : "Instancia estándar"}
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* Columna RUT + PIN */}
-                              <td className="py-3.5 px-4 whitespace-nowrap font-mono-num">
-                                <div className="text-slate-900 font-medium">{formatearRutVisual(emp.rut)}</div>
-                                <div className="text-[11px] text-slate-400">
-                                  PIN: {emp.clave} • {emp.modoJerarquia ? "Roles" : "General"}
-                                </div>
-                              </td>
-
-                              {/* Columna Rubro */}
-                              <td className="py-3.5 px-4 whitespace-nowrap">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium text-[11px]">
-                                  {infoRubro.corto}
-                                </span>
-                              </td>
-
-                              {/* Columna Módulos */}
-                              <td className="py-3.5 px-4 whitespace-nowrap font-mono-num text-slate-600">
-                                {modulosActivos} / 14
-                              </td>
-
-                              {/* Columna Estado */}
-                              <td className="py-3.5 px-4 whitespace-nowrap">
-                                <span
-                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                                    emp.estado === "activo"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : emp.estado === "aviso"
-                                      ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                      : "bg-rose-50 text-rose-700 border border-rose-200"
-                                  }`}
-                                >
-                                  <span
-                                    className={`w-1.5 h-1.5 rounded-full ${
-                                      emp.estado === "activo"
-                                        ? "bg-emerald-500"
-                                        : emp.estado === "aviso"
-                                        ? "bg-amber-500"
-                                        : "bg-rose-500"
-                                    }`}
-                                  ></span>
-                                  <span className="capitalize">{emp.estado}</span>
-                                </span>
-                              </td>
-
-                              {/* Columna Plan UF */}
-                              <td className="py-3.5 px-4 whitespace-nowrap text-right font-mono-num font-semibold text-slate-900">
-                                {emp.tarifaUF} UF
-                              </td>
-
-                              {/* Columna Acciones */}
-                              <td className="py-3.5 px-4 whitespace-nowrap text-right">
-                                <div className="inline-flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => abrirDrawerEditar(emp, "general")}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-medium transition"
-                                  >
-                                    <Icon name="sliders" className="w-3.5 h-3.5 text-slate-500" />
-                                    Configurar
-                                  </button>
-                                  <button
-                                    onClick={() => entrarComoAdmin(emp)}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white font-medium transition"
-                                  >
-                                    Entrar
-                                    <Icon name="external" className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+              {equipoLista.length === 0 ? (
+                <div className="text-center p-8 bg-slate-50 rounded-2xl text-xs text-slate-500">
+                  Aún no has agregado colaboradores. Crea tu primer jefe o vendedor arriba.
                 </div>
               ) : (
-                /* TABLA DE ARQUITECTURA */
-                <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                  <div className="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
-                    <Icon name="server" className="w-4 h-4 text-slate-500" />
-                    <h2 className="text-sm font-semibold text-slate-900">Topología de Despliegue</h2>
-                  </div>
-                  <div className="divide-y divide-slate-200 text-xs">
-                    <div className="px-5 py-3.5 flex items-center justify-between">
-                      <span className="text-slate-600 font-medium">Orquestador Principal y Consola</span>
-                      <span className="font-mono-num text-slate-900">index.html</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {equipoLista.map((m) => (
+                    <div key={m.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">{m.nombre}</p>
+                        <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 inline-block">
+                          {m.rol}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => eliminarMiembroEquipo(m.id)}
+                        className="text-rose-600 hover:bg-rose-50 p-2 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        🗑️
+                      </button>
                     </div>
-                    <div className="px-5 py-3.5 flex items-center justify-between">
-                      <span className="text-slate-600 font-medium">Operación Dedicada PGB</span>
-                      <span className="font-mono-num text-emerald-700">pgb-operacion.html (Aislado)</span>
-                    </div>
-                    <div className="px-5 py-3.5 flex items-center justify-between">
-                      <span className="text-slate-600 font-medium">Motor Cloud Firestore</span>
-                      <span className="font-mono-num text-slate-900">pgb-bodegad • Tiempo Real</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               )}
-            </main>
+            </div>
+          )}
 
-            {/* PANEL LATERAL DESLIZANTE (SLIDE-OVER INSPECTOR DRAWER) */}
-            {drawerEmpresa && (
-              <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40 backdrop-blur-[2px]">
-                <div className="w-full max-w-lg bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col animate-drawer">
-                  {/* Cabecera Drawer */}
-                  <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                    <div>
-                      <span className="text-[11px] font-mono-num uppercase tracking-wider text-slate-400">
-                        {drawerEmpresa.esNueva ? "Alta de Inquilino" : formatearRutVisual(drawerEmpresa.rut)}
-                      </span>
-                      <h2 className="text-base font-semibold text-slate-900">
-                        {drawerEmpresa.esNueva ? "Nueva Organización" : drawerEmpresa.razonSocial}
-                      </h2>
-                    </div>
-                    <button
-                      onClick={() => setDrawerEmpresa(null)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100"
-                    >
-                      <Icon name="x" className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Pestañas Internas del Drawer */}
-                  <div className="px-6 border-b border-slate-200 flex gap-5 bg-slate-50/70">
-                    {[
-                      { id: "general", label: "General y Plan" },
-                      { id: "marca", label: "Identidad PNG" },
-                      { id: "modulos", label: "Módulos (14)" }
-                    ].map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => setTabDrawer(t.id)}
-                        className={`py-2.5 text-xs font-medium border-b-2 transition ${
-                          tabDrawer === t.id
-                            ? "border-slate-900 text-slate-900"
-                            : "border-transparent text-slate-500 hover:text-slate-700"
-                        }`}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Cuerpo del Drawer */}
-                  <form onSubmit={guardarEmpresa} className="flex-1 overflow-y-auto p-6 space-y-5">
-                    {tabDrawer === "general" && (
-                      <>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">
-                              RUT Empresa (sin puntos ni guion)
-                            </label>
-                            <input
-                              type="text"
-                              disabled={!drawerEmpresa.esNueva}
-                              value={drawerEmpresa.rut}
-                              onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, rut: e.target.value })}
-                              placeholder="Ej: 775280425"
-                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 font-mono-num disabled:bg-slate-100 disabled:text-slate-500"
-                              required
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">
-                              Razón Social
-                            </label>
-                            <input
-                              type="text"
-                              value={drawerEmpresa.razonSocial}
-                              onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, razonSocial: e.target.value })}
-                              placeholder="Nombre legal de la empresa"
-                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900"
-                              required
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-xs font-medium text-slate-700 mb-1">
-                                Clave de Acceso
-                              </label>
-                              <input
-                                type="text"
-                                value={drawerEmpresa.clave}
-                                onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, clave: e.target.value })}
-                                className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 font-mono-num"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-slate-700 mb-1">
-                                Tarifa Mensual (UF)
-                              </label>
-                              <input
-                                type="number"
-                                step="0.5"
-                                value={drawerEmpresa.tarifaUF}
-                                onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, tarifaUF: e.target.value })}
-                                className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900 font-mono-num"
-                              />
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">
-                              Estado Operativo
-                            </label>
-                            <select
-                              value={drawerEmpresa.estado}
-                              onChange={(e) => setDrawerEmpresa({ ...drawerEmpresa, estado: e.target.value })}
-                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-300 text-xs text-slate-900"
-                            >
-                              <option value="activo">Activo — Operación normal</option>
-                              <option value="aviso">Aviso — Banner preventivo de pago</option>
-                              <option value="suspendido">Suspendido — Acceso bloqueado</option>
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                              Plantilla de Industria (Auto-configura módulos)
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                              {Object.entries(PLANTILLAS_RUBRO).map(([key, info]) => (
-                                <button
-                                  type="button"
-                                  key={key}
-                                  onClick={() => cambiarRubroDrawer(key)}
-                                  className={`px-3 py-2 rounded-lg border text-left text-xs font-medium transition ${
-                                    drawerEmpresa.rubro === key
-                                      ? "bg-slate-900 border-slate-900 text-white"
-                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                                  }`}
-                                >
-                                  {info.nombre}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
-                            <div>
-                              <p className="text-xs font-medium text-slate-900">Jerarquía por Roles</p>
-                              <p className="text-[11px] text-slate-500">
-                                Separa permisos entre administradores y operarios.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDrawerEmpresa({ ...drawerEmpresa, modoJerarquia: !drawerEmpresa.modoJerarquia })
-                              }
-                              className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
-                                drawerEmpresa.modoJerarquia
-                                  ? "bg-slate-900 border-slate-900 text-white"
-                                  : "bg-white border-slate-300 text-slate-700"
-                              }`}
-                            >
-                              {drawerEmpresa.modoJerarquia ? "Activado" : "Estándar"}
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-
-                    {tabDrawer === "marca" && (
-                      <div className="space-y-4">
-                        <div className="border border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50/50">
-                          {drawerEmpresa.logoBase64 ? (
-                            <div className="space-y-3">
-                              <img
-                                src={drawerEmpresa.logoBase64}
-                                alt="Logo"
-                                className="max-h-24 mx-auto object-contain bg-white p-2 rounded-lg border border-slate-200"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setDrawerEmpresa({ ...drawerEmpresa, logoBase64: "" })}
-                                className="text-xs text-rose-600 font-medium hover:underline"
-                              >
-                                Quitar logotipo actual
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center mx-auto text-slate-500">
-                                <Icon name="upload" className="w-4 h-4" />
-                              </div>
-                              <p className="text-xs font-medium text-slate-900">
-                                Subir logotipo original (PNG transparente)
-                              </p>
-                              <p className="text-[11px] text-slate-500">
-                                Se aplicará en el portal, cabecera operativa y reportes PDF.
-                              </p>
-                            </div>
-                          )}
-
-                          <input
-                            type="file"
-                            accept="image/png,image/webp,image/jpeg"
-                            onChange={manejarSubidaLogo}
-                            className="mt-4 text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-medium file:bg-white file:text-slate-800 hover:file:bg-slate-100"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {tabDrawer === "modulos" && (
-                      <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
-                        {Object.entries(ETIQUETAS_MODULOS).map(([modKey, label]) => {
-                          const activo = !!drawerEmpresa.modulos?.[modKey];
-                          return (
-                            <div
-                              key={modKey}
-                              onClick={() =>
-                                setDrawerEmpresa({
-                                  ...drawerEmpresa,
-                                  modulos: { ...drawerEmpresa.modulos, [modKey]: !activo }
-                                })
-                              }
-                              className="flex items-center justify-between px-4 py-3 bg-white hover:bg-slate-50 cursor-pointer transition"
-                            >
-                              <span className="text-xs font-medium text-slate-800">{label}</span>
-                              <div
-                                className={`w-8 h-4 rounded-full p-0.5 transition shrink-0 ${
-                                  activo ? "bg-slate-900" : "bg-slate-200"
-                                }`}
-                              >
-                                <div
-                                  className={`w-3 h-3 rounded-full bg-white transition-transform ${
-                                    activo ? "translate-x-4" : "translate-x-0"
-                                  }`}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Pie Fijo Drawer */}
-                    <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setDrawerEmpresa(null)}
-                        className="px-4 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-medium hover:bg-slate-50"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={guardando}
-                        className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
-                      >
-                        {guardando ? "Guardando..." : "Guardar Cambios"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      }
-
-      // 4. ESPACIO DE TRABAJO CLIENTE (TECNOSHOP / NUEVAS EMPRESAS)
-      if (vista === "cliente" && empresaActiva) {
-        const infoRubro = PLANTILLAS_RUBRO[empresaActiva.rubro] || PLANTILLAS_RUBRO.minimarket;
-        const activos = Object.entries(empresaActiva.modulos || {}).filter(([, val]) => val);
-
-        return (
-          <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
-            {empresaActiva.estado === "aviso" && (
-              <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs font-medium text-center py-2 px-4">
-                Aviso administrativo: Existe un saldo pendiente en tu suscripción mensual.
-              </div>
-            )}
-
-            <header className="h-14 bg-white border-b border-slate-200 px-6 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {empresaActiva.logoBase64 ? (
-                  <img
-                    src={empresaActiva.logoBase64}
-                    alt={empresaActiva.razonSocial}
-                    className="w-8 h-8 object-contain rounded border border-slate-200 p-0.5"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
-                    {empresaActiva.razonSocial.substring(0, 2).toUpperCase()}
-                  </div>
-                )}
+          {/* VISTA 3: CATÁLOGO INTELIGENTE MAESTRO (.XLSX + MANUAL) */}
+          {tabPanel === "catalogo" && (
+            <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
-                  <h1 className="font-semibold text-slate-900 text-sm leading-tight">
-                    {empresaActiva.razonSocial}
-                  </h1>
-                  <p className="text-[11px] text-slate-500 font-mono-num">
-                    {formatearRutVisual(empresaActiva.rut)} • {infoRubro.nombre}
+                  <h2 className="text-xl font-black text-slate-900">📚 Catálogo Maestro Inteligente</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Este catálogo alimenta automáticamente tu <strong>Inventario</strong>, tu <strong>Punto de Venta</strong>, tus <strong>Incidencias</strong> y tus publicaciones en <strong>Mercado Libre / Falabella / Lider</strong>.
                   </p>
+                </div>
+                <label className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-5 py-3 rounded-xl cursor-pointer shadow-sm text-center shrink-0">
+                  {importandoXlsx ? "⏳ Procesando Excel..." : "📥 Subir Excel (.xlsx)"}
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={subirExcelCatalogo} disabled={importandoXlsx} className="hidden" />
+                </label>
+              </div>
+
+              <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <input
+                  type="text"
+                  value={prodManualCod}
+                  onChange={(e) => setProdManualCod(e.target.value)}
+                  placeholder="Código / SKU"
+                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                />
+                <input
+                  type="text"
+                  value={prodManualNom}
+                  onChange={(e) => setProdManualNom(e.target.value)}
+                  placeholder="Nombre del producto *"
+                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  required
+                />
+                <input
+                  type="text"
+                  value={prodManualProv}
+                  onChange={(e) => setProdManualProv(e.target.value)}
+                  placeholder="Proveedor / Marca"
+                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                />
+                <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2 px-4 rounded-xl text-xs cursor-pointer">
+                  ➕ Agregar Ítem
+                </button>
+              </form>
+
+              <input
+                type="text"
+                value={busquedaCat}
+                onChange={(e) => setBusquedaCat(e.target.value)}
+                placeholder="🔍 Buscar en el catálogo por código, nombre o proveedor..."
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-amber-500"
+              />
+
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-2xl">
+                {catalogoFiltrado.length === 0 ? (
+                  <p className="p-8 text-center text-xs text-slate-500">Sin productos cargados aún.</p>
+                ) : (
+                  catalogoFiltrado.slice(0, 150).map((p) => (
+                    <div key={p.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-slate-50">
+                      <div className="min-w-0">
+                        <span className="font-bold text-slate-900 block truncate">
+                          {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}
+                        </span>
+                        {p.proveedor && <span className="text-[10px] text-slate-500">Proveedor: {p.proveedor}</span>}
+                      </div>
+                      <button onClick={() => borrarProductoCat(p.id)} className="text-rose-600 font-bold text-[11px] px-2 py-1 rounded hover:bg-rose-50 cursor-pointer">
+                        🗑️
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* VISTA 4: ESPACIOS INTUITIVOS PARA APIS (MERCADO LIBRE, FALABELLA, LIDER Y SII / OPENFACTURA) */}
+          {tabPanel === "apis" && (
+            <form onSubmit={guardarConfigApis} className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">🔌 Integraciones Omnicanal y Facturación Electrónica (SII)</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Conecta tus canales de venta online y tu proveedor de documentos tributarios para automatizar stock y boletas/facturas.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 space-y-3">
+                  <h3 className="text-sm font-black text-amber-900">🟡 Mercado Libre Chile API</h3>
+                  <input
+                    type="text"
+                    value={apisForm.meliClientId}
+                    onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })}
+                    placeholder="App ID / Client ID"
+                    className="w-full bg-white border border-amber-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  />
+                  <input
+                    type="password"
+                    value={apisForm.meliSecret}
+                    onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })}
+                    placeholder="Client Secret / Access Token"
+                    className="w-full bg-white border border-amber-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  />
+                </div>
+
+                <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 space-y-3">
+                  <h3 className="text-sm font-black text-emerald-900">🟢 Falabella Seller Center API</h3>
+                  <input
+                    type="text"
+                    value={apisForm.falabellaUser}
+                    onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })}
+                    placeholder="User ID (Correo Seller Center)"
+                    className="w-full bg-white border border-emerald-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  />
+                  <input
+                    type="password"
+                    value={apisForm.falabellaApiKey}
+                    onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })}
+                    placeholder="API Key Falabella"
+                    className="w-full bg-white border border-emerald-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  />
+                </div>
+
+                <div className="bg-sky-50/60 border border-sky-200 rounded-2xl p-4 space-y-3">
+                  <h3 className="text-sm font-black text-sky-900">🔵 Lider / Walmart Marketplace API</h3>
+                  <input
+                    type="password"
+                    value={apisForm.liderApiKey}
+                    onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })}
+                    placeholder="Client Secret / Token Lider"
+                    className="w-full bg-white border border-sky-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  />
+                  <p className="text-[11px] text-sky-800">
+                    * Incluye bandeja física separada para impresión de etiquetas Lider.
+                  </p>
+                </div>
+
+                <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4 space-y-3">
+                  <h3 className="text-sm font-black text-indigo-900">🧾 SII / OpenFactura (Boleta 39 y Factura 33)</h3>
+                  <select
+                    value={apisForm.siiProveedor}
+                    onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })}
+                    className="w-full bg-white border border-indigo-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  >
+                    <option>OpenFactura (Haulmer)</option>
+                    <option>SimpleFactura</option>
+                    <option>SII Directo (Certificado .PFX + CAF)</option>
+                  </select>
+                  <input
+                    type="password"
+                    value={apisForm.siiApiKey}
+                    onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })}
+                    placeholder="API Key OpenFactura / Clave Certificado"
+                    className="w-full bg-white border border-indigo-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                  />
                 </div>
               </div>
 
               <button
-                onClick={cerrarSesionCliente}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white hover:bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700 transition"
+                type="submit"
+                disabled={guardandoApis}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-2xl text-sm shadow-md transition cursor-pointer"
               >
-                <Icon name="logout" className="w-3.5 h-3.5" />
-                Cerrar sesión
+                {guardandoApis ? "Guardando..." : "💾 Guardar Conexiones API y Tributarias"}
               </button>
-            </header>
-
-            <main className="max-w-5xl w-full mx-auto px-6 py-8 space-y-6">
-              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-900">
-                      Módulos Activos de la Organización
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Instancia aislada y configurada desde la consola central.
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    En línea
-                  </span>
-                </div>
-
-                <div className="divide-y divide-slate-200">
-                  {activos.map(([key]) => (
-                    <div key={key} className="px-6 py-3.5 flex items-center justify-between text-xs">
-                      <span className="font-medium text-slate-800">{ETIQUETAS_MODULOS[key] || key}</span>
-                      <span className="font-mono-num text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                        Habilitado
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </main>
-          </div>
-        );
-      }
-
-      return null;
+            </form>
+          )}
+        </div>
+      );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
 </html>
