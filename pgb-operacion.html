@@ -230,6 +230,7 @@
       const [catalogoClientes, setCatalogoClientes] = useState([]);
       const [historialInventario, setHistorialInventario] = useState([]);
       const [conteoPendiente, setConteoPendiente] = useState([]);
+      const [inventarioEsperandoCount, setInventarioEsperandoCount] = useState(0);
       const [seleccionadosInventario, setSeleccionadosInventario] = useState({});
       const [seleccionadosRetornosPDF, setSeleccionadosRetornosPDF] = useState({});
       
@@ -375,7 +376,11 @@
             setConteoPendiente(lista);
           }, (err) => { console.error("Error conteo:", err); });
 
-          unsubs = [unsubInc, unsubIncBodega, unsubCierres, unsubCat, unsubCatClientes, unsubHistInv, unsubConteo];
+          const unsubInvGral = db.collection("inventario_general_esperando").onSnapshot((snap) => {
+            setInventarioEsperandoCount(snap.size);
+          }, (err) => { console.error("Error inv gral:", err); });
+
+          unsubs = [unsubInc, unsubIncBodega, unsubCierres, unsubCat, unsubCatClientes, unsubHistInv, unsubConteo, unsubInvGral];
         };
 
         auth.signInAnonymously()
@@ -1739,6 +1744,24 @@
                 </div>
               </button>
 
+              <a
+                href="pgb-inventario.html"
+                className="w-full px-5 py-4 text-left text-sm font-bold flex items-center justify-between text-white hover:bg-amber-500/40 transition cursor-pointer"
+              >
+                <span className="flex items-center gap-3">
+                  <span className="text-base">📦</span>
+                  <span>Inventario</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {inventarioEsperandoCount > 0 && (
+                    <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full shadow">
+                      {inventarioEsperandoCount}
+                    </span>
+                  )}
+                  <span className="text-xs opacity-75">›</span>
+                </div>
+              </a>
+
               <button
                 onClick={() => setVista("historial")}
                 className={`w-full px-5 py-4 text-left text-sm font-bold flex items-center justify-between transition cursor-pointer ${
@@ -2115,26 +2138,34 @@
               </div>
 
               {/* MENÚ DE NAVEGACIÓN MÓVIL (lg:hidden) */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-white p-2 rounded-2xl border border-slate-200 mb-6 shadow-sm no-print lg:hidden">
-                <button onClick={() => setVista("dashboard")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "dashboard" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-white p-2 rounded-2xl border border-slate-200 mb-6 shadow-sm no-print lg:hidden">
+                <button onClick={() => setVista("dashboard")} className={`py-3 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer ${vista === "dashboard" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
                   📋 Tablero Ruta ({incidencias.length})
                 </button>
-                <button onClick={() => setVista("bodega_interna")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "bodega_interna" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
-                  🏢 Incidentes Bodega ({incidentesBodega.length})
+                <button onClick={() => setVista("bodega_interna")} className={`py-3 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer ${vista === "bodega_interna" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
+                  🏢 Bodega ({incidentesBodega.length})
                 </button>
-                <button onClick={() => setVista("nuevo")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "nuevo" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
-                  {editandoId ? "✏️ Editando Factura" : "➕ Nueva Incidencia"}
+                <button onClick={() => setVista("nuevo")} className={`py-3 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer ${vista === "nuevo" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
+                  {editandoId ? "✏️ Editando" : "➕ Incidencia"}
                 </button>
-                <button onClick={() => setVista("balance")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition relative cursor-pointer ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
-                  ⚖️ Cuadratura y Gráficos ({conteoPendiente.length})
+                <button onClick={() => setVista("balance")} className={`py-3 px-3 rounded-xl text-xs font-extrabold transition relative cursor-pointer ${vista === "balance" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
+                  ⚖️ Cuadratura ({conteoPendiente.length})
                   {conteoPendiente.length > 0 && (
                     <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">
                       {conteoPendiente.length}
                     </span>
                   )}
                 </button>
-                <button onClick={() => setVista("historial")} className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${vista === "historial" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
-                  📁 Archivo Semanal ({cierres.length})
+                <a href="pgb-inventario.html" className="py-3 px-3 rounded-xl text-xs font-extrabold transition relative cursor-pointer text-slate-700 bg-amber-50/70 hover:bg-amber-100 border border-amber-200 flex items-center justify-center gap-1">
+                  <span>📦 Inventario</span>
+                  {inventarioEsperandoCount > 0 && (
+                    <span className="bg-emerald-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                      {inventarioEsperandoCount}
+                    </span>
+                  )}
+                </a>
+                <button onClick={() => setVista("historial")} className={`py-3 px-3 rounded-xl text-xs font-extrabold transition cursor-pointer ${vista === "historial" ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
+                  📁 Archivo ({cierres.length})
                 </button>
               </div>
 
@@ -3826,7 +3857,7 @@
                       <div>
                         <h2 className="text-lg font-black text-slate-900 mb-1">🕒 Historial Acumulativo de Correcciones de Inventario</h2>
                         <p className="text-xs text-slate-500">
-                          Cada ajuste resuelto en el conteo cíclico se suma automáticamente aquí, agrupado por producto.
+                          Cada ajuste resuelto en el conteo cíclico o inventario general se suma automáticamente aquí, agrupado por producto.
                         </p>
                       </div>
                       <button
