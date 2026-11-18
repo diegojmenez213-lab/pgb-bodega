@@ -101,6 +101,7 @@
 
     const MOTIVOS_VENTAS = [
       { id: "ErrorFacturacion", label: "Error de Facturación", desc: "Vendedor facturó mal; cliente rechaza y retorna", fisico: false },
+      { id: "RechazoRazonSocial", label: "Pedido rechazado por razón social incorrecta", desc: "Cliente pidió el producto, pero la factura venía con otra razón social o dirección", fisico: false },
       { id: "RechazoNoPedido", label: "Rechazo por pedido no realizado", desc: "Cliente asegura no haber pedido este producto y lo devuelve", fisico: false },
       { id: "CruceVentas", label: "Cruce de Producto", desc: "Cliente pidió un producto/medida y vendedor facturó otro", fisico: false }
     ];
@@ -168,6 +169,9 @@
       "Chofer Retorna Producto a Bodega"
     ];
 
+    const MOTIVOS_VENTAS_IDS = ["ErrorFacturacion", "RechazoRazonSocial", "RechazoNoPedido", "CruceVentas"];
+    const MOTIVOS_RETORNO_UNICO_VENTAS = ["ErrorFacturacion", "RechazoRazonSocial", "RechazoNoPedido"];
+
     const normalizarTexto = (str) => {
       if (str === null || str === undefined) return "";
       return String(str).trim().replace(/\s+/g, ' ').toUpperCase();
@@ -189,12 +193,13 @@
     const esIncidenciaVentas = (item) => {
       if (!item) return false;
       if (item.areaResponsable === "ventas") return true;
-      return ["ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(item.motivo);
+      return MOTIVOS_VENTAS_IDS.includes(item.motivo);
     };
 
     const obtenerLabelMotivo = (motivo) => {
       if (motivo === "AceptadoPorCliente") return "ACEPTADO X CLIENTE";
       if (motivo === "ErrorFacturacion") return "ERROR FACTURACIÓN";
+      if (motivo === "RechazoRazonSocial") return "RECHAZO POR RAZÓN SOCIAL INCORRECTA";
       if (motivo === "RechazoNoPedido") return "RECHAZO PEDIDO NO REALIZADO";
       if (motivo === "CruceVentas") return "CRUCE DE PRODUCTO (VENTAS)";
       return (motivo || "").toUpperCase();
@@ -398,7 +403,7 @@
               const motivoObj = MOTIVOS.find(m => m.id === inc.motivo);
               const esFisico = motivoObj ? motivoObj.fisico : true;
 
-              if (requiereAjuste && !yaAjustado && esFisico && !["AceptadoPorCliente", "ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(inc.motivo)) {
+              if (requiereAjuste && !yaAjustado && esFisico && !["AceptadoPorCliente", ...MOTIVOS_VENTAS_IDS].includes(inc.motivo)) {
                 const prodNorm = normalizarTexto(inc.producto);
                 const uniNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? inc.detalleDanio.unidadDanada : inc.unidad;
                 const cantNorm = (inc.motivo === "Daño/Merma" && inc.detalleDanio) ? Number(inc.detalleDanio.cantidadDanada) : Number(inc.cantidad);
@@ -448,7 +453,7 @@
 
       const seleccionarMotivo = (nuevoMotivo) => {
         setMotivo(nuevoMotivo);
-        if (nuevoMotivo === "ErrorFacturacion" || nuevoMotivo === "RechazoNoPedido") {
+        if (MOTIVOS_RETORNO_UNICO_VENTAS.includes(nuevoMotivo)) {
           setAccionesSeleccionadas(["Chofer Retorna Producto a Bodega", "Nota de Crédito (Tributaria)"]);
         } else if (nuevoMotivo === "CruceVentas") {
           setAccionesSeleccionadas(["Chofer Retorna Producto a Bodega", "Enviar / Reponer Producto al Cliente"]);
@@ -808,7 +813,7 @@
         e.preventDefault();
         if (!factura.trim()) return alert("Completa el Nº de Factura.");
 
-        const esMalFacturadoUnico = motivo === "ErrorFacturacion" || motivo === "RechazoNoPedido";
+        const esMalFacturadoUnico = MOTIVOS_RETORNO_UNICO_VENTAS.includes(motivo);
         const esCruceVentas = motivo === "CruceVentas";
 
         if (esMalFacturadoUnico) {
@@ -883,7 +888,7 @@
           }
         }
 
-        if (requiereFisico && requiereAjusteInv && !["AceptadoPorCliente", "ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(motivo)) {
+        if (requiereFisico && requiereAjusteInv && !["AceptadoPorCliente", ...MOTIVOS_VENTAS_IDS].includes(motivo)) {
           await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim(), infoProdPrincipal);
         }
         if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
@@ -1351,7 +1356,7 @@
         setRegistradoPor(item.registradoPor || "Diego");
         setMotivo(item.motivo || (esVentas ? "ErrorFacturacion" : "Faltante"));
         
-        if (["ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(item.motivo)) {
+        if (MOTIVOS_VENTAS_IDS.includes(item.motivo)) {
           setProductoMalFacturado(item.producto || "");
           setCantidadMalFacturada(item.cantidad || 1);
           setUnidadMalFacturada(UNIDADES.includes(item.unidad) ? item.unidad : UNIDADES[0]);
@@ -1455,7 +1460,7 @@
         total: incidencias.length + incidentesBodega.length,
         pendientes: incidencias.filter(i => !i.resuelto).length + incidentesBodega.filter(ib => !ib.ajustado).length,
         resueltas: incidencias.filter(i => i.resuelto).length + incidentesBodega.filter(ib => ib.ajustado).length,
-        cruces: incidencias.filter(i => ["Cruce", "AceptadoPorCliente", "ErrorFacturacion", "RechazoNoPedido", "CruceVentas"].includes(i.motivo)).length
+        cruces: incidencias.filter(i => ["Cruce", "AceptadoPorCliente", ...MOTIVOS_VENTAS_IDS].includes(i.motivo)).length
       }), [incidencias, incidentesBodega]);
 
       const conteosListosParaAjustar = useMemo(() => {
@@ -2485,13 +2490,15 @@
                                 <span className="text-[11px] font-bold uppercase text-slate-500 block mb-0.5">
                                   {item.motivo === "ErrorFacturacion"
                                     ? "🧾 Producto Mal Facturado por Vendedor (Retorna):"
-                                    : item.motivo === "RechazoNoPedido"
-                                      ? "🚫 Producto Facturado No Pedido por Cliente (Retorna):"
-                                      : item.motivo === "CruceVentas"
-                                        ? "🧾 Producto / Medida Facturado por Vendedor:"
-                                        : (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente")
-                                          ? "Producto Facturado:"
-                                          : "Producto Afectado:"}
+                                    : item.motivo === "RechazoRazonSocial"
+                                      ? "🏢 Producto Rechazado por Razón Social Incorrecta (Retorna):"
+                                      : item.motivo === "RechazoNoPedido"
+                                        ? "🚫 Producto Facturado No Pedido por Cliente (Retorna):"
+                                        : item.motivo === "CruceVentas"
+                                          ? "🧾 Producto / Medida Facturado por Vendedor:"
+                                          : (item.motivo === "Cruce" || item.motivo === "AceptadoPorCliente")
+                                            ? "Producto Facturado:"
+                                            : "Producto Afectado:"}
                                 </span>
                                 <p className="text-base font-black text-slate-900">
                                   {item.cantidad} {item.unidad} — <span className={esVentas ? "text-indigo-700" : "text-amber-700"}>{item.producto}</span>
@@ -2981,7 +2988,7 @@
                     <label className="text-xs font-bold text-slate-700 block mb-2">
                       ⚠️ Tipo de Incidencia ({areaResponsable === "ventas" ? "Área Comercial / Ventas" : "Operación Bodega"})
                     </label>
-                    <div className={`grid grid-cols-1 ${areaResponsable === "ventas" ? "sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3"} gap-2`}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {motivosDisponiblesActuales.map(m => (
                         <button
                           type="button"
@@ -3003,27 +3010,33 @@
                   </div>
 
                   {/* BLOQUES CONDICIONALES SEGÚN MOTIVO */}
-                  {(motivo === "ErrorFacturacion" || motivo === "RechazoNoPedido") ? (
+                  {MOTIVOS_RETORNO_UNICO_VENTAS.includes(motivo) ? (
                     <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 space-y-3">
                       <div className="flex justify-between items-center">
                         <p className="text-xs font-extrabold text-indigo-800 uppercase">
-                          {motivo === "RechazoNoPedido"
-                            ? "🚫 Producto Facturado por Vendedor que el Cliente NO Pidió (Retorna)"
-                            : "🧾 Producto Mal Facturado por el Vendedor (Retorna con Chofer)"}
+                          {motivo === "RechazoRazonSocial"
+                            ? "🏢 Producto Rechazado por Razón Social Incorrecta (Retorna con Chofer)"
+                            : motivo === "RechazoNoPedido"
+                              ? "🚫 Producto Facturado por Vendedor que el Cliente NO Pidió (Retorna)"
+                              : "🧾 Producto Mal Facturado por el Vendedor (Retorna con Chofer)"}
                         </p>
                         <span className="text-[10px] text-indigo-600 font-semibold">💡 Retorno directo a bodega</span>
                       </div>
                       <p className="text-[11px] text-slate-700">
-                        {motivo === "RechazoNoPedido"
-                          ? "Indica qué producto facturó el vendedor y el cliente aseguró no haber pedido para que el chofer lo devuelva:"
-                          : "Indica qué producto se llevó en la factura mal emitida por el vendedor y el cliente rechazó para que el chofer lo retorne:"}
+                        {motivo === "RechazoRazonSocial"
+                          ? "Indica los ítems facturados con razón social/dirección incorrecta que el cliente rechazó y retornan con el chofer:"
+                          : motivo === "RechazoNoPedido"
+                            ? "Indica qué producto facturó el vendedor y el cliente aseguró no haber pedido para que el chofer lo devuelva:"
+                            : "Indica qué producto se llevó en la factura mal emitida por el vendedor y el cliente rechazó para que el chofer lo retorne:"}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="sm:col-span-2 relative">
                           <label className="text-[11px] font-bold text-indigo-900 block mb-1">
-                            {motivo === "RechazoNoPedido"
-                              ? "¿Qué producto facturó el vendedor y el cliente no pidió? *"
-                              : "Código o nombre del producto que debe retornar *"}
+                            {motivo === "RechazoRazonSocial"
+                              ? "Código o producto rechazado que retorna *"
+                              : motivo === "RechazoNoPedido"
+                                ? "¿Qué producto facturó el vendedor y el cliente no pidió? *"
+                                : "Código o nombre del producto que debe retornar *"}
                           </label>
                           <input type="text" list="lista-catalogo" value={productoMalFacturado} onChange={e => setProductoMalFacturado(e.target.value)} placeholder="Buscar por código o nombre..." className="w-full bg-white border border-indigo-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 outline-none" required />
                           <datalist id="lista-catalogo">
@@ -3388,7 +3401,7 @@
 
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">💬 Notas Opcionales</label>
-                    <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Cliente indica que nunca pidió ese código..." className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
+                    <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Factura emitida con razón social antigua..." className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
                   </div>
 
                   <button type="submit" className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer">
