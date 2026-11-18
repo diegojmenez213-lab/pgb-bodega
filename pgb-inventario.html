@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PGB Distribution Chile SpA • Inventario General</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .light-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05); }
+    .print-only { display: none; }
+    @media print {
+      body { background: white !important; color: black !important; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+    }
+  </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-amber-400 selection:text-slate-950">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
+      authDomain: "pgb-bodegad.firebaseapp.com",
+      projectId: "pgb-bodegad",
+      storageBucket: "pgb-bodegad.firebasestorage.app",
+      messagingSenderId: "497839332750",
+      appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
+    const EQUIPO_CONTEO = ["Nico", "Edwin", "Diego"];
+    const JEFATURA = ["Pedro", "Bedanli"];
+
+    const normalizarTexto = (str) => {
+      if (str === null || str === undefined) return "";
+      return String(str).trim().replace(/\s+/g, " ").toUpperCase();
+    };
+
+    const huellaFlexible = (txt) =>
+      normalizarTexto(txt)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\bDE\b/g, " ")
+        .replace(/(\d+)\s+(G|GR|GRS|KG|ML|L|LT|LTS|CC|UN|UND)\b/g, "$1$2")
+        .replace(/[^A-Z0-9]/g, "");
+
+    const formatearDisplayProducto = (p) => {
+      if (!p) return "";
+      return p.codigo ? `[${p.codigo}] ${p.nombre}` : p.nombre;
+    };
+
+    const LogoPGB = ({ className = "h-16 w-auto" }) => {
+      const [logoUrl, setLogoUrl] = useState("");
+
+      useEffect(() => {
+        const unsub = db.collection("saas_empresas").doc("769497226").onSnapshot((doc) => {
+          if (doc.exists && doc.data().logoBase64) {
+            setLogoUrl(doc.data().logoBase64);
+          }
+        });
+        return () => unsub();
+      }, []);
+
+      if (logoUrl) {
+        return <img src={logoUrl} alt="PGB Distribution Chile SpA" className={`${className} object-contain mx-auto`} />;
+      }
+      return <span className="font-extrabold text-slate-800 text-lg">PGB Distribution Chile SpA</span>;
+    };
+
+    function AppInventario() {
+      const [conectado, setConectado] = useState(false);
+      const [catalogoProductos, setCatalogoProductos] = useState([]);
+      const [esperandoAjuste, setEsperandoAjuste] = useState([]);
+      const [importandoExcel, setImportandoExcel] = useState(false);
+
+      const [busqueda, setBusqueda] = useState("");
+      const [proveedorActivo, setProveedorActivo] = useState("TODOS");
+      const [seleccionados, setSeleccionados] = useState({});
+
+      const [modoConteoDigital, setModoConteoDigital] = useState(false);
+      const [datosConteo, setDatosConteo] = useState({});
+      const [guardandoConteo, setGuardandoConteo] = useState(false);
+      const [imprimiendoHoja, setImprimiendoHoja] = useState(false);
+
+      useEffect(() => {
+        let unsubs = [];
+
+        const conectar = () => {
+          const u1 = db.collection("catalogo_productos").onSnapshot((snap) => {
+            setConectado(true);
+            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es", { sensitivity: "base" }));
+            setCatalogoProductos(lista);
+          });
+
+          const u2 = db.collection("inventario_general_esperando").onSnapshot((snap) => {
+            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setEsperandoAjuste(lista);
+          });
+
+          unsubs = [u1, u2];
+        };
+
+        auth.signInAnonymously().then(conectar).catch(conectar);
+        return () => unsubs.forEach((fn) => typeof fn === "function" && fn());
+      }, []);
+
+      const importarCatalogoExcel = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setImportandoExcel(true);
+
+        try {
+          const buffer = await file.arrayBuffer();
+          const workbook = XLSX.read(buffer, { type: "array" });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+          if (!rows || rows.length === 0) {
+            alert("El archivo Excel está vacío.");
+            setImportandoExcel(false);
+            e.target.value = "";
+            return;
+          }
+
+          const normalizarClave = (k) =>
+            String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+          const existentesPorCodigo = new Set(catalogoProductos.filter((p) => p.codigo).map((p) => normalizarTexto(p.codigo)));
+          const existentesPorNombre = new Set(catalogoProductos.filter((p) => p.nombre).map((p) => normalizarTexto(p.nombre)));
+          const existentesPorHuella = new Set(catalogoProductos.filter((p) => p.nombre).map((p) => huellaFlexible(p.nombre)));
+
+          const nuevos = [];
+          const actualizables = [];
+
+          rows.forEach((row) => {
+            const keys = Object.keys(row);
+            let codigoVal = "";
+            let nombreVal = "";
+            let proveedorVal = "";
+
+            keys.forEach((k) => {
+              const kn = normalizarClave(k);
+              const val = row[k];
+              if (!codigoVal && (kn.includes("cod") || kn.includes("sku") || kn === "id" || kn.includes("item"))) {
+                codigoVal = normalizarTexto(val);
+              } else if (!nombreVal && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art") || kn.includes("det"))) {
+                nombreVal = normalizarTexto(val);
+              } else if (!proveedorVal && (kn.includes("prov") || kn.includes("marc") || kn.includes("fab"))) {
+                proveedorVal = normalizarTexto(val);
+              }
+            });
+
+            if (!nombreVal && keys.length >= 2) {
+              codigoVal = normalizarTexto(row[keys[0]]);
+              nombreVal = normalizarTexto(row[keys[1]]);
+              if (keys.length >= 3) proveedorVal = normalizarTexto(row[keys[2]]);
+            } else if (!nombreVal && keys.length === 1) {
+              nombreVal = normalizarTexto(row[keys[0]]);
+            }
+
+            if (!nombreVal) return;
+            const hVal = huellaFlexible(nombreVal);
+
+            const yaExiste =
+              (codigoVal && existentesPorCodigo.has(codigoVal)) ||
+              existentesPorNombre.has(nombreVal) ||
+              (hVal && existentesPorHuella.has(hVal));
+
+            if (yaExiste) {
+              const docExist = catalogoProductos.find(
+                (p) =>
+                  (codigoVal && normalizarTexto(p.codigo) === codigoVal) ||
+                  normalizarTexto(p.nombre) === nombreVal ||
+                  (hVal && huellaFlexible(p.nombre) === hVal)
+              );
+              if (docExist) {
+                const codFinal = codigoVal || docExist.codigo || "";
+                const provFinal = proveedorVal || docExist.proveedor || "";
+                if (codFinal !== docExist.codigo || provFinal !== docExist.proveedor || nombreVal !== docExist.nombre) {
+                  actualizables.push({ id: docExist.id, codigo: codFinal, nombre: nombreVal, proveedor: provFinal });
+                }
+              }
+              return;
+            }
+
+            if (codigoVal) existentesPorCodigo.add(codigoVal);
+            existentesPorNombre.add(nombreVal);
+            if (hVal) existentesPorHuella.add(hVal);
+            nuevos.push({ codigo: codigoVal, nombre: nombreVal, proveedor: proveedorVal });
+          });
+
+          const CHUNK = 400;
+          for (let i = 0; i < nuevos.length; i += CHUNK) {
+            const batch = db.batch();
+            nuevos.slice(i, i + CHUNK).forEach((item) => batch.set(db.collection("catalogo_productos").doc(), item));
+            await batch.commit();
+          }
+          for (let i = 0; i < actualizables.length; i += CHUNK) {
+            const batch = db.batch();
+            actualizables.slice(i, i + CHUNK).forEach((item) =>
+              batch.update(db.collection("catalogo_productos").doc(item.id), {
+                codigo: item.codigo,
+                nombre: item.nombre,
+                proveedor: item.proveedor
+              })
+            );
+            await batch.commit();
+          }
+
+          alert(`✅ Catálogo actualizado: ${nuevos.length} nuevos y ${actualizables.length} fusionados.`);
+        } catch (err) {
+          alert("Error al leer Excel: " + err.message);
+        }
+
+        setImportandoExcel(false);
+        e.target.value = "";
+      };
+
+      const proveedoresDisponibles = useMemo(() => {
+        const setProv = new Set();
+        catalogoProductos.forEach((p) => {
+          if (p.proveedor && p.proveedor.trim()) {
+            setProv.add(normalizarTexto(p.proveedor));
+          }
+        });
+        return Array.from(setProv).sort((a, b) => a.localeCompare(b, "es"));
+      }, [catalogoProductos]);
+
+      const productosFiltrados = useMemo(() => {
+        const q = busqueda.trim().toLowerCase();
+        return catalogoProductos.filter((p) => {
+          const provNorm = normalizarTexto(p.proveedor);
+          const matchProv = proveedorActivo === "TODOS" ? true : provNorm === proveedorActivo;
+          if (!matchProv) return false;
+          if (!q) return true;
+          return (
+            (p.nombre || "").toLowerCase().includes(q) ||
+            (p.codigo || "").toLowerCase().includes(q) ||
+            (p.proveedor || "").toLowerCase().includes(q)
+          );
+        });
+      }, [catalogoProductos, proveedorActivo, busqueda]);
+
+      const productosSeleccionadosLista = useMemo(() => {
+        return catalogoProductos.filter((p) => seleccionados[p.id]);
+      }, [catalogoProductos, seleccionados]);
+
+      const toggleProducto = (id) => {
+        setSeleccionados((prev) => ({ ...prev, [id]: !prev[id] }));
+      };
+
+      const seleccionarTodosVisibles = () => {
+        const nuevo = { ...seleccionados };
+        productosFiltrados.forEach((p) => {
+          nuevo[p.id] = true;
+        });
+        setSeleccionados(nuevo);
+      };
+
+      const limpiarSeleccion = () => {
+        setSeleccionados({});
+      };
+
+      const iniciarImpresionPDF = () => {
+        if (productosSeleccionadosLista.length === 0) {
+          return alert("Selecciona al menos un producto del catálogo para imprimir.");
+        }
+        setImprimiendoHoja(true);
+        setTimeout(() => {
+          window.print();
+          setImprimiendoHoja(false);
+        }, 250);
+      };
+
+      const abrirConteoDigital = () => {
+        if (productosSeleccionadosLista.length === 0) {
+          return alert("Selecciona al menos un producto del catálogo para iniciar el conteo digital.");
+        }
+        const inicial = {};
+        productosSeleccionadosLista.forEach((p) => {
+          inicial[p.id] = datosConteo[p.id] || { cantidad: "", unidad: "Caja", observacion: "" };
+        });
+        setDatosConteo(inicial);
+        setModoConteoDigital(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      };
+
+      const guardarConteoDigital = async (e) => {
+        e.preventDefault();
+        const incompletos = productosSeleccionadosLista.some(
+          (p) => datosConteo[p.id]?.cantidad === "" || datosConteo[p.id]?.cantidad === undefined
+        );
+        if (incompletos) {
+          return alert("Ingresa la cantidad contada en todos los productos seleccionados (puede ser 0 si no hay stock).");
+        }
+
+        const resp = prompt(
+          `¿Quién realizó este conteo físico en bodega?\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`,
+          "Diego"
+        );
+        if (!resp || !EQUIPO_CONTEO.includes(resp.trim())) {
+          if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
+          return;
+        }
+
+        setGuardandoConteo(true);
+        const ahoraStr = new Date().toLocaleString("es-CL");
+
+        try {
+          const batch = db.batch();
+          productosSeleccionadosLista.forEach((p) => {
+            const info = datosConteo[p.id];
+            const ref = db.collection("inventario_general_esperando").doc();
+            batch.set(ref, {
+              productoId: p.id,
+              codigoProducto: p.codigo || "",
+              nombreProducto: p.nombre,
+              productoDisplay: formatearDisplayProducto(p),
+              proveedor: p.proveedor || "Sin proveedor",
+              cantidadContada: Number(info.cantidad),
+              unidad: info.unidad || "Unidad",
+              observacion: (info.observacion || "").trim(),
+              contadoPor: resp.trim(),
+              fechaHoraConteo: ahoraStr,
+              timestamp: Date.now()
+            });
+          });
+
+          await batch.commit();
+          setModoConteoDigital(false);
+          setSeleccionados({});
+          setDatosConteo({});
+          alert("✅ Conteo enviado a la bandeja de espera de ajuste para Jefatura (Pedro / Bedanli).");
+        } catch (err) {
+          alert("Error al guardar conteo: " + err.message);
+        }
+        setGuardandoConteo(false);
+      };
+
+      const aprobarYAjustarInventario = async (item) => {
+        const jefe = prompt(
+          `Confirma tu nombre como Jefatura (Pedro o Bedanli) para aprobar el ajuste y enviarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`,
+          "Pedro"
+        );
+        if (!jefe || !JEFATURA.includes(jefe.trim())) {
+          if (jefe) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
+          return;
+        }
+
+        const ahoraStr = new Date().toLocaleString("es-CL");
+        const prodNorm = normalizarTexto(item.productoDisplay || item.nombreProducto);
+
+        try {
+          const detalleTexto = `Inventario General (${item.proveedor}) — Stock físico contado: ${item.cantidadContada} ${item.unidad}${item.observacion ? ` — Nota: ${item.observacion}` : ""}`;
+
+          const colHist = db.collection("historial_inventario");
+          await colHist.add({
+            producto: prodNorm,
+            unidad: item.unidad,
+            factura: "INV-GRAL",
+            corregidoPor: jefe.trim(),
+            fechaHoraAjuste: ahoraStr,
+            contadoPor: item.contadoPor,
+            fechaHoraConteo: item.fechaHoraConteo,
+            detalle: detalleTexto,
+            fechaHora: ahoraStr,
+            timestamp: Date.now()
+          });
+
+          const snap = await colHist.where("producto", "==", prodNorm).get();
+          const regs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          regs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          if (regs.length > 10) {
+            const batchClean = db.batch();
+            regs.slice(5).forEach((r) => batchClean.delete(colHist.doc(r.id)));
+            await batchClean.commit();
+          }
+
+          await db.collection("inventario_general_esperando").doc(item.id).delete();
+          alert("✅ Ajustado y enviado al Historial Acumulativo de Correcciones de Inventario.");
+        } catch (err) {
+          alert("Error al ajustar: " + err.message);
+        }
+      };
+
+      const eliminarDeEspera = async (id) => {
+        if (confirm("¿Eliminar este registro de inventario pendiente?")) {
+          try {
+            await db.collection("inventario_general_esperando").doc(id).delete();
+          } catch (err) {
+            alert(err.message);
+          }
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900">
+          {imprimiendoHoja && (
+            <div className="print-only bg-white text-black p-8">
+              <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-5">
+                <LogoPGB className="h-20 w-auto mb-2" />
+                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
+                  HOJA DE TOMA DE INVENTARIO FÍSICO EN BODEGA
+                </h2>
+                <p className="text-xs text-gray-600 mt-1">
+                  Proveedor: <strong>{proveedorActivo}</strong> | Total Ítems: <strong>{productosSeleccionadosLista.length}</strong> | Fecha: {new Date().toLocaleDateString("es-CL")}
+                </p>
+              </div>
+
+              <table className="w-full text-left text-xs border-collapse border border-gray-400">
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border border-gray-400 p-2 w-10">#</th>
+                    <th className="border border-gray-400 p-2 w-28">Código</th>
+                    <th className="border border-gray-400 p-2">Producto / Descripción</th>
+                    <th className="border border-gray-400 p-2 w-32">Proveedor</th>
+                    <th className="border border-gray-400 p-2 w-36">Conteo Físico (Cajas / Und)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productosSeleccionadosLista.map((p, idx) => (
+                    <tr key={p.id}>
+                      <td className="border border-gray-400 p-2 text-center">{idx + 1}</td>
+                      <td className="border border-gray-400 p-2 font-mono font-bold">{p.codigo || "—"}</td>
+                      <td className="border border-gray-400 p-2 font-bold">{p.nombre}</td>
+                      <td className="border border-gray-400 p-2">{p.proveedor || "—"}</td>
+                      <td className="border border-gray-400 p-2 h-9"></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="mt-12 pt-6 border-t text-xs flex justify-between">
+                <p>Contado por (Bodega): ___________________________</p>
+                <p>Supervisión (Pedro / Bedanli): ___________________________</p>
+              </div>
+            </div>
+          )}
+
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-6 no-print">
+            <div className="light-card rounded-3xl p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <a
+                    href="pgb-operacion.html"
+                    className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl transition"
+                  >
+                    ← Volver a Operación
+                  </a>
+                  <label className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shadow-sm transition">
+                    {importandoExcel ? "⏳ Cargando..." : "📥 Subir Excel (.xlsx)"}
+                    <input type="file" accept=".xlsx,.xls,.csv" onChange={importarCatalogoExcel} disabled={importandoExcel} className="hidden" />
+                  </label>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className={`h-2 w-2 rounded-full ${conectado ? "bg-emerald-500 animate-ping" : "bg-amber-500"}`}></span>
+                    {conectado ? "EN VIVO" : "CONECTANDO..."}
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+                  📦 INVENTARIO <span className="text-amber-500">GENERAL</span>
+                </h1>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Filtra por proveedor, selecciona todo o marca excepciones para PDF o conteo digital.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 shrink-0">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-center">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Catálogo</span>
+                  <span className="text-xl font-black text-slate-900">{catalogoProductos.length}</span>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 text-center">
+                  <span className="text-[10px] font-bold text-amber-800 uppercase block">Esperando Ajuste</span>
+                  <span className="text-xl font-black text-amber-600">{esperandoAjuste.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {modoConteoDigital && (
+              <form onSubmit={guardarConteoDigital} className="light-card rounded-3xl p-5 sm:p-7 border-2 border-amber-400 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                  <div>
+                    <h2 className="text-lg font-black text-amber-700">
+                      📱 Conteo Digital en Estantería ({productosSeleccionadosLista.length} productos)
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Registra el stock físico contado. Pasará directo a la bandeja de espera para ajuste de Jefatura.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setModoConteoDigital(false)}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer"
+                  >
+                    ✕ Cancelar
+                  </button>
+                </div>
+
+                <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                  {productosSeleccionadosLista.map((p) => {
+                    const estado = datosConteo[p.id] || { cantidad: "", unidad: "Caja", observacion: "" };
+                    return (
+                      <div key={p.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                        <div>
+                          <span className="font-black text-slate-900 text-sm block">
+                            {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}
+                          </span>
+                          <span className="text-[11px] font-bold text-amber-700">
+                            Proveedor: {p.proveedor || "General"}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-600 block mb-1">Cantidad Física *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="Ej: 12"
+                              value={estado.cantidad}
+                              onChange={(e) => setDatosConteo({ ...datosConteo, [p.id]: { ...estado, cantidad: e.target.value } })}
+                              className="w-full bg-white border border-amber-400 rounded-xl px-3 py-2 text-sm font-black text-slate-900 outline-none"
+                              required
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-600 block mb-1">Unidad</label>
+                            <select
+                              value={estado.unidad}
+                              onChange={(e) => setDatosConteo({ ...datosConteo, [p.id]: { ...estado, unidad: e.target.value } })}
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none"
+                            >
+                              {UNIDADES.map((u) => (
+                                <option key={u} value={u}>{u}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-600 block mb-1">Observación (Opcional)</label>
+                            <input
+                              type="text"
+                              placeholder="Ej: Pasillo 2 / Vence pronto"
+                              value={estado.observacion}
+                              onChange={(e) => setDatosConteo({ ...datosConteo, [p.id]: { ...estado, observacion: e.target.value } })}
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={guardandoConteo}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer"
+                >
+                  {guardandoConteo ? "⏳ Guardando conteo..." : "💾 Guardar Conteo y Enviar a Espera de Ajuste"}
+                </button>
+              </form>
+            )}
+
+            {!modoConteoDigital && (
+              <div className="light-card rounded-3xl p-5 sm:p-7 space-y-5">
+                <div>
+                  <label className="text-xs font-extrabold uppercase tracking-wider text-slate-500 block mb-2">
+                    🏭 Filtrar por Proveedor:
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProveedorActivo("TODOS")}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                        proveedorActivo === "TODOS"
+                          ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+                          : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+                      }`}
+                    >
+                      Todos ({catalogoProductos.length})
+                    </button>
+
+                    {proveedoresDisponibles.map((prov) => {
+                      const count = catalogoProductos.filter((p) => normalizarTexto(p.proveedor) === prov).length;
+                      return (
+                        <button
+                          type="button"
+                          key={prov}
+                          onClick={() => setProveedorActivo(prov)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                            proveedorActivo === prov
+                              ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm"
+                              : "bg-white text-slate-700 border-slate-300 hover:bg-amber-50"
+                          }`}
+                        >
+                          {prov} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="🔍 Buscar producto por nombre, código o proveedor..."
+                    className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none"
+                  />
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-bold text-slate-500">
+                      Mostrando {productosFiltrados.length} productos •{" "}
+                      <strong className="text-amber-700">{productosSeleccionadosLista.length} seleccionados</strong>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={seleccionarTodosVisibles}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-1.5 rounded-lg border border-slate-300 cursor-pointer"
+                      >
+                        ✓ Seleccionar visibles ({productosFiltrados.length})
+                      </button>
+                      {productosSeleccionadosLista.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={limpiarSeleccion}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-3 py-1.5 rounded-lg border border-rose-200 cursor-pointer"
+                        >
+                          Limpiar ({productosSeleccionadosLista.length})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-2xl bg-amber-50/80 border border-amber-300">
+                  <button
+                    type="button"
+                    disabled={productosSeleccionadosLista.length === 0}
+                    onClick={iniciarImpresionPDF}
+                    className="py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    🖨️ Imprimir Hoja PDF ({productosSeleccionadosLista.length})
+                  </button>
+                  <button
+                    type="button"
+                    disabled={productosSeleccionadosLista.length === 0}
+                    onClick={abrirConteoDigital}
+                    className="py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-xs sm:text-sm shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    📱 Hacer Conteo Digital ({productosSeleccionadosLista.length})
+                  </button>
+                </div>
+
+                {productosFiltrados.length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-10 text-center text-xs text-slate-500">
+                    No se encontraron productos con ese filtro.
+                  </div>
+                ) : (
+                  <div className="max-h-[430px] overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-2xl bg-white">
+                    {productosFiltrados.map((p) => {
+                      const marcado = !!seleccionados[p.id];
+                      return (
+                        <label
+                          key={p.id}
+                          className={`flex items-center justify-between gap-3 px-4 py-3 cursor-pointer transition ${
+                            marcado ? "bg-amber-50/90" : "hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={marcado}
+                              onChange={() => toggleProducto(p.id)}
+                              className="w-4 h-4 accent-amber-500 shrink-0 cursor-pointer"
+                            />
+                            <div className="min-w-0">
+                              <span className="text-xs sm:text-sm font-bold text-slate-900 block truncate">
+                                {p.codigo && (
+                                  <span className="font-mono text-amber-700 mr-1.5">[{p.codigo}]</span>
+                                )}
+                                {p.nombre}
+                              </span>
+                            </div>
+                          </div>
+                          {p.proveedor && (
+                            <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
+                              {p.proveedor}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="light-card rounded-3xl p-5 sm:p-7 border-2 border-amber-200 space-y-4">
+              <div>
+                <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                  ⏳ Registro de Inventario Esperando Ajuste ({esperandoAjuste.length})
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Conteos digitales terminados por bodega. Al aprobar Jefatura, pasan automáticamente al{" "}
+                  <strong className="text-emerald-700">Historial Acumulativo de Correcciones</strong> en Cuadratura.
+                </p>
+              </div>
+
+              {esperandoAjuste.length === 0 ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center text-xs text-slate-500">
+                  No hay conteos de inventario esperando ajuste en este momento.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {esperandoAjuste.map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-black text-slate-900 text-sm">{item.productoDisplay}</span>
+                          <span className="bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-0.5 rounded-lg font-black">
+                            Contado: {item.cantidadContada} {item.unidad}
+                          </span>
+                          <span className="bg-white text-slate-600 border border-slate-300 px-2 py-0.5 rounded-lg font-bold text-[10px]">
+                            {item.proveedor}
+                          </span>
+                        </div>
+                        <p className="text-slate-600">
+                          📋 Contado por <strong className="text-slate-900">{item.contadoPor}</strong> el {item.fechaHoraConteo}
+                          {item.observacion ? ` — Nota: "${item.observacion}"` : ""}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => aprobarYAjustarInventario(item)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2.5 rounded-xl shadow-sm transition cursor-pointer"
+                        >
+                          ⚖️ Ajustar y Pasar a Historial
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => eliminarDeEspera(item.id)}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-2.5 rounded-xl font-bold transition cursor-pointer"
+                          title="Eliminar"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<AppInventario />);
+  </script>
+</body>
+</html>
