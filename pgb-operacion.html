@@ -2230,7 +2230,12 @@
                               <button
                                 type="button"
                                 key={m}
-                                onClick={() => setMotivoBodega(m)}
+                                onClick={() => {
+                                  setMotivoBodega(m);
+                                  if (m !== "Compra personal (Descuento sueldo)" && !PERSONAL_EQUIPO.includes(responsableBodega)) {
+                                    setResponsableBodega(PERSONAL_EQUIPO[0]);
+                                  }
+                                }}
                                 className={`py-2 px-3 rounded-xl text-xs font-bold border text-left transition cursor-pointer ${
                                   motivoBodega === m ? "bg-amber-100 text-amber-950 border-amber-500 shadow-sm" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
                                 }`}
@@ -2243,7 +2248,11 @@
                       </div>
 
                       <div>
-                        <label className="text-xs font-bold text-slate-600 block mb-2">Implicado / Responsable</label>
+                        <label className="text-xs font-bold text-slate-600 block mb-2">
+                          {motivoBodega === "Compra personal (Descuento sueldo)"
+                            ? "👤 Colaborador que compra (Bodega / Admin / Ventas)"
+                            : "Implicado / Responsable"}
+                        </label>
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                           {PERSONAL_EQUIPO.map(p => (
                             <button
@@ -2258,6 +2267,28 @@
                             </button>
                           ))}
                         </div>
+
+                        {motivoBodega === "Compra personal (Descuento sueldo)" && (
+                          <div className="mt-3 pt-3 border-t border-slate-200">
+                            <span className="text-[11px] font-extrabold text-indigo-700 uppercase block mb-2">
+                              💼 Equipo de Ventas:
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {VENDEDORES.map(v => (
+                                <button
+                                  type="button"
+                                  key={v}
+                                  onClick={() => setResponsableBodega(v)}
+                                  className={`py-2 px-2 rounded-xl text-xs font-black border transition cursor-pointer ${
+                                    responsableBodega === v ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-indigo-50/60 text-indigo-950 border-indigo-200 hover:bg-indigo-100"
+                                  }`}
+                                >
+                                  {v}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div>
