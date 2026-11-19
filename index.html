@@ -75,8 +75,34 @@
       </svg>
     );
 
+    const IconUpload = ({ className = "w-4 h-4" }) => (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" y1="3" x2="12" y2="15" />
+      </svg>
+    );
+
+    const SwitchToggle = ({ checked, onChange }) => (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+          checked ? "bg-slate-900" : "bg-slate-200"
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+            checked ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
+    );
+
     const CATALOGO_18_MODULOS = [
-      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Multi-Empresa y Perfil", desc: "Identidad corporativa, marca y aislamiento de datos por RUT.", archivo: "#config_equipo", listo: true },
+      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Identidad y Logo PNG", desc: "Logotipo corporativo en alta definición para sistema y reportes PDF.", archivo: "#config_equipo", listo: true },
       { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, vendedores, bodega y despacho.", archivo: "#config_equipo", listo: true },
       { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga masiva en Excel (.xlsx) vinculada a toda la operación.", archivo: "#config_catalogo", listo: true },
       { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Conexión para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis", listo: true },
@@ -119,6 +145,7 @@
       const [empresa, setEmpresa] = useState(null);
       const [todasEmpresas, setTodasEmpresas] = useState([]);
       const [tabPanel, setTabPanel] = useState("modulos");
+      const [subiendoLogo, setSubiendoLogo] = useState(false);
 
       const [nuevoNombreMiembro, setNuevoNombreMiembro] = useState("");
       const [nuevoRolMiembro, setNuevoRolMiembro] = useState(ROLES_JERARQUIA[1]);
@@ -145,7 +172,25 @@
       useEffect(() => {
         const onHash = () => setModoSuperAdmin(window.location.hash === "#/comando");
         window.addEventListener("hashchange", onHash);
-        auth.signInAnonymously().catch(() => {});
+
+        auth.signInAnonymously().then(() => {
+          // Garantizar que PGB Distribution Chile SpA exista sin sobrescribir su configuración ni su logo previo
+          const pgbRef = db.collection("saas_empresas").doc("769497226");
+          pgbRef.get().then((snap) => {
+            if (!snap.exists) {
+              const modulosTodos = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {});
+              pgbRef.set({
+                rut: "76.949.722-6",
+                nombre: "PGB Distribution Chile SpA",
+                rubro: "Distribuidora / Mayorista",
+                activa: true,
+                equipo: [],
+                modulosActivos: modulosTodos,
+                creadoEn: new Date().toISOString()
+              }, { merge: true });
+            }
+          }).catch(() => {});
+        }).catch(() => {});
 
         const unsubCfg = db.collection("saas_config").doc("master").onSnapshot((doc) => {
           if (doc.exists && doc.data().pin) {
@@ -231,6 +276,37 @@
         setClaveMaestraGuardada(nuevaClaveMaestra.trim());
         setNuevaClaveMaestra("");
         alert("Clave maestra actualizada correctamente.");
+      };
+
+      // CARGADOR DE LOGO PNG (SINCRONIZADO CON OPERACIÓN, INVENTARIO Y REPORTES PDF)
+      const subirLogoEmpresaPng = async (empresaId, e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 900 * 1024) {
+          alert("El archivo PNG supera los 900 KB. Usa una versión optimizada para que cargue instantáneamente en reportes PDF.");
+          e.target.value = "";
+          return;
+        }
+        setSubiendoLogo(true);
+        try {
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            const base64Str = ev.target.result;
+            await db.collection("saas_empresas").doc(empresaId).set({ logoBase64: base64Str }, { merge: true });
+            setSubiendoLogo(false);
+            alert("Logotipo PNG guardado y sincronizado en toda la plataforma y reportes PDF.");
+          };
+          reader.readAsDataURL(file);
+        } catch (err) {
+          setSubiendoLogo(false);
+          alert("Error al cargar logotipo: " + err.message);
+        }
+        e.target.value = "";
+      };
+
+      const eliminarLogoEmpresa = async (empresaId) => {
+        if (!confirm("¿Eliminar el logotipo cargado de esta empresa?")) return;
+        await db.collection("saas_empresas").doc(empresaId).update({ logoBase64: "" });
       };
 
       const ingresarConRut = async (e) => {
@@ -408,6 +484,11 @@
         });
       };
 
+      const toggleEstadoEmpresa = async (emp) => {
+        const nuevoEstado = emp.activa === false ? true : false;
+        await db.collection("saas_empresas").doc(emp.id).update({ activa: nuevoEstado });
+      };
+
       const catalogoFiltrado = useMemo(() => {
         const q = busquedaCat.trim().toLowerCase();
         if (!q) return catalogoLocal;
@@ -427,7 +508,7 @@
         window.location.href = mod.archivo;
       };
 
-      // CONSOLA DE COMANDO SUPER ADMIN (#/comando) - ESTÉTICA CORPORATIVA BLANCA
+      // CONSOLA DE COMANDO SUPER ADMIN (#/comando) - ESTÉTICA CORPORATIVA BLANCA + SWITCHES + CARGADOR LOGO PNG
       if (modoSuperAdmin) {
         if (!adminAutenticado) {
           return (
@@ -436,7 +517,7 @@
                 <div className="space-y-1">
                   <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Consola de Comando</span>
                   <h1 className="text-xl font-extrabold text-slate-900">Acceso Administrativo</h1>
-                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gestionar empresas y módulos.</p>
+                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gestionar empresas, logotipos y módulos.</p>
                 </div>
                 <div>
                   <input
@@ -468,11 +549,11 @@
 
         return (
           <div className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-8">
-            <div className="max-w-5xl mx-auto space-y-6">
+            <div className="max-w-6xl mx-auto space-y-6">
               <div className="corp-card rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">NEXUS ERP • Administración Central</span>
-                  <h1 className="text-2xl font-extrabold text-slate-900">Gestión de Empresas y Módulos</h1>
+                  <h1 className="text-2xl font-extrabold text-slate-900">Gestión de Empresas, Logotipos PNG y Switches</h1>
                 </div>
                 <button
                   onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
@@ -486,7 +567,7 @@
               <form onSubmit={crearEmpresaDesdeSuperAdmin} className="corp-card rounded-2xl p-6 space-y-4">
                 <div>
                   <h2 className="text-base font-extrabold text-slate-900">Registrar Nueva Empresa Cliente</h2>
-                  <p className="text-xs text-slate-500">Habilita una organización con acceso inmediato a los 18 módulos del sistema.</p>
+                  <p className="text-xs text-slate-500">Habilita una organización con acceso inmediato a los 18 módulos del sistema sin alterar empresas existentes.</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <input
@@ -525,15 +606,13 @@
                     required
                   />
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                  <button
-                    type="submit"
-                    disabled={creandoEmpresaAdmin}
-                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer"
-                  >
-                    {creandoEmpresaAdmin ? "Registrando..." : "Crear Empresa y Habilitar Módulos"}
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  disabled={creandoEmpresaAdmin}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer"
+                >
+                  {creandoEmpresaAdmin ? "Registrando..." : "Crear Empresa y Habilitar Módulos"}
+                </button>
               </form>
 
               {/* CONFIGURACIÓN DE CLAVE MAESTRA */}
@@ -556,46 +635,95 @@
                 </div>
               </form>
 
-              {/* LISTADO DE EMPRESAS */}
-              {todasEmpresas.map((emp) => (
-                <div key={emp.id} className="corp-card rounded-2xl p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h2 className="text-lg font-extrabold text-slate-900">{emp.nombre}</h2>
-                      <p className="text-xs text-slate-500">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        localStorage.setItem("nexus_empresa_rut", emp.id);
-                        setRutActivo(emp.id);
-                        window.location.hash = "";
-                        setModoSuperAdmin(false);
-                      }}
-                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
-                    >
-                      Acceder al Espacio
-                    </button>
-                  </div>
+              {/* LISTADO DE EMPRESAS CON CARGADOR DE LOGO PNG Y SWITCHES DE MÓDULOS */}
+              {todasEmpresas.map((emp) => {
+                const empresaActiva = emp.activa !== false;
+                return (
+                  <div key={emp.id} className="corp-card rounded-2xl p-6 space-y-5">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-20 h-14 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center p-1.5 overflow-hidden shrink-0">
+                          {emp.logoBase64 ? (
+                            <img src={emp.logoBase64} alt={emp.nombre} className="max-h-full max-w-full object-contain" />
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400 text-center">Sin Logo PNG</span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2.5">
+                            <h2 className="text-lg font-extrabold text-slate-900">{emp.nombre}</h2>
+                            <SwitchToggle checked={empresaActiva} onChange={() => toggleEstadoEmpresa(emp)} />
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${empresaActiva ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                              {empresaActiva ? "Activa" : "Pausada"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
+                        </div>
+                      </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                    {CATALOGO_18_MODULOS.map((m) => {
-                      const encendido = emp.modulosActivos?.[m.id] !== false;
-                      return (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer transition">
+                          <IconUpload className="w-3.5 h-3.5" />
+                          <span>{subiendoLogo ? "Cargando..." : "Cargar Logo PNG"}</span>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(e) => subirLogoEmpresaPng(emp.id, e)}
+                            disabled={subiendoLogo}
+                            className="hidden"
+                          />
+                        </label>
+                        {emp.logoBase64 && (
+                          <button
+                            type="button"
+                            onClick={() => eliminarLogoEmpresa(emp.id)}
+                            className="text-xs font-bold text-slate-400 hover:text-rose-600 px-2.5 py-2 rounded-xl cursor-pointer"
+                          >
+                            Quitar Logo
+                          </button>
+                        )}
                         <button
-                          key={m.id}
-                          onClick={() => toggleModuloEmpresa(emp, m.id)}
-                          className={`p-2.5 rounded-xl border text-left text-[11px] font-semibold transition cursor-pointer ${
-                            encendido ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-slate-50 border-slate-200 text-slate-400"
-                          }`}
+                          onClick={() => {
+                            localStorage.setItem("nexus_empresa_rut", emp.id);
+                            setRutActivo(emp.id);
+                            window.location.hash = "";
+                            setModoSuperAdmin(false);
+                          }}
+                          className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
                         >
-                          <span className="block font-extrabold">M{m.num}</span>
-                          <span className="truncate block">{m.nombre}</span>
+                          Entrar al Espacio
                         </button>
-                      );
-                    })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2.5">
+                        Interruptores de Módulos Habilitados
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                        {CATALOGO_18_MODULOS.map((m) => {
+                          const encendido = emp.modulosActivos?.[m.id] !== false;
+                          return (
+                            <div
+                              key={m.id}
+                              onClick={() => toggleModuloEmpresa(emp, m.id)}
+                              className={`p-2.5 rounded-xl border transition cursor-pointer flex flex-col justify-between gap-2 ${
+                                encendido ? "bg-white border-slate-300 text-slate-900" : "bg-slate-50 border-slate-200 text-slate-400"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-extrabold text-slate-500">M{m.num}</span>
+                                <SwitchToggle checked={encendido} onChange={() => {}} />
+                              </div>
+                              <span className="text-[11px] font-bold leading-tight">{m.nombre}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -673,7 +801,7 @@
         );
       }
 
-      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA (ESTÉTICA BLANCA MINIMALISTA SIN EMOJIS)
+      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA (ESTÉTICA BLANCA MINIMALISTA SIN EMOJIS + LOGO PNG)
       const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] !== false);
       const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
       const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
@@ -681,22 +809,33 @@
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-6">
           <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1 rounded-full">
-                  RUT {empresa.rut}
-                </span>
-                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-3 py-1 rounded-full">
-                  {modulosHabilitados.length} Módulos Activos
-                </span>
+            <div className="flex items-center gap-4">
+              {empresa.logoBase64 ? (
+                <div className="w-24 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
+                  <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
+                </div>
+              ) : (
+                <div className="w-14 h-14 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center shrink-0">
+                  <IconBuilding className="w-6 h-6 text-slate-400" />
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1 rounded-full">
+                    RUT {empresa.rut}
+                  </span>
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-3 py-1 rounded-full">
+                    {modulosHabilitados.length} Módulos Activos
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+                  {empresa.nombre}
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  Configura tu logotipo, estructura tu equipo, carga tu catálogo maestro y accede a tus módulos.
+                </p>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2.5">
-                <IconBuilding className="w-6 h-6 text-slate-400" />
-                <span>{empresa.nombre}</span>
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-500">
-                Configura la jerarquía de tu equipo, carga tu catálogo maestro y accede a tus módulos operativos.
-              </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -716,12 +855,12 @@
               className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
             >
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">01 • Estructura</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">01 • Identidad y Jerarquía</span>
                 <p className="text-sm font-extrabold text-slate-900 mt-0.5">
-                  {equipoLista.length > 0 ? `${equipoLista.length} Colaboradores` : "Configurar Equipo y Roles"}
+                  {equipoLista.length > 0 ? `${equipoLista.length} Colaboradores` : "Logo PNG y Equipo"}
                 </p>
               </div>
-              <span className="text-xs font-bold text-slate-500">{equipoLista.length > 0 ? "Configurado" : "Pendiente"}</span>
+              <span className="text-xs font-bold text-slate-500">{empresa.logoBase64 || equipoLista.length > 0 ? "Configurado" : "Editar"}</span>
             </button>
 
             <button
@@ -763,7 +902,7 @@
               onClick={() => setTabPanel("equipo")}
               className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "equipo" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
             >
-              Jerarquía y Equipo ({equipoLista.length})
+              Identidad y Equipo ({equipoLista.length})
             </button>
             <button
               onClick={() => setTabPanel("catalogo")}
@@ -812,59 +951,104 @@
           )}
 
           {tabPanel === "equipo" && (
-            <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Estructura y Jerarquía de la Organización</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Registra jefaturas, vendedores, personal de bodega y despacho. Los módulos operativos utilizarán este directorio.
-                </p>
+            <div className="space-y-6">
+              {/* CARGADOR DE LOGOTIPO PNG DE LA EMPRESA */}
+              <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-28 h-20 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center p-2 shrink-0">
+                    {empresa.logoBase64 ? (
+                      <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
+                    ) : (
+                      <span className="text-[11px] font-semibold text-slate-400 text-center">Sin Logo PNG</span>
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900">Logotipo Corporativo (PNG / Alta Definición)</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Se aplica automáticamente en los encabezados operativos, hojas de conteo y reportes PDF oficiales.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <label className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition">
+                    <IconUpload className="w-4 h-4" />
+                    <span>{subiendoLogo ? "Subiendo..." : "Subir Logo PNG"}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(e) => subirLogoEmpresaPng(empresa.id, e)}
+                      disabled={subiendoLogo}
+                      className="hidden"
+                    />
+                  </label>
+                  {empresa.logoBase64 && (
+                    <button
+                      type="button"
+                      onClick={() => eliminarLogoEmpresa(empresa.id)}
+                      className="text-xs font-bold text-slate-500 hover:text-rose-600 px-3 py-2.5 rounded-xl border border-slate-200 cursor-pointer"
+                    >
+                      Eliminar
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <form onSubmit={agregarMiembroEquipo} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <input
-                  type="text"
-                  value={nuevoNombreMiembro}
-                  onChange={(e) => setNuevoNombreMiembro(e.target.value)}
-                  placeholder="Nombre completo del colaborador..."
-                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-slate-900"
-                  required
-                />
-                <select
-                  value={nuevoRolMiembro}
-                  onChange={(e) => setNuevoRolMiembro(e.target.value)}
-                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
-                >
-                  {ROLES_JERARQUIA.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer">
-                  Agregar Colaborador
-                </button>
-              </form>
+              {/* JERARQUÍA Y COLABORADORES */}
+              <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900">Estructura y Jerarquía de la Organización</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Registra jefaturas, vendedores, personal de bodega y despacho. Los módulos operativos utilizarán este directorio.
+                  </p>
+                </div>
 
-              {equipoLista.length === 0 ? (
-                <div className="text-center p-8 bg-slate-50 rounded-xl text-xs text-slate-500">
-                  Aún no hay colaboradores registrados en esta empresa.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {equipoLista.map((m) => (
-                    <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-bold text-slate-900">{m.nombre}</p>
-                        <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded mt-1 inline-block">
-                          {m.rol}
-                        </span>
+                <form onSubmit={agregarMiembroEquipo} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <input
+                    type="text"
+                    value={nuevoNombreMiembro}
+                    onChange={(e) => setNuevoNombreMiembro(e.target.value)}
+                    placeholder="Nombre completo del colaborador..."
+                    className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-slate-900"
+                    required
+                  />
+                  <select
+                    value={nuevoRolMiembro}
+                    onChange={(e) => setNuevoRolMiembro(e.target.value)}
+                    className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
+                  >
+                    {ROLES_JERARQUIA.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer">
+                    Agregar Colaborador
+                  </button>
+                </form>
+
+                {equipoLista.length === 0 ? (
+                  <div className="text-center p-8 bg-slate-50 rounded-xl text-xs text-slate-500">
+                    Aún no hay colaboradores registrados en esta empresa.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {equipoLista.map((m) => (
+                      <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">{m.nombre}</p>
+                          <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded mt-1 inline-block">
+                            {m.rol}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => eliminarMiembroEquipo(m.id)}
+                          className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1 cursor-pointer"
+                        >
+                          Eliminar
+                        </button>
                       </div>
-                      <button
-                        onClick={() => eliminarMiembroEquipo(m.id)}
-                        className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1 cursor-pointer"
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
