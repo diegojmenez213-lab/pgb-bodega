@@ -11,13 +11,14 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-ticket { font-family: 'JetBrains Mono', monospace; }
     .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
     .print-only { display: none; }
     @media print {
-      body { background: white !important; color: black !important; }
+      body { background: white !important; color: black !important; margin: 0; padding: 0; }
       .no-print { display: none !important; }
       .print-only { display: block !important; }
     }
@@ -68,6 +69,41 @@
       industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700", sw: "bg-amber-700" }
     };
 
+    const AYUDA_APIS = {
+      sii: {
+        titulo: "Cómo obtener tu API Key en OpenFactura / SII",
+        pasos: [
+          "1. Inicia sesión en tu portal de OpenFactura (Haulmer) o tu proveedor DTE autorizado por el SII.",
+          "2. Ve al menú Configuración → Integraciones / API Keys.",
+          "3. Copia tu API Key de Producción y verifica que tengas cargados tus folios CAF (33 y 39)."
+        ]
+      },
+      meli: {
+        titulo: "Cómo obtener Client ID y Secret en Mercado Libre",
+        pasos: [
+          "1. Entra a developers.mercadolibre.cl con la cuenta principal de la tienda.",
+          "2. Abre 'Mis Aplicaciones' → 'Crear nueva aplicación' (permisos: Órdenes, Ítems y Facturación).",
+          "3. Copia el App ID (Client ID) y el Client Secret generados en la ficha de la app."
+        ]
+      },
+      falabella: {
+        titulo: "Cómo obtener API Key en Falabella Seller Center",
+        pasos: [
+          "1. Ingresa a sellercenter.falabella.com con usuario administrador.",
+          "2. Haz clic en Configuración (arriba a la derecha) → 'Administrar Usuarios'.",
+          "3. Copia el Correo (User ID) y la columna 'API Key' de tu usuario."
+        ]
+      },
+      lider: {
+        titulo: "Cómo obtener el Token en Lider / Walmart Marketplace",
+        pasos: [
+          "1. Entra a marketplace.walmartchile.cl (Seller Center Lider).",
+          "2. Dirígete a Configuración → Credenciales API / Integración.",
+          "3. Genera o copia el Client Secret / Token de acceso."
+        ]
+      }
+    };
+
     const SwitchToggle = ({ checked, onChange, colorClass = "bg-slate-900" }) => (
       <button
         type="button"
@@ -86,6 +122,94 @@
       </button>
     );
 
+    // Simulación visual fiel del Timbre Electrónico PDF417 del SII
+    const TimbrePdf417Svg = () => (
+      <svg viewBox="0 0 260 68" className="w-full max-w-[250px] h-16 mx-auto my-2" aria-label="Timbre Electrónico SII">
+        <rect x="0" y="0" width="260" height="68" fill="#ffffff" />
+        {Array.from({ length: 64 }).map((_, i) => {
+          const x = 4 + i * 3.9;
+          const h1 = ((i * 7 + 3) % 5) * 4 + 38;
+          const w = (i % 3 === 0) ? 2.4 : 1.4;
+          return <rect key={i} x={x} y={(68 - h1) / 2} width={w} height={h1} fill="#0f172a" />;
+        })}
+      </svg>
+    );
+
+    // Documento Térmico Oficial (Formato Boleta 39 y Factura 33)
+    const DocumentoTermicoSii = ({ orden, empresa, datosEmisor }) => {
+      if (!orden) return null;
+      const esFactura = orden.tipoDte === 33;
+      const total = Number(orden.totalClp || 0);
+      const neto = Math.round(total / 1.19);
+      const iva = total - neto;
+      const fechaIso = orden.fechaIso || new Date(orden.timestamp || Date.now()).toISOString().slice(0, 10);
+
+      return (
+        <div className="bg-white text-black p-6 max-w-[360px] mx-auto border border-slate-300 shadow-sm font-ticket text-[12px] leading-relaxed">
+          <div className="space-y-0.5 text-left">
+            <p className="font-bold uppercase text-[13px]">{(empresa?.nombre || "TECNOSHOP COMPANY SPA").toUpperCase()}</p>
+            <p>{empresa?.rut || "77.528.042-5"}</p>
+            <p className="uppercase">Giro: {datosEmisor.giro || "VENTAS POR INTERNET DE ARTICULOS PARA EL HOGAR, DEPORTE Y OTROS"}</p>
+            <p className="uppercase">{datosEmisor.direccion || "MERCED 838 A INT OF 117"}</p>
+            <p>{datosEmisor.comuna || "Santiago"}</p>
+            <p className="pt-1 font-bold">
+              {esFactura ? "FACTURA ELECTRÓNICA" : "BOLETA ELECTRÓNICA"} NUMERO: {Number(orden.folioSii || 0).toLocaleString("es-CL")}
+            </p>
+            <p>REF. VENDEDOR: {orden.ordenExterna}</p>
+            <p>Fecha: {fechaIso}</p>
+          </div>
+
+          <div className="mt-4 pt-2 border-t border-dashed border-slate-400 space-y-1">
+            {esFactura ? (
+              <>
+                <p>Señor(es): <span className="uppercase">{orden.comprador}</span></p>
+                <p>RUT Receptor: {orden.rutComprador}</p>
+                <p>Dirección: {orden.direccionCliente || "Santiago"}</p>
+              </>
+            ) : (
+              <p>Dirección: {orden.direccionCliente || "Santiago"}</p>
+            )}
+          </div>
+
+          <div className="mt-4 space-y-1.5">
+            <div className="flex justify-between items-start gap-2">
+              <span className="uppercase">
+                {orden.cantidad > 1 ? `${orden.cantidad}x ` : ""}{orden.productoNombre || "Venta"}
+              </span>
+              <span className="font-bold shrink-0">$ {total.toLocaleString("es-CL")}</span>
+            </div>
+
+            {esFactura ? (
+              <div className="pt-3 border-t border-dashed border-slate-400 space-y-0.5 text-right">
+                <p>Monto Neto: $ {neto.toLocaleString("es-CL")}</p>
+                <p>IVA (19%): $ {iva.toLocaleString("es-CL")}</p>
+                <p className="font-bold text-[13px]">Total Factura: $ {total.toLocaleString("es-CL")}</p>
+              </div>
+            ) : (
+              <p className="pt-3">
+                El IVA incluido en esta boleta es de: $ {iva.toLocaleString("es-CL")}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-5 text-center">
+            <TimbrePdf417Svg />
+            <div className="text-left text-[11px] mt-1 space-y-0.5">
+              <p>Timbre Electrónico SII</p>
+              <p>Res. 99 de 2014</p>
+              <p>Verifique documento en sii.cl</p>
+            </div>
+          </div>
+
+          {orden.esSimulacion !== false && (
+            <div className="mt-4 pt-2 border-t border-amber-300 text-center text-[10px] font-sans font-bold text-amber-800 bg-amber-50 py-1 rounded">
+              VISTA DE SIMULACIÓN (Aún no timbrada en vivo por SII)
+            </div>
+          )}
+        </div>
+      );
+    };
+
     function AppEcommerceSII() {
       const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "775280425");
       const [empresa, setEmpresa] = useState(null);
@@ -102,11 +226,19 @@
         siiApiKey: "",
         siiModoAutomatico: true
       });
+
+      const [datosEmisor, setDatosEmisor] = useState({
+        giro: "VENTAS POR INTERNET DE ARTICULOS PARA EL HOGAR, DEPORTE Y OTROS",
+        direccion: "MERCED 838 A INT OF 117",
+        comuna: "Santiago"
+      });
+
+      const [ayudaAbierta, setAyudaAbierta] = useState(null);
       const [guardandoApis, setGuardandoApis] = useState(false);
 
       const [cafConfig, setCafConfig] = useState({
-        boleta39Actual: 14820,
-        boleta39Limite: 15000,
+        boleta39Actual: 22016,
+        boleta39Limite: 25000,
         factura33Actual: 3290,
         factura33Limite: 3500
       });
@@ -115,6 +247,7 @@
       const [filtroCanal, setFiltroCanal] = useState("TODOS");
       const [busqueda, setBusqueda] = useState("");
       const [colaImprimir, setColaImprimir] = useState(null);
+      const [dteVisualizando, setDteVisualizando] = useState(null);
 
       const [mostrarNuevaOrden, setMostrarNuevaOrden] = useState(false);
       const [canalNuevo, setCanalNuevo] = useState("Mercado Libre");
@@ -135,12 +268,13 @@
               const data = { id: doc.id, ...doc.data() };
               setEmpresa(data);
               if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
+              if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
               if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
             } else {
               setEmpresa({
                 id: rutActivo,
                 rut: formatearRut(rutActivo),
-                nombre: `Empresa ${formatearRut(rutActivo)}`,
+                nombre: "TECNOSHOP COMPANY SPA",
                 paleta: "ecommerce"
               });
             }
@@ -195,10 +329,10 @@
         e.preventDefault();
         setGuardandoApis(true);
         try {
-          await empRef().set({ apis: apisForm }, { merge: true });
-          alert("Credenciales API y configuración automática del SII vinculadas a " + (empresa?.nombre || rutActivo) + ".");
+          await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
+          alert("Credenciales API y datos tributarios guardados.");
         } catch (err) {
-          alert("Error al guardar credenciales: " + err.message);
+          alert("Error al guardar: " + err.message);
         }
         setGuardandoApis(false);
       };
@@ -215,7 +349,7 @@
         const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
           id: "manual",
           codigo: "SKU-001",
-          nombre: skuSeleccionado || "PRODUCTO E-COMMERCE",
+          nombre: skuSeleccionado || "Venta",
           stockOnline: 10
         };
 
@@ -225,12 +359,14 @@
         const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
         const colaDestino = canalNuevo === "Lider" ? "lider" : "general";
         const autoSii = apisForm.siiModoAutomatico !== false;
+        const esRealSii = Boolean(estadoConexiones.sii);
 
         const nuevaOrden = {
           canal: canalNuevo,
-          ordenExterna: ordenExtNuevo.trim() || `${canalNuevo.slice(0, 3).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`,
+          ordenExterna: ordenExtNuevo.trim() || `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
           comprador: compradorNuevo.trim() || "Cliente Marketplace",
           rutComprador: esFactura33 ? formatearRut(rutLim) : "",
+          direccionCliente: "Santiago",
           productoId: prodObj.id,
           codigoSku: prodObj.codigo || "S/C",
           productoNombre: prodObj.nombre,
@@ -238,12 +374,11 @@
           totalClp: Number(totalNuevo),
           tipoDte,
           folioSii: autoSii ? folioAsignado : "PENDIENTE",
-          estadoSii: autoSii
-            ? `Emitido Automático (${apisForm.siiProveedor || "SII"})`
-            : "En espera de emisión manual",
+          esSimulacion: !esRealSii,
           colaImpresion: colaDestino,
           etiquetaImpresa: false,
           despachado: false,
+          fechaIso: new Date().toISOString().slice(0, 10),
           fecha: new Date().toLocaleString("es-CL"),
           timestamp: Date.now()
         };
@@ -271,36 +406,17 @@
           setOrdenExtNuevo("");
           setCompradorNuevo("");
           setRutCompradorNuevo("");
-          alert(
-            autoSii
-              ? `Orden procesada, stock descontado en todos los canales y ${esFactura33 ? "Factura 33" : "Boleta 39"} Folio #${folioAsignado} emitida automáticamente al SII.`
-              : "Orden ingresada y stock descontado. Emisión DTE en cola manual."
-          );
         } catch (err) {
           alert("Error al procesar orden: " + err.message);
         }
       };
 
-      const emitirDteManual = async (orden) => {
-        const esFactura33 = orden.tipoDte === 33;
-        const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
-        const batch = db.batch();
-        batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
-          folioSii: folioAsignado,
-          estadoSii: `Emitido (${apisForm.siiProveedor || "SII"})`
-        });
-        batch.set(
-          empRef(),
-          {
-            cafConfig: {
-              ...cafConfig,
-              factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
-              boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
-            }
-          },
-          { merge: true }
-        );
-        await batch.commit();
+      const eliminarSimulacion = async (orden) => {
+        if (orden.esSimulacion === false) {
+          return alert("Este documento fue emitido en vivo por el SII y no puede eliminarse por normativa tributaria.");
+        }
+        if (!confirm(`¿Eliminar la simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
+        await empRef().collection("ecommerce_ordenes").doc(orden.id).delete();
       };
 
       const actualizarStockProducto = async (prodId, nuevoStock) => {
@@ -309,8 +425,8 @@
 
       const guardarNuevosFoliosCaf = async (e) => {
         e.preventDefault();
-        await empRef().set({ cafConfig }, { merge: true });
-        alert("Rangos de folios CAF actualizados.");
+        await empRef().set({ cafConfig, datosEmisor }, { merge: true });
+        alert("Datos tributarios y folios CAF guardados.");
       };
 
       const imprimirLoteEtiquetas = async (tipoCola) => {
@@ -334,7 +450,6 @@
 
       const disponibles39 = cafConfig.boleta39Limite - cafConfig.boleta39Actual;
       const disponibles33 = cafConfig.factura33Limite - cafConfig.factura33Actual;
-      const alertaCafCritica = disponibles39 < 50 || disponibles33 < 30;
 
       const colaGeneralPendiente = useMemo(
         () => ordenes.filter((o) => o.colaImpresion === "general" && !o.etiquetaImpresa),
@@ -364,296 +479,239 @@
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900">
-          {colaImprimir && (
+          {/* ZONA DE IMPRESIÓN: DTE INDIVIDUAL O LOTE DE ETIQUETAS */}
+          {dteVisualizando && (
+            <div className="print-only bg-white p-4">
+              <DocumentoTermicoSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+            </div>
+          )}
+
+          {!dteVisualizando && colaImprimir && (
             <div className="print-only bg-white text-black p-6">
               <div className="border-b-2 border-black pb-3 mb-4">
                 <h2 className="text-base font-black uppercase">
                   {colaImprimir === "lider"
-                    ? "COLA FÍSICA EXCLUSIVA LIDER / WALMART MARKETPLACE"
+                    ? "COLA FÍSICA EXCLUSIVA LIDER / WALMART"
                     : "LOTE DESPACHO MERCADO LIBRE & FALABELLA"}
                 </h2>
-                <p className="text-xs">
-                  Remitente: <strong>{empresa?.nombre}</strong> ({empresa?.rut}) • Fecha: {new Date().toLocaleString("es-CL")}
-                </p>
+                <p className="text-xs">{empresa?.nombre} ({empresa?.rut}) • {new Date().toLocaleString("es-CL")}</p>
               </div>
-              <div className="grid grid-cols-1 gap-4">
+              <div className="space-y-4">
                 {(colaImprimir === "lider" ? colaLiderPendiente : colaGeneralPendiente).map((o) => (
-                  <div key={o.id} className="border-2 border-black p-4 rounded-lg text-xs space-y-1">
+                  <div key={o.id} className="border-2 border-black p-4 rounded text-xs space-y-1">
                     <div className="flex justify-between font-black text-sm border-b border-gray-400 pb-1">
-                      <span>CANAL: {o.canal.toUpperCase()}</span>
-                      <span>ORDEN: #{o.ordenExterna}</span>
+                      <span>{o.canal.toUpperCase()}</span>
+                      <span>REF: {o.ordenExterna}</span>
                     </div>
-                    <p><strong>Destinatario:</strong> {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""}</p>
-                    <p><strong>SKU / Producto:</strong> [{o.codigoSku}] {o.productoNombre} — <strong>Cant: {o.cantidad}</strong></p>
-                    <p><strong>Documento SII:</strong> {o.tipoDte === 33 ? "FACTURA ELECTRÓNICA (33)" : "BOLETA ELECTRÓNICA (39)"} • <strong>Folio #{o.folioSii}</strong></p>
+                    <p><strong>Cliente:</strong> {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""}</p>
+                    <p><strong>Producto:</strong> {o.cantidad}x {o.productoNombre}</p>
+                    <p><strong>SII:</strong> {o.tipoDte === 33 ? "FACTURA 33" : "BOLETA 39"} N° {o.folioSii}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-6 no-print">
-            {alertaCafCritica && (
-              <div className="bg-rose-600 text-white p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-3">
-                <span className="text-xs font-extrabold">
-                  ALERTA FOLIOS CAF SII: Quedan {disponibles39} folios Boleta (39) y {disponibles33} folios Factura (33).
-                </span>
+          {/* MODAL PARA VER E IMPRIMIR BOLETA / FACTURA */}
+          {dteVisualizando && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto no-print">
+              <div className="bg-slate-100 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold uppercase text-slate-700">
+                    Vista Previa Documento SII
+                  </span>
+                  <button
+                    onClick={() => setDteVisualizando(null)}
+                    className="bg-white border border-slate-300 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div className="max-h-[70vh] overflow-y-auto py-1">
+                  <DocumentoTermicoSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => window.print()}
+                    className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}
+                  >
+                    Imprimir Documento
+                  </button>
+                  {dteVisualizando.esSimulacion !== false && (
+                    <button
+                      onClick={async () => {
+                        await eliminarSimulacion(dteVisualizando);
+                        setDteVisualizando(null);
+                      }}
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-3 rounded-xl text-xs cursor-pointer"
+                    >
+                      Eliminar Simulación
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL DE AYUDA (?) PARA API KEYS */}
+          {ayudaAbierta && AYUDA_APIS[ayudaAbierta] && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 no-print">
+              <div className="corp-card rounded-2xl max-w-md w-full p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-extrabold text-slate-900">{AYUDA_APIS[ayudaAbierta].titulo}</h3>
+                  <button
+                    onClick={() => setAyudaAbierta(null)}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2 py-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="space-y-2 text-xs text-slate-600 leading-relaxed">
+                  {AYUDA_APIS[ayudaAbierta].pasos.map((p, i) => (
+                    <p key={i} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 font-medium">{p}</p>
+                  ))}
+                </div>
                 <button
-                  onClick={() => setTab("sii_caf")}
-                  className="bg-white text-rose-700 text-xs font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer"
+                  onClick={() => setAyudaAbierta(null)}
+                  className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}
                 >
-                  Gestionar CAF
+                  Entendido
                 </button>
               </div>
-            )}
+            </div>
+          )}
 
-            <div className={`corp-card rounded-2xl p-6 sm:p-8 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center md:justify-between gap-4`}>
-              <div className="flex items-center gap-4">
+          {/* CONTENIDO PRINCIPAL */}
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
+            {/* CABECERA COMPACTA Y ORDENADA */}
+            <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
+              <div className="flex items-center gap-3.5">
                 {empresa?.logoBase64 && (
-                  <div className="w-24 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
+                  <div className="w-20 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
                     <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
                   </div>
                 )}
                 <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <a
-                      href={urlVolver}
-                      className={`text-xs font-bold px-3.5 py-1.5 rounded-xl transition ${tema.btn}`}
-                    >
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <a href={urlVolver} className={`text-xs font-bold px-3 py-1 rounded-lg ${tema.btn}`}>
                       Volver
                     </a>
-                    <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${tema.tag}`}>
-                      {empresa?.nombre || "Cargando..."} • {empresa?.rut || formatearRut(rutActivo)}
+                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tema.tag}`}>
+                      {empresa?.nombre || "Empresa"} • {empresa?.rut || formatearRut(rutActivo)}
                     </span>
                   </div>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                    E-Commerce Omnicanal & Motor Tributario SII
+                  <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+                    E-Commerce Omnicanal & Facturación SII
                   </h1>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Sincronización 24/7 (Mercado Libre • Falabella • Lider), stock compartido y emisión automática Boleta 39 / Factura 33.
-                  </p>
                 </div>
               </div>
 
               <button
                 onClick={() => setMostrarNuevaOrden(!mostrarNuevaOrden)}
-                className={`font-bold text-xs px-5 py-3 rounded-xl transition cursor-pointer shrink-0 ${tema.btn}`}
+                className={`font-bold text-xs px-4 py-3 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
               >
-                {mostrarNuevaOrden ? "Cerrar Registro" : "Registrar / Simular Orden"}
+                {mostrarNuevaOrden ? "Cerrar Formulario" : "+ Simular / Registrar Orden"}
               </button>
             </div>
 
+            {/* BANNER DE API KEYS PENDIENTES */}
             {faltanCredencialesCriticas && (
-              <div className="corp-card rounded-2xl p-6 border-amber-300 bg-amber-50/20 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded">
-                      Configuración Requerida para {empresa?.nombre}
-                    </span>
-                    <h2 className="text-base font-extrabold text-slate-900 mt-1">
-                      Completa tus API Keys de Marketplaces y Servicio de Impuestos Internos (SII)
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Este módulo detectó credenciales pendientes. Ingresa las llaves que utilice tu empresa para activar la conexión automática.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setTab("credenciales")}
-                    className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
-                  >
-                    Configurar API Keys Ahora
-                  </button>
+              <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-extrabold text-amber-900 block">
+                    Faltan credenciales API por vincular ({!estadoConexiones.sii ? "SII / OpenFactura" : "Canales Marketplace"})
+                  </span>
+                  <span className="text-[11px] text-slate-600">
+                    Mientras no se conecten las llaves reales, las órdenes se marcan como simulación y se pueden eliminar.
+                  </span>
                 </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                  <div className={`p-3 rounded-xl border ${estadoConexiones.sii ? "bg-emerald-50/50 border-emerald-200 text-emerald-900" : "bg-white border-slate-200 text-slate-600"}`}>
-                    <span className="font-extrabold block">SII / OpenFactura</span>
-                    <span className="text-[11px]">{estadoConexiones.sii ? "Conectado" : "Falta API Key"}</span>
-                  </div>
-                  <div className={`p-3 rounded-xl border ${estadoConexiones.meli ? "bg-emerald-50/50 border-emerald-200 text-emerald-900" : "bg-white border-slate-200 text-slate-600"}`}>
-                    <span className="font-extrabold block">Mercado Libre</span>
-                    <span className="text-[11px]">{estadoConexiones.meli ? "Conectado" : "Pendiente"}</span>
-                  </div>
-                  <div className={`p-3 rounded-xl border ${estadoConexiones.falabella ? "bg-emerald-50/50 border-emerald-200 text-emerald-900" : "bg-white border-slate-200 text-slate-600"}`}>
-                    <span className="font-extrabold block">Falabella</span>
-                    <span className="text-[11px]">{estadoConexiones.falabella ? "Conectado" : "Pendiente"}</span>
-                  </div>
-                  <div className={`p-3 rounded-xl border ${estadoConexiones.lider ? "bg-emerald-50/50 border-emerald-200 text-emerald-900" : "bg-white border-slate-200 text-slate-600"}`}>
-                    <span className="font-extrabold block">Lider Marketplace</span>
-                    <span className="text-[11px]">{estadoConexiones.lider ? "Conectado" : "Pendiente"}</span>
-                  </div>
-                </div>
+                <button
+                  onClick={() => setTab("credenciales")}
+                  className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
+                >
+                  Configurar APIs
+                </button>
               </div>
             )}
 
+            {/* FORMULARIO PARA SIMULAR O REGISTRAR ORDEN */}
             {mostrarNuevaOrden && (
-              <form onSubmit={registrarOrdenOmnicanal} className="corp-card rounded-2xl p-6 border-slate-400 space-y-4">
-                <div className="border-b border-slate-100 pb-3">
-                  <h2 className="text-base font-extrabold text-slate-900">Ingreso de Orden Omnicanal</h2>
-                  <p className="text-xs text-slate-500">
-                    Descuenta stock compartido al instante, emite Boleta 39 (sin RUT) o Factura 33 (con RUT) y enruta la etiqueta a su bandeja.
-                  </p>
+              <form onSubmit={registrarOrdenOmnicanal} className="corp-card rounded-2xl p-5 space-y-4 border-slate-400">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <h2 className="text-sm font-extrabold text-slate-900">Nueva Orden (Boleta 39 o Factura 33)</h2>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {limpiarRut(rutCompradorNuevo).length >= 7 ? "Emitirá Factura 33" : "Emitirá Boleta 39"}
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">Canal de Venta *</label>
-                    <select
-                      value={canalNuevo}
-                      onChange={(e) => setCanalNuevo(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                    >
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Canal</label>
+                    <select value={canalNuevo} onChange={(e) => setCanalNuevo(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold">
                       <option value="Mercado Libre">Mercado Libre</option>
                       <option value="Falabella">Falabella</option>
-                      <option value="Lider">Lider (Cola Física Exclusiva)</option>
+                      <option value="Lider">Lider (Cola Física Aparte)</option>
                     </select>
                   </div>
-
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">Comprador / Razón Social *</label>
-                    <input
-                      type="text"
-                      value={compradorNuevo}
-                      onChange={(e) => setCompradorNuevo(e.target.value)}
-                      placeholder="Ej: Comercializadora Sur SpA"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                      required
-                    />
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Nombre / Razón Social *</label>
+                    <input type="text" value={compradorNuevo} onChange={(e) => setCompradorNuevo(e.target.value)} placeholder="Ej: Sanhoo" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
                   </div>
-
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">
-                      RUT Comprador <span className="font-normal text-slate-400">(Vacío = Boleta 39 | Con RUT = Factura 33)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={rutCompradorNuevo}
-                      onChange={(e) => setRutCompradorNuevo(e.target.value)}
-                      placeholder="Ej: 76.123.456-7 (Opcional)"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                    />
+                    <label className="text-xs font-bold text-slate-700 block mb-1">RUT Receptor (Opcional)</label>
+                    <input type="text" value={rutCompradorNuevo} onChange={(e) => setRutCompradorNuevo(e.target.value)} placeholder="Vacío = Boleta • Con RUT = Factura" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div className="sm:col-span-2">
-                    <label className="text-xs font-bold text-slate-700 block mb-1">Producto del Catálogo *</label>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Producto *</label>
                     {catalogo.length > 0 ? (
-                      <select
-                        value={skuSeleccionado}
-                        onChange={(e) => setSkuSeleccionado(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                        required
-                      >
-                        <option value="">-- Selecciona producto del catálogo --</option>
+                      <select value={skuSeleccionado} onChange={(e) => setSkuSeleccionado(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required>
+                        <option value="">-- Selecciona del catálogo --</option>
                         {catalogo.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre} (Stock: {p.stockOnline ?? 25})
-                          </option>
+                          <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</option>
                         ))}
                       </select>
                     ) : (
-                      <input
-                        type="text"
-                        value={skuSeleccionado}
-                        onChange={(e) => setSkuSeleccionado(e.target.value)}
-                        placeholder="Nombre del producto..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                        required
-                      />
+                      <input type="text" value={skuSeleccionado} onChange={(e) => setSkuSeleccionado(e.target.value)} placeholder="Ej: Ventilador" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
                     )}
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs font-bold text-slate-700 block mb-1">Cantidad *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={cantidadNueva}
-                        onChange={(e) => setCantidadNueva(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-slate-700 block mb-1">Total CLP *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={totalNuevo}
-                        onChange={(e) => setTotalNuevo(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none"
-                        required
-                      />
-                    </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Cantidad *</label>
+                    <input type="number" min="1" value={cantidadNueva} onChange={(e) => setCantidadNueva(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Total CLP *</label>
+                    <input type="number" min="1" value={totalNuevo} onChange={(e) => setTotalNuevo(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  className={`w-full font-bold py-3.5 rounded-xl text-xs transition cursor-pointer ${tema.btn}`}
-                >
-                  Procesar Orden + Descontar Stock + {apisForm.siiModoAutomatico !== false ? `Emitir ${limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"} Automática` : "Enviar a Cola DTE"}
+                <button type="submit" className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                  Generar {limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"} y Descontar Stock
                 </button>
               </form>
             )}
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="corp-card rounded-2xl p-4">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Órdenes Totales</span>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">{ordenes.length}</p>
-              </div>
-              <div className="corp-card rounded-2xl p-4">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cola MeLi + Falabella</span>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">{colaGeneralPendiente.length}</p>
-              </div>
-              <div className="corp-card rounded-2xl p-4">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cola Exclusiva Lider</span>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">{colaLiderPendiente.length}</p>
-              </div>
-              <div className="corp-card rounded-2xl p-4">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Folios CAF Disponibles</span>
-                <p className="text-sm font-extrabold text-slate-900 mt-2">
-                  B39: {disponibles39} • F33: {disponibles33}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-              <button
-                onClick={() => setTab("ordenes")}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tab === "ordenes" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                Consola 24/7 ({ordenes.length})
+            {/* 4 PESTAÑAS LIMPIAS Y ORDENADAS */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
+              <button onClick={() => setTab("ordenes")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "ordenes" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                1. Ventas y DTE ({ordenes.length})
               </button>
-              <button
-                onClick={() => setTab("stock")}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tab === "stock" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                Stock Compartido ({catalogo.length})
+              <button onClick={() => setTab("impresion")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "impresion" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                2. Colas Impresión ({colaGeneralPendiente.length + colaLiderPendiente.length})
               </button>
-              <button
-                onClick={() => setTab("sii_caf")}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tab === "sii_caf" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                Motor SII & CAF
+              <button onClick={() => setTab("stock")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "stock" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                3. Stock & Folios CAF
               </button>
-              <button
-                onClick={() => setTab("impresion")}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tab === "impresion" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                Colas Impresión ({colaGeneralPendiente.length + colaLiderPendiente.length})
-              </button>
-              <button
-                onClick={() => setTab("credenciales")}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tab === "credenciales" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                API Keys & SII {faltanCredencialesCriticas ? "(!)" : ""}
+              <button onClick={() => setTab("credenciales")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "credenciales" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                4. API Keys & SII {faltanCredencialesCriticas ? "(!)" : ""}
               </button>
             </div>
 
+            {/* PESTAÑA 1: VENTAS Y DOCUMENTOS DTE */}
             {tab === "ordenes" && (
               <div className="space-y-4">
                 <div className="corp-card rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
@@ -661,15 +719,15 @@
                     type="text"
                     value={busqueda}
                     onChange={(e) => setBusqueda(e.target.value)}
-                    placeholder="Buscar por Nº Orden, comprador, producto o folio SII..."
-                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs font-semibold outline-none focus:border-slate-900"
+                    placeholder="Buscar por orden, cliente, producto o folio..."
+                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs font-semibold outline-none"
                   />
                   <div className="flex flex-wrap gap-1.5">
                     {["TODOS", "Mercado Libre", "Falabella", "Lider"].map((c) => (
                       <button
                         key={c}
                         onClick={() => setFiltroCanal(c)}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
                           filtroCanal === c ? `${tema.btn} border-transparent` : "bg-slate-50 text-slate-700 border-slate-300"
                         }`}
                       >
@@ -680,350 +738,243 @@
                 </div>
 
                 {ordenesFiltradas.length === 0 ? (
-                  <div className="corp-card rounded-2xl p-12 text-center space-y-2">
-                    <h3 className="text-base font-extrabold text-slate-900">Consola Omnicanal Lista</h3>
-                    <p className="text-xs text-slate-500 max-w-md mx-auto">
-                      Aún no hay órdenes registradas. Utiliza el botón superior para registrar o simular una orden entrante.
-                    </p>
+                  <div className="corp-card rounded-2xl p-10 text-center space-y-2">
+                    <h3 className="text-sm font-extrabold text-slate-900">No hay documentos registrados</h3>
+                    <p className="text-xs text-slate-500">Usa "+ Simular / Registrar Orden" arriba para generar una Boleta 39 o Factura 33.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {ordenesFiltradas.map((o) => (
-                      <div key={o.id} className={`corp-card rounded-2xl p-5 space-y-3 border ${o.despachado ? "border-emerald-300 bg-emerald-50/10" : "border-slate-200"}`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={`text-xs font-extrabold px-3 py-1 rounded-lg ${tema.tag}`}>
-                            {o.canal} • #{o.ordenExterna}
-                          </span>
-                          <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-900 text-white">
-                            {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
-                          </span>
-                        </div>
+                    {ordenesFiltradas.map((o) => {
+                      const esSimulada = o.esSimulacion !== false;
+                      return (
+                        <div key={o.id} className="corp-card rounded-2xl p-5 space-y-3 border border-slate-200">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${tema.tag}`}>
+                              {o.canal} • #{o.ordenExterna}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {esSimulada ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                                  Simulación
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                  SII Real
+                                </span>
+                              )}
+                              <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-900 text-white">
+                                {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
+                              </span>
+                            </div>
+                          </div>
 
-                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                          <p className="text-sm font-extrabold text-slate-900">
-                            {o.cantidad}x [{o.codigoSku}] {o.productoNombre}
-                          </p>
-                          <p className="text-xs text-slate-600 mt-1">
-                            {o.comprador} {o.rutComprador ? `• RUT: ${o.rutComprador}` : "• Consumidor Final"}
-                          </p>
-                          <p className="text-xs font-extrabold text-slate-900 mt-0.5">
-                            Total: ${Number(o.totalClp || 0).toLocaleString("es-CL")} CLP
-                          </p>
-                        </div>
+                          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                            <p className="text-sm font-extrabold text-slate-900">
+                              {o.cantidad}x {o.productoNombre}
+                            </p>
+                            <p className="text-xs text-slate-600 mt-0.5">
+                              {o.comprador} {o.rutComprador ? `• RUT: ${o.rutComprador}` : "• Boleta Consumidor Final"}
+                            </p>
+                            <p className="text-xs font-extrabold text-slate-900 mt-1">
+                              Total: ${Number(o.totalClp || 0).toLocaleString("es-CL")} CLP
+                            </p>
+                          </div>
 
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
-                          <span className="font-semibold text-slate-500">
-                            {o.etiquetaImpresa ? "Etiqueta impresa" : `Cola: ${o.colaImpresion === "lider" ? "Lider Exclusiva" : "Lote MeLi/Falabella"}`}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {o.folioSii === "PENDIENTE" && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                            <div className="flex items-center gap-2">
                               <button
-                                onClick={() => emitirDteManual(o)}
-                                className="px-3 py-1.5 rounded-xl font-bold bg-slate-200 hover:bg-slate-300 text-slate-900 cursor-pointer"
+                                onClick={() => setDteVisualizando(o)}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${tema.btn}`}
                               >
-                                Emitir DTE
+                                Ver / Imprimir {o.tipoDte === 33 ? "Factura" : "Boleta"}
                               </button>
-                            )}
+
+                              {esSimulada && (
+                                <button
+                                  onClick={() => eliminarSimulacion(o)}
+                                  className="px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer"
+                                >
+                                  Eliminar
+                                </button>
+                              )}
+                            </div>
+
                             <button
                               onClick={() => marcarDespachado(o.id, o.despachado)}
-                              className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${
-                                o.despachado ? "bg-emerald-700 text-white" : tema.btn
+                              className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                                o.despachado ? "bg-emerald-700 text-white" : "bg-slate-200 text-slate-800"
                               }`}
                             >
-                              {o.despachado ? "Despachado" : "Marcar Despachado"}
+                              {o.despachado ? "Despachado" : "Despachar"}
                             </button>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             )}
 
-            {tab === "stock" && (
-              <div className="corp-card rounded-2xl p-6 space-y-4">
-                <div>
-                  <h2 className="text-base font-extrabold text-slate-900">Stock Compartido en Tiempo Real</h2>
-                  <p className="text-xs text-slate-500">
-                    Descuenta simultáneamente en Mercado Libre, Falabella y Lider al concretarse una venta.
-                  </p>
-                </div>
-
-                {catalogo.length === 0 ? (
-                  <p className="text-xs text-slate-500 bg-slate-50 p-8 rounded-xl text-center">
-                    No hay productos en el catálogo de esta empresa. Cárgalos desde tu panel principal en Catálogo Maestro.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-100 text-slate-600 uppercase">
-                        <tr>
-                          <th className="p-3 rounded-l-xl">SKU / Producto</th>
-                          <th className="p-3">Canales</th>
-                          <th className="p-3 text-center">Stock Compartido</th>
-                          <th className="p-3 rounded-r-xl text-right">Ajuste</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200">
-                        {catalogo.slice(0, 100).map((p) => {
-                          const st = Number(p.stockOnline ?? 25);
-                          return (
-                            <tr key={p.id}>
-                              <td className="p-3 font-bold text-slate-900">
-                                {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}
-                              </td>
-                              <td className="p-3 text-[11px] font-semibold text-slate-500">
-                                MeLi • Falabella • Lider
-                              </td>
-                              <td className="p-3 text-center">
-                                <span className={`px-3 py-1 rounded-full font-extrabold ${st <= 3 ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-900"}`}>
-                                  {st} unds
-                                </span>
-                              </td>
-                              <td className="p-3 text-right space-x-1">
-                                <button
-                                  onClick={() => actualizarStockProducto(p.id, st - 1)}
-                                  className="bg-slate-200 hover:bg-slate-300 px-2.5 py-1 rounded-lg font-bold cursor-pointer"
-                                >
-                                  -1
-                                </button>
-                                <button
-                                  onClick={() => actualizarStockProducto(p.id, st + 5)}
-                                  className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${tema.btn}`}
-                                >
-                                  +5
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {tab === "sii_caf" && (
-              <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
-                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                  <div>
-                    <h2 className="text-base font-extrabold text-slate-900">Motor Tributario SII ({apisForm.siiProveedor})</h2>
-                    <p className="text-xs text-slate-500">
-                      Emisión automática de DTE 39 (Boleta) o DTE 33 (Factura) y control preventivo de folios CAF.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl">
-                    <span className="text-xs font-extrabold text-slate-900">Modo Automático SII</span>
-                    <SwitchToggle checked={apisForm.siiModoAutomatico !== false} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
-                  </div>
-                </div>
-
-                <form onSubmit={guardarNuevosFoliosCaf} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Boleta Electrónica (DTE 39)</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Actual</label>
-                        <input
-                          type="number"
-                          value={cafConfig.boleta39Actual}
-                          onChange={(e) => setCafConfig({ ...cafConfig, boleta39Actual: Number(e.target.value) })}
-                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Tope CAF</label>
-                        <input
-                          type="number"
-                          value={cafConfig.boleta39Limite}
-                          onChange={(e) => setCafConfig({ ...cafConfig, boleta39Limite: Number(e.target.value) })}
-                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold"
-                        />
-                      </div>
-                    </div>
-                    <p className="text-xs font-bold text-slate-700">Disponibles: {disponibles39} folios</p>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Factura Electrónica (DTE 33)</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Actual</label>
-                        <input
-                          type="number"
-                          value={cafConfig.factura33Actual}
-                          onChange={(e) => setCafConfig({ ...cafConfig, factura33Actual: Number(e.target.value) })}
-                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Tope CAF</label>
-                        <input
-                          type="number"
-                          value={cafConfig.factura33Limite}
-                          onChange={(e) => setCafConfig({ ...cafConfig, factura33Limite: Number(e.target.value) })}
-                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold"
-                        />
-                      </div>
-                    </div>
-                    <p className="text-xs font-bold text-slate-700">Disponibles: {disponibles33} folios</p>
-                  </div>
-
-                  <button type="submit" className={`md:col-span-2 font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                    Guardar Rangos CAF
-                  </button>
-                </form>
-              </div>
-            )}
-
+            {/* PESTAÑA 2: COLAS DE IMPRESIÓN */}
             {tab === "impresion" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="corp-card rounded-2xl p-6 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-base font-extrabold text-slate-900">Cola General (MeLi + Falabella)</h3>
+                    <h3 className="text-sm font-extrabold text-slate-900">Cola General (MeLi + Falabella)</h3>
                     <span className={`text-xs font-extrabold px-3 py-1 rounded-full ${tema.tag}`}>
                       {colaGeneralPendiente.length} pendientes
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    Agrupa las etiquetas de Mercado Libre y Falabella listas para salida de bodega en un lote unificado.
-                  </p>
-                  <button
-                    onClick={() => imprimirLoteEtiquetas("general")}
-                    className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}
-                  >
+                  <p className="text-xs text-slate-500">Agrupa etiquetas de Mercado Libre y Falabella en un solo lote.</p>
+                  <button onClick={() => imprimirLoteEtiquetas("general")} className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
                     Imprimir Lote MeLi + Falabella ({colaGeneralPendiente.length})
                   </button>
                 </div>
 
                 <div className="corp-card rounded-2xl p-6 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-base font-extrabold text-slate-900">Bandeja Física Exclusiva Lider</h3>
+                    <h3 className="text-sm font-extrabold text-slate-900">Bandeja Física Exclusiva Lider</h3>
                     <span className={`text-xs font-extrabold px-3 py-1 rounded-full ${tema.tag}`}>
                       {colaLiderPendiente.length} pendientes
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    Cola física independiente dedicada al etiquetado y despacho de Walmart / Lider Marketplace.
-                  </p>
-                  <button
-                    onClick={() => imprimirLoteEtiquetas("lider")}
-                    className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}
-                  >
+                  <p className="text-xs text-slate-500">Cola física separada para pedidos de Walmart / Lider Marketplace.</p>
+                  <button onClick={() => imprimirLoteEtiquetas("lider")} className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
                     Imprimir Cola Exclusiva Lider ({colaLiderPendiente.length})
                   </button>
                 </div>
               </div>
             )}
 
-            {tab === "credenciales" && (
-              <form onSubmit={guardarCredencialesEmpresa} className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
-                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                  <div>
-                    <h2 className="text-lg font-extrabold text-slate-900">Conexión de APIs y Facturación Automática SII</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Los datos guardados aquí pertenecen exclusivamente a <strong>{empresa?.nombre}</strong> ({empresa?.rut}).
+            {/* PESTAÑA 3: STOCK COMPARTIDO & FOLIOS CAF */}
+            {tab === "stock" && (
+              <div className="space-y-5">
+                <form onSubmit={guardarNuevosFoliosCaf} className="corp-card rounded-2xl p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div>
+                      <h2 className="text-sm font-extrabold text-slate-900">Datos del Emisor SII & Folios CAF</h2>
+                      <p className="text-xs text-slate-500">Aparecen en el encabezado de cada Boleta 39 y Factura 33 impresa.</p>
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                      <span className="text-xs font-bold">Emisión Automática</span>
+                      <SwitchToggle checked={apisForm.siiModoAutomatico !== false} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Giro Comercial SII</label>
+                      <input type="text" value={datosEmisor.giro} onChange={(e) => setDatosEmisor({ ...datosEmisor, giro: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Dirección Casa Matriz</label>
+                      <input type="text" value={datosEmisor.direccion} onChange={(e) => setDatosEmisor({ ...datosEmisor, direccion: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Boleta 39 Actual</label>
+                      <input type="number" value={cafConfig.boleta39Actual} onChange={(e) => setCafConfig({ ...cafConfig, boleta39Actual: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Tope CAF Boleta ({disponibles39} disp.)</label>
+                      <input type="number" value={cafConfig.boleta39Limite} onChange={(e) => setCafConfig({ ...cafConfig, boleta39Limite: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Factura 33 Actual</label>
+                      <input type="number" value={cafConfig.factura33Actual} onChange={(e) => setCafConfig({ ...cafConfig, factura33Actual: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Tope CAF Factura ({disponibles33} disp.)</label>
+                      <input type="number" value={cafConfig.factura33Limite} onChange={(e) => setCafConfig({ ...cafConfig, factura33Limite: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                  </div>
+
+                  <button type="submit" className={`font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                    Guardar Datos Tributarios y Folios
+                  </button>
+                </form>
+
+                <div className="corp-card rounded-2xl p-6 space-y-3">
+                  <h2 className="text-sm font-extrabold text-slate-900">Stock Compartido Multi-Canal ({catalogo.length} productos)</h2>
+                  {catalogo.length === 0 ? (
+                    <p className="text-xs text-slate-500 bg-slate-50 p-6 rounded-xl text-center">
+                      Agrega productos desde tu panel principal en la pestaña Catálogo (por Excel o manualmente).
                     </p>
-                  </div>
-                  <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl">
-                    <span className="text-xs font-extrabold text-slate-900">Emisión Automática SII</span>
-                    <SwitchToggle
-                      checked={apisForm.siiModoAutomatico !== false}
-                      onChange={() => setApisForm({ ...apisForm, siiModoAutomatico: !(apisForm.siiModoAutomatico !== false) })}
-                      colorClass={tema.sw}
-                    />
-                  </div>
+                  ) : (
+                    <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl">
+                      {catalogo.slice(0, 80).map((p) => {
+                        const st = Number(p.stockOnline ?? 25);
+                        return (
+                          <div key={p.id} className="p-3 flex items-center justify-between gap-2 text-xs">
+                            <span className="font-bold text-slate-900">{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold px-2.5 py-1 rounded-full bg-slate-100">{st} unds</span>
+                              <button onClick={() => actualizarStockProducto(p.id, st - 1)} className="bg-slate-200 px-2.5 py-1 rounded-lg font-bold cursor-pointer">-1</button>
+                              <button onClick={() => actualizarStockProducto(p.id, st + 5)} className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${tema.btn}`}>+5</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* PESTAÑA 4: API KEYS CON BOTÓN DE AYUDA (?) EN CADA CAJA */}
+            {tab === "credenciales" && (
+              <form onSubmit={guardarCredencialesEmpresa} className="corp-card rounded-2xl p-6 space-y-5">
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">Credenciales API y Facturación SII</h2>
+                  <p className="text-xs text-slate-500">Presiona el botón <strong>?</strong> en cada bloque si necesitas saber dónde obtener cada llave.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                      1. Servicio de Impuestos Internos (SII / OpenFactura) *
-                    </h3>
-                    <select
-                      value={apisForm.siiProveedor}
-                      onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    >
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">1. SII / OpenFactura</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold">
                       <option>OpenFactura (Haulmer)</option>
                       <option>SimpleFactura</option>
-                      <option>Factura Movil / BSale DTE</option>
                       <option>SII Directo (Certificado .PFX + CAF)</option>
                     </select>
-                    <input
-                      type="password"
-                      value={apisForm.siiApiKey}
-                      onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })}
-                      placeholder="Pega aquí tu API Key de OpenFactura / SII..."
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    />
+                    <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                      2. Mercado Libre Chile API
-                    </h3>
-                    <input
-                      type="text"
-                      value={apisForm.meliClientId}
-                      onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })}
-                      placeholder="App ID / Client ID Mercado Libre"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    />
-                    <input
-                      type="password"
-                      value={apisForm.meliSecret}
-                      onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })}
-                      placeholder="Client Secret / Access Token"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    />
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">2. Mercado Libre Chile</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="App ID / Client ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                      3. Falabella Seller Center API
-                    </h3>
-                    <input
-                      type="text"
-                      value={apisForm.falabellaUser}
-                      onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })}
-                      placeholder="User ID (Correo Seller Center)"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    />
-                    <input
-                      type="password"
-                      value={apisForm.falabellaApiKey}
-                      onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })}
-                      placeholder="API Key Falabella"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    />
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">3. Falabella Seller Center</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                      4. Lider / Walmart Marketplace API
-                    </h3>
-                    <input
-                      type="password"
-                      value={apisForm.liderApiKey}
-                      onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })}
-                      placeholder="Client Secret / Token Lider"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                    />
-                    <p className="text-[11px] text-slate-500">
-                      Al activarse, habilita automáticamente la bandeja física exclusiva de etiquetas Lider.
-                    </p>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">4. Lider / Walmart Marketplace</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={guardandoApis}
-                  className={`w-full font-bold py-3.5 rounded-xl text-xs transition cursor-pointer ${tema.btn}`}
-                >
-                  {guardandoApis ? "Guardando y vinculando..." : "Guardar Credenciales y Activar Sincronización"}
+                <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                  {guardandoApis ? "Guardando..." : "Guardar Credenciales y Activar Conexión"}
                 </button>
               </form>
             )}
