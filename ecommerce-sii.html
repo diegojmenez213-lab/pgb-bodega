@@ -3,7 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>NEXUS ERP • E-Commerce Omnicanal & Motor SII</title>
+  <script>
+    // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE ENTRE EMPRESAS)
+    (function () {
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) {
+        window.location.replace("index.html");
+      }
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) {
+          window.location.replace("index.html");
+        } else if (ev.persisted && rutActual !== rutInicial) {
+          window.location.reload();
+        }
+      });
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -359,7 +386,7 @@
 
       useEffect(() => {
         if (!rutActivo) {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
 
@@ -370,12 +397,18 @@
           const u1 = empRef.onSnapshot((doc) => {
             if (doc.exists) {
               const data = { id: doc.id, ...doc.data() };
+              if (data.activa === false) {
+                localStorage.removeItem("nexus_empresa_rut");
+                window.location.replace("index.html");
+                return;
+              }
               setEmpresa(data);
               if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
               if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
               if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
             } else {
-              window.location.href = "index.html";
+              localStorage.removeItem("nexus_empresa_rut");
+              window.location.replace("index.html");
             }
           });
 
@@ -517,7 +550,21 @@
           return alert("Este documento fue emitido en vivo por el SII y no puede eliminarse por normativa tributaria.");
         }
         if (!confirm(`¿Eliminar la simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
-        await empRef().collection("ecommerce_ordenes").doc(orden.id).delete();
+        const batch = db.batch();
+        batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
+        const esFactura33 = orden.tipoDte === 33;
+        batch.set(
+          empRef(),
+          {
+            cafConfig: {
+              ...cafConfig,
+              factura33Actual: esFactura33 ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
+              boleta39Actual: !esFactura33 ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
+            }
+          },
+          { merge: true }
+        );
+        await batch.commit();
       };
 
       const actualizarStockProducto = async (prodId, nuevoStock) => {
@@ -530,14 +577,12 @@
         alert("Datos tributarios guardados.");
       };
 
-      // Solo documentos SIN IMPRIMIR ordenados cronológicamente (primero el que llegó primero)
       const ordenesSinImprimirCronologicas = useMemo(() => {
         return ordenes
           .filter((o) => !o.etiquetaImpresa)
           .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       }, [ordenes]);
 
-      // Documentos YA IMPRESOS separados en su propio historial
       const ordenesYaImpresas = useMemo(() => {
         const q = busquedaImpresas.trim().toLowerCase();
         return ordenes
@@ -724,9 +769,9 @@
                 )}
                 <div>
                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <a href={urlVolver} className={`text-xs font-bold px-3 py-1 rounded-lg ${tema.btn}`}>
+                    <button onClick={() => window.location.replace(urlVolver)} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${tema.btn}`}>
                       Volver
-                    </a>
+                    </button>
                     <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tema.tag}`}>
                       {empresa?.nombre || "Empresa"} • {empresa?.rut || formatearRut(rutActivo)}
                     </span>
@@ -998,7 +1043,6 @@
               </div>
             )}
 
-            {/* PESTAÑA 2: LOTES PDF (SOLO NUEVAS SIN IMPRIMIR + HISTORIAL SEPARADO DE YA IMPRESAS) */}
             {tab === "impresion" && (
               <div className="space-y-5">
                 <div className="corp-card rounded-2xl p-6 space-y-5">
@@ -1104,7 +1148,6 @@
                   )}
                 </div>
 
-                {/* HISTORIAL SEPARADO DE FACTURAS Y BOLETAS YA IMPRESAS (PARA REIMPRESIÓN MANUAL SI LO DESEA) */}
                 <div className="corp-card rounded-2xl p-6 space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
