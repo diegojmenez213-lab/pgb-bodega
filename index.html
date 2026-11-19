@@ -70,10 +70,10 @@
       { id: "m12_ruta_inc", num: 12, grupo: "Logística", nombre: "Tablero Incidencias y Ruta", desc: "Faltantes, cruces, rechazos y errores de facturación.", archivo: "pgb-operacion.html", icono: "🚚", listo: true },
       { id: "m13_retornos_merma", num: 13, grupo: "Logística", nombre: "Retornos y Mermas Bodega", desc: "Recepción de devoluciones, roturas y compras personal.", archivo: "pgb-operacion.html", icono: "📥", listo: true },
       { id: "m14_analitica_err", num: 14, grupo: "Logística", nombre: "Analítica 100% Bodega/Ventas", desc: "Gráficos mensuales de desempeño por colaborador.", archivo: "pgb-operacion.html", icono: "📊", listo: true },
-      { id: "m15_pos_ventas", num: 15, grupo: "Comercial", nombre: "Punto de Venta (POS) Rápido", desc: "Ventas presenciales, mesón y cotizaciones al instante.", archivo: "ventas-pos.html", icono: "💳", listo: false },
-      { id: "m16_caja_cobros", num: 16, grupo: "Comercial", nombre: "Cuentas por Cobrar y Caja", desc: "Fiados, abonos parciales y arqueo de billetes.", archivo: "ventas-pos.html", icono: "💵", listo: false },
-      { id: "m17_compras_prov", num: 17, grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición inteligente según stock mínimo y marca.", archivo: "compras-finanzas.html", icono: "📋", listo: false },
-      { id: "m18_finanzas_bi", num: 18, grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Utilidad neta, gastos operativos y reportes ejecutivos.", archivo: "compras-finanzas.html", icono: "📈", listo: false }
+      { id: "m15_pos_ventas", num: 15, grupo: "Comercial", nombre: "Punto de Venta (POS) Rápido", desc: "Ventas presenciales, mesón y cotizaciones al instante.", archivo: "ventas-pos.html", icono: "💳", listo: true },
+      { id: "m16_caja_cobros", num: 16, grupo: "Comercial", nombre: "Cuentas por Cobrar y Caja", desc: "Fiados, abonos parciales y arqueo de billetes.", archivo: "ventas-pos.html", icono: "💵", listo: true },
+      { id: "m17_compras_prov", num: 17, grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición inteligente según stock mínimo y marca.", archivo: "compras-finanzas.html", icono: "📋", listo: true },
+      { id: "m18_finanzas_bi", num: 18, grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Utilidad neta, gastos operativos y reportes ejecutivos.", archivo: "compras-finanzas.html", icono: "📈", listo: true }
     ];
 
     const ROLES_JERARQUIA = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
@@ -365,9 +365,6 @@
           const destino = mod.archivo.replace("#config_", "");
           setTabPanel(destino === "empresa" ? "equipo" : destino);
           return;
-        }
-        if (!mod.listo) {
-          return alert(`🚧 Módulo ${mod.num} (${mod.nombre}): Espacios API y base de datos ya están creados. En el siguiente paso desplegaremos su interfaz (${mod.archivo}).`);
         }
         window.location.href = mod.archivo;
       };
@@ -684,8 +681,8 @@
                       <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-600">
                         Módulo {mod.num} • {mod.grupo}
                       </span>
-                      <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${mod.listo ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-800 border border-amber-200"}`}>
-                        {mod.listo ? "● Operativo" : "⚡ Listo para Conectar"}
+                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        ● Operativo
                       </span>
                     </div>
                     <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
