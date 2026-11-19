@@ -66,11 +66,26 @@
 
     const huellaFlexible = (txt) =>
       normalizarTexto(txt)
+        .replace(/^\[[^\]]+\]\s*/, "")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/\bDE\b/g, " ")
         .replace(/(\d+)\s+(G|GR|GRS|KG|ML|L|LT|LTS|CC|UN|UND)\b/g, "$1$2")
         .replace(/[^A-Z0-9]/g, "");
+
+    const extraerCodigo = (txt) => {
+      const m = normalizarTexto(txt).match(/^\[([^\]]+)\]/);
+      return m ? normalizarTexto(m[1]) : "";
+    };
+
+    const esMismoProducto = (prodA, codA, prodB, codB) => {
+      const cA = normalizarTexto(codA) || extraerCodigo(prodA);
+      const cB = normalizarTexto(codB) || extraerCodigo(prodB);
+      if (cA && cB && cA === cB) return true;
+      const hA = huellaFlexible(prodA);
+      const hB = huellaFlexible(prodB);
+      return Boolean(hA && hB && hA === hB);
+    };
 
     const formatearDisplayProducto = (p) => {
       if (!p) return "";
@@ -369,7 +384,7 @@
 
       const aprobarYAjustarInventario = async (item) => {
         const jefe = prompt(
-          `Confirma tu nombre como Jefatura (Pedro o Bedanli) para aprobar el ajuste y enviarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`,
+          `Confirma tu nombre como Jefatura (Pedro o Bedanli) para aprobar el ajuste, limpiar desfases en Cuadratura y enviarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`,
           "Pedro"
         );
         if (!jefe || !JEFATURA.includes(jefe.trim())) {
@@ -379,10 +394,12 @@
 
         const ahoraStr = new Date().toLocaleString("es-CL");
         const prodNorm = normalizarTexto(item.productoDisplay || item.nombreProducto);
+        const codItem = item.codigoProducto || extraerCodigo(prodNorm);
 
         try {
           const detalleTexto = `Inventario General (${item.proveedor}) — Stock físico contado: ${item.cantidadContada} ${item.unidad}${item.observacion ? ` — Nota: ${item.observacion}` : ""}`;
 
+          // 1. Registrar en Historial Acumulativo
           const colHist = db.collection("historial_inventario");
           await colHist.add({
             producto: prodNorm,
@@ -406,8 +423,69 @@
             await batchClean.commit();
           }
 
-          await db.collection("inventario_general_esperando").doc(item.id).delete();
-          alert("✅ Ajustado y enviado al Historial Acumulativo de Correcciones de Inventario.");
+          // 2. Sincronizar y limpiar cualquier descuadre abierto de este mismo producto en Cuadratura Automática
+          const batchSync = db.batch();
+          let desfasesLimpiados = 0;
+
+          // 2a. Limpiar en Incidencias de Ruta
+          const incSnap = await db.collection("incidencias").get();
+          incSnap.docs.forEach((docSnap) => {
+            const inc = docSnap.data();
+            const coincidePrincipal = esMismoProducto(prodNorm, codItem, inc.producto, inc.codigoProducto);
+            const coincideCruce = inc.productoCruce && esMismoProducto(prodNorm, codItem, inc.productoCruce, inc.codigoProductoCruce);
+
+            if (coincidePrincipal || coincideCruce) {
+              const acciones = inc.acciones || [];
+              const checks = { ...(inc.checksAcciones || {}) };
+              if (acciones.includes("Ajustar Inventario en Bodega") && !checks["Ajustar Inventario en Bodega"]?.completado) {
+                checks["Ajustar Inventario en Bodega"] = {
+                  completado: true,
+                  por: `${jefe.trim()} (Inv. Gral)`,
+                  fechaHora: ahoraStr
+                };
+                const todasListas = acciones.every((ac) => checks[ac] && checks[ac].completado);
+                batchSync.update(db.collection("incidencias").doc(docSnap.id), {
+                  checksAcciones: checks,
+                  resuelto: todasListas ? true : Boolean(inc.resuelto)
+                });
+                desfasesLimpiados++;
+              }
+            }
+          });
+
+          // 2b. Limpiar en Incidentes Internos de Bodega
+          const bodegaSnap = await db.collection("incidentes_bodega").where("ajustado", "==", false).get();
+          bodegaSnap.docs.forEach((docSnap) => {
+            const ib = docSnap.data();
+            if (esMismoProducto(prodNorm, codItem, ib.producto, ib.codigoProducto)) {
+              batchSync.update(db.collection("incidentes_bodega").doc(docSnap.id), {
+                ajustado: true,
+                ajustadoPor: `${jefe.trim()} (Inv. Gral)`,
+                fechaHoraAjuste: ahoraStr
+              });
+              desfasesLimpiados++;
+            }
+          });
+
+          // 2c. Limpiar en Conteo Cíclico Pendiente
+          const conteoSnap = await db.collection("conteo_pendiente").get();
+          conteoSnap.docs.forEach((docSnap) => {
+            const cp = docSnap.data();
+            if (esMismoProducto(prodNorm, codItem, cp.producto, cp.codigoProducto)) {
+              batchSync.delete(db.collection("conteo_pendiente").doc(docSnap.id));
+              desfasesLimpiados++;
+            }
+          });
+
+          // 3. Quitar de la lista de espera de Inventario General
+          batchSync.delete(db.collection("inventario_general_esperando").doc(item.id));
+          await batchSync.commit();
+
+          alert(
+            desfasesLimpiados > 0
+              ? `✅ Ajustado, enviado al Historial Acumulativo y se limpiaron ${desfasesLimpiados} desfase(s) abierto(s) de este producto en Cuadratura.`
+              : "✅ Ajustado y enviado al Historial Acumulativo de Correcciones de Inventario."
+          );
         } catch (err) {
           alert("Error al ajustar: " + err.message);
         }
@@ -737,8 +815,9 @@
                   ⏳ Registro de Inventario Esperando Ajuste ({esperandoAjuste.length})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Conteos digitales terminados por bodega. Al aprobar Jefatura, pasan automáticamente al{" "}
-                  <strong className="text-emerald-700">Historial Acumulativo de Correcciones</strong> en Cuadratura.
+                  Conteos digitales terminados por bodega. Al aprobar Jefatura, se limpian los desfases abiertos en{" "}
+                  <strong className="text-sky-700">Cuadratura</strong> y pasan al{" "}
+                  <strong className="text-emerald-700">Historial Acumulativo</strong>.
                 </p>
               </div>
 
