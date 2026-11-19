@@ -63,10 +63,10 @@
       { id: "m5_inv_general", num: 5, grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Selección masiva o por marca para toma de stock.", archivo: "pgb-inventario.html", icono: "📦", listo: true },
       { id: "m6_conteo_ciclico", num: 6, grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde celular.", archivo: "pgb-inventario.html", icono: "📱", listo: true },
       { id: "m7_auditoria_inv", num: 7, grupo: "Inventario", nombre: "Auditoría Acumulativa Stock", desc: "Aprobación de Jefatura e historial de correcciones.", archivo: "pgb-operacion.html", icono: "⚖️", listo: true },
-      { id: "m8_omnicanal", num: 8, grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes en vivo de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html", icono: "🛒", listo: false },
-      { id: "m9_stock_sync", num: 9, grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento automático multi-canal sin sobreventas.", archivo: "ecommerce-sii.html", icono: "🔄", listo: false },
-      { id: "m10_sii_dte", num: 10, grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Boleta o Factura automática + monitor de folios CAF.", archivo: "ecommerce-sii.html", icono: "🧾", listo: false },
-      { id: "m11_colas_print", num: 11, grupo: "E-Commerce & SII", nombre: "Colas de Impresión Etiquetas", desc: "Lote general MeLi/Falabella + cola exclusiva Lider.", archivo: "ecommerce-sii.html", icono: "🖨️", listo: false },
+      { id: "m8_omnicanal", num: 8, grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes en vivo de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html", icono: "🛒", listo: true },
+      { id: "m9_stock_sync", num: 9, grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento automático multi-canal sin sobreventas.", archivo: "ecommerce-sii.html", icono: "🔄", listo: true },
+      { id: "m10_sii_dte", num: 10, grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Boleta o Factura automática + monitor de folios CAF.", archivo: "ecommerce-sii.html", icono: "🧾", listo: true },
+      { id: "m11_colas_print", num: 11, grupo: "E-Commerce & SII", nombre: "Colas de Impresión Etiquetas", desc: "Lote general MeLi/Falabella + cola exclusiva Lider.", archivo: "ecommerce-sii.html", icono: "🖨️", listo: true },
       { id: "m12_ruta_inc", num: 12, grupo: "Logística", nombre: "Tablero Incidencias y Ruta", desc: "Faltantes, cruces, rechazos y errores de facturación.", archivo: "pgb-operacion.html", icono: "🚚", listo: true },
       { id: "m13_retornos_merma", num: 13, grupo: "Logística", nombre: "Retornos y Mermas Bodega", desc: "Recepción de devoluciones, roturas y compras personal.", archivo: "pgb-operacion.html", icono: "📥", listo: true },
       { id: "m14_analitica_err", num: 14, grupo: "Logística", nombre: "Analítica 100% Bodega/Ventas", desc: "Gráficos mensuales de desempeño por colaborador.", archivo: "pgb-operacion.html", icono: "📊", listo: true },
@@ -84,7 +84,6 @@
       const [pinAdmin, setPinAdmin] = useState("");
       const [adminAutenticado, setAdminAutenticado] = useState(false);
 
-      // Login / Registro
       const [tabAuth, setTabAuth] = useState("ingresar");
       const [rutInput, setRutInput] = useState("");
       const [nombreReg, setNombreReg] = useState("");
@@ -92,12 +91,10 @@
       const [jefeReg, setJefeReg] = useState("");
       const [cargandoAuth, setCargandoAuth] = useState(false);
 
-      // Datos empresa activa
       const [empresa, setEmpresa] = useState(null);
       const [todasEmpresas, setTodasEmpresas] = useState([]);
-      const [tabPanel, setTabPanel] = useState("modulos"); // modulos | equipo | catalogo | apis
+      const [tabPanel, setTabPanel] = useState("modulos");
 
-      // Formularios Jefe
       const [nuevoNombreMiembro, setNuevoNombreMiembro] = useState("");
       const [nuevoRolMiembro, setNuevoRolMiembro] = useState(ROLES_JERARQUIA[1]);
 
@@ -108,7 +105,6 @@
       const [prodManualNom, setProdManualNom] = useState("");
       const [prodManualProv, setProdManualProv] = useState("");
 
-      // APIs e Integraciones
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
         meliSecret: "",
@@ -128,7 +124,6 @@
         return () => window.removeEventListener("hashchange", onHash);
       }, []);
 
-      // Escuchar todas las empresas si está en Super Admin
       useEffect(() => {
         if (!modoSuperAdmin) return;
         const unsub = db.collection("saas_empresas").onSnapshot((snap) => {
@@ -137,7 +132,6 @@
         return () => unsub();
       }, [modoSuperAdmin]);
 
-      // Escuchar empresa activa
       useEffect(() => {
         const rutClean = limpiarRut(rutActivo);
         if (!rutClean) {
@@ -152,7 +146,6 @@
               setApisForm((prev) => ({ ...prev, ...data.apis }));
             }
           } else {
-            // Auto-crear ficha base si el RUT ya existía en sesión
             const base = {
               rut: formatearRut(rutClean),
               nombre: rutClean === "769497226" ? "PGB Distribution Chile SpA" : rutClean === "775280425" ? "Tecnoshop Company SpA" : `Empresa ${formatearRut(rutClean)}`,
@@ -166,7 +159,6 @@
           }
         });
 
-        // Catálogo: PGB usa colección histórica compartida; empresas nuevas usan su propio catálogo aislado
         const colCat = rutClean === "769497226"
           ? db.collection("catalogo_productos")
           : db.collection("saas_empresas").doc(rutClean).collection("catalogo");
@@ -244,7 +236,6 @@
         setEmpresa(null);
       };
 
-      // GESTIÓN DE JERARQUÍA Y EQUIPO POR EL JEFE
       const agregarMiembroEquipo = async (e) => {
         e.preventDefault();
         if (!nuevoNombreMiembro.trim() || !empresa) return;
@@ -263,7 +254,6 @@
         await db.collection("saas_empresas").doc(empresa.id).update({ equipo: actualizado });
       };
 
-      // GESTIÓN DE CATÁLOGO MAESTRO (.XLSX Y MANUAL)
       const getColeccionCatalogo = () => {
         const rutClean = limpiarRut(rutActivo);
         return rutClean === "769497226"
@@ -339,7 +329,6 @@
         await getColeccionCatalogo().doc(id).delete();
       };
 
-      // GUARDAR LLAVES API
       const guardarConfigApis = async (e) => {
         e.preventDefault();
         if (!empresa) return;
@@ -353,7 +342,6 @@
         setGuardandoApis(false);
       };
 
-      // SUPER ADMIN TOGGLE DE MÓDULOS POR EMPRESA
       const toggleModuloEmpresa = async (emp, modId) => {
         const actuales = emp.modulosActivos || {};
         const nuevoValor = actuales[modId] === false ? true : false;
@@ -384,7 +372,6 @@
         window.location.href = mod.archivo;
       };
 
-      // VISTA CONSOLA SUPER ADMIN (#/comando)
       if (modoSuperAdmin) {
         if (!adminAutenticado) {
           return (
@@ -467,7 +454,6 @@
         );
       }
 
-      // PANTALLA DE LOGIN / AUTO-REGISTRO UNIVERSAL
       if (!rutActivo || !empresa) {
         return (
           <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center p-4">
@@ -585,14 +571,12 @@
         );
       }
 
-      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA
       const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] !== false);
       const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
       const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
 
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-6">
-          {/* CABECERA CORPORATIVA */}
           <div className="card-clean rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -619,7 +603,6 @@
             </div>
           </div>
 
-          {/* GUÍA RÁPIDA INTUITIVA PARA EL JEFE (CHECKLIST AUTOEXPLICATIVO) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={() => setTabPanel("equipo")}
@@ -661,7 +644,6 @@
             </button>
           </div>
 
-          {/* NAVEGACIÓN DE PESTAÑAS DEL NÚCLEO */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
             <button
               onClick={() => setTabPanel("modulos")}
@@ -689,7 +671,6 @@
             </button>
           </div>
 
-          {/* VISTA 1: LANZADOR DE LOS 18 MÓDULOS */}
           {tabPanel === "modulos" && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {modulosHabilitados.map((mod) => (
@@ -723,7 +704,6 @@
             </div>
           )}
 
-          {/* VISTA 2: JERARQUÍA Y EQUIPO EDITABLE POR EL JEFE */}
           {tabPanel === "equipo" && (
             <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
               <div>
@@ -781,7 +761,6 @@
             </div>
           )}
 
-          {/* VISTA 3: CATÁLOGO INTELIGENTE MAESTRO (.XLSX + MANUAL) */}
           {tabPanel === "catalogo" && (
             <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -855,7 +834,6 @@
             </div>
           )}
 
-          {/* VISTA 4: ESPACIOS INTUITIVOS PARA APIS (MERCADO LIBRE, FALABELLA, LIDER Y SII / OPENFACTURA) */}
           {tabPanel === "apis" && (
             <form onSubmit={guardarConfigApis} className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
               <div>
