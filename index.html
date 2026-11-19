@@ -47,6 +47,8 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
+    const RUT_PGB = "769497226";
+
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
     const formatearRut = (r) => {
       const c = limpiarRut(r);
@@ -102,30 +104,30 @@
     );
 
     const CATALOGO_18_MODULOS = [
-      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Identidad y Logo PNG", desc: "Logotipo corporativo en alta definición para sistema y reportes PDF.", archivo: "#config_equipo", listo: true },
-      { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, vendedores, bodega y despacho.", archivo: "#config_equipo", listo: true },
-      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga masiva en Excel (.xlsx) vinculada a toda la operación.", archivo: "#config_catalogo", listo: true },
-      { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Conexión para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis", listo: true },
-      { id: "m5_inv_general", num: "05", grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Filtrado por proveedor y selección masiva para toma física.", archivo: "pgb-inventario.html", listo: true },
-      { id: "m6_conteo_ciclico", num: "06", grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde dispositivos.", archivo: "pgb-inventario.html", listo: true },
-      { id: "m7_auditoria_inv", num: "07", grupo: "Inventario", nombre: "Auditoría Acumulativa de Stock", desc: "Aprobación de jefatura e historial de ajustes de inventario.", archivo: "pgb-operacion.html", listo: true },
-      { id: "m8_omnicanal", num: "08", grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes centralizadas de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html", listo: true },
-      { id: "m9_stock_sync", num: "09", grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento sincronizado multi-canal para evitar sobreventas.", archivo: "ecommerce-sii.html", listo: true },
-      { id: "m10_sii_dte", num: "10", grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Emisión automática de Boleta o Factura y control de folios CAF.", archivo: "ecommerce-sii.html", listo: true },
-      { id: "m11_colas_print", num: "11", grupo: "E-Commerce & SII", nombre: "Colas de Impresión Logística", desc: "Lote general MeLi/Falabella y bandeja física exclusiva Lider.", archivo: "ecommerce-sii.html", listo: true },
-      { id: "m12_ruta_inc", num: "12", grupo: "Logística", nombre: "Tablero de Incidencias y Ruta", desc: "Control de faltantes, cruces, rechazos y errores comerciales.", archivo: "pgb-operacion.html", listo: true },
-      { id: "m13_retornos_merma", num: "13", grupo: "Logística", nombre: "Retornos y Mermas Internas", desc: "Recepción de devoluciones, roturas y compras de personal.", archivo: "pgb-operacion.html", listo: true },
-      { id: "m14_analitica_err", num: "14", grupo: "Logística", nombre: "Analítica Operativa 100%", desc: "Indicadores mensuales de desempeño por área y colaborador.", archivo: "pgb-operacion.html", listo: true },
-      { id: "m15_pos_ventas", num: "15", grupo: "Comercial", nombre: "Punto de Venta (POS) y Cotizaciones", desc: "Facturación rápida de mesón y conversión de cotizaciones.", archivo: "ventas-pos.html", listo: true },
-      { id: "m16_caja_cobros", num: "16", grupo: "Comercial", nombre: "Cuentas por Cobrar y Arqueo", desc: "Control de créditos, abonos parciales y cierre de efectivo.", archivo: "ventas-pos.html", listo: true },
-      { id: "m17_compras_prov", num: "17", grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición por proveedor y recepción directa a inventario.", archivo: "compras-finanzas.html", listo: true },
-      { id: "m18_finanzas_bi", num: "18", grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Consolidado de ingresos, egresos operativos y margen neto.", archivo: "compras-finanzas.html", listo: true }
+      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Identidad y Logo PNG", desc: "Logotipo corporativo en alta definición para sistema y reportes PDF.", archivo: "#config_equipo" },
+      { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, vendedores, bodega y despacho.", archivo: "#config_equipo" },
+      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga masiva en Excel (.xlsx) vinculada a toda la operación.", archivo: "#config_catalogo" },
+      { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Conexión para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis" },
+      { id: "m5_inv_general", num: "05", grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Filtrado por proveedor y selección masiva para toma física.", archivo: "pgb-inventario.html" },
+      { id: "m6_conteo_ciclico", num: "06", grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde dispositivos.", archivo: "pgb-inventario.html" },
+      { id: "m7_auditoria_inv", num: "07", grupo: "Inventario", nombre: "Auditoría Acumulativa de Stock", desc: "Aprobación de jefatura e historial de ajustes de inventario.", archivo: "pgb-operacion.html" },
+      { id: "m8_omnicanal", num: "08", grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes centralizadas de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html" },
+      { id: "m9_stock_sync", num: "09", grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento sincronizado multi-canal para evitar sobreventas.", archivo: "ecommerce-sii.html" },
+      { id: "m10_sii_dte", num: "10", grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Emisión automática de Boleta o Factura y control de folios CAF.", archivo: "ecommerce-sii.html" },
+      { id: "m11_colas_print", num: "11", grupo: "E-Commerce & SII", nombre: "Colas de Impresión Logística", desc: "Lote general MeLi/Falabella y bandeja física exclusiva Lider.", archivo: "ecommerce-sii.html" },
+      { id: "m12_ruta_inc", num: "12", grupo: "Logística", nombre: "Tablero de Incidencias y Ruta", desc: "Control de faltantes, cruces, rechazos y errores comerciales.", archivo: "pgb-operacion.html" },
+      { id: "m13_retornos_merma", num: "13", grupo: "Logística", nombre: "Retornos y Mermas Internas", desc: "Recepción de devoluciones, roturas y compras de personal.", archivo: "pgb-operacion.html" },
+      { id: "m14_analitica_err", num: "14", grupo: "Logística", nombre: "Analítica Operativa 100%", desc: "Indicadores mensuales de desempeño por área y colaborador.", archivo: "pgb-operacion.html" },
+      { id: "m15_pos_ventas", num: "15", grupo: "Comercial", nombre: "Punto de Venta (POS) y Cotizaciones", desc: "Facturación rápida de mesón y conversión de cotizaciones.", archivo: "ventas-pos.html" },
+      { id: "m16_caja_cobros", num: "16", grupo: "Comercial", nombre: "Cuentas por Cobrar y Arqueo", desc: "Control de créditos, abonos parciales y cierre de efectivo.", archivo: "ventas-pos.html" },
+      { id: "m17_compras_prov", num: "17", grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición por proveedor y recepción directa a inventario.", archivo: "compras-finanzas.html" },
+      { id: "m18_finanzas_bi", num: "18", grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Consolidado de ingresos, egresos operativos y margen neto.", archivo: "compras-finanzas.html" }
     ];
 
     const ROLES_JERARQUIA = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
 
     function App() {
-      const [rutActivo, setRutActivo] = useState(() => localStorage.getItem("nexus_empresa_rut") || "");
+      const [rutActivo, setRutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
       const [modoSuperAdmin, setModoSuperAdmin] = useState(() => window.location.hash === "#/comando");
       const [toquesCandado, setToquesCandado] = useState(0);
       const [pinAdmin, setPinAdmin] = useState("");
@@ -174,18 +176,17 @@
         window.addEventListener("hashchange", onHash);
 
         auth.signInAnonymously().then(() => {
-          // Garantizar que PGB Distribution Chile SpA exista sin sobrescribir su configuración ni su logo previo
-          const pgbRef = db.collection("saas_empresas").doc("769497226");
+          // Asegurar ficha de PGB en consola sin tocar su configuración ni su logo
+          const pgbRef = db.collection("saas_empresas").doc(RUT_PGB);
           pgbRef.get().then((snap) => {
             if (!snap.exists) {
-              const modulosTodos = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {});
               pgbRef.set({
                 rut: "76.949.722-6",
                 nombre: "PGB Distribution Chile SpA",
                 rubro: "Distribuidora / Mayorista",
                 activa: true,
-                equipo: [],
-                modulosActivos: modulosTodos,
+                archivoPrincipal: "pgb-operacion.html",
+                modulosActivos: {},
                 creadoEn: new Date().toISOString()
               }, { merge: true });
             }
@@ -204,6 +205,15 @@
         };
       }, []);
 
+      // Redirección directa e intacta a PGB Operación cuando el RUT activo es PGB
+      useEffect(() => {
+        if (modoSuperAdmin) return;
+        const rutClean = limpiarRut(rutActivo);
+        if (rutClean === RUT_PGB) {
+          window.location.href = "pgb-operacion.html";
+        }
+      }, [rutActivo, modoSuperAdmin]);
+
       useEffect(() => {
         if (!modoSuperAdmin) return;
         const unsub = db.collection("saas_empresas").onSnapshot((snap) => {
@@ -214,13 +224,17 @@
 
       useEffect(() => {
         const rutClean = limpiarRut(rutActivo);
-        if (!rutClean) {
+        if (!rutClean || rutClean === RUT_PGB) {
           setEmpresa(null);
           return;
         }
         const unsub = db.collection("saas_empresas").doc(rutClean).onSnapshot((doc) => {
           if (doc.exists) {
             const data = { id: doc.id, ...doc.data() };
+            if (data.archivoPrincipal) {
+              window.location.href = data.archivoPrincipal;
+              return;
+            }
             setEmpresa(data);
             if (data.apis) {
               setApisForm((prev) => ({ ...prev, ...data.apis }));
@@ -232,10 +246,7 @@
           }
         });
 
-        const colCat = rutClean === "769497226"
-          ? db.collection("catalogo_productos")
-          : db.collection("saas_empresas").doc(rutClean).collection("catalogo");
-
+        const colCat = db.collection("saas_empresas").doc(rutClean).collection("catalogo");
         const unsubCat = colCat.onSnapshot((snap) => {
           const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
@@ -278,12 +289,11 @@
         alert("Clave maestra actualizada correctamente.");
       };
 
-      // CARGADOR DE LOGO PNG (SINCRONIZADO CON OPERACIÓN, INVENTARIO Y REPORTES PDF)
       const subirLogoEmpresaPng = async (empresaId, e) => {
         const file = e.target.files[0];
         if (!file) return;
         if (file.size > 900 * 1024) {
-          alert("El archivo PNG supera los 900 KB. Usa una versión optimizada para que cargue instantáneamente en reportes PDF.");
+          alert("El archivo PNG supera los 900 KB. Usa una versión optimizada para reportes PDF.");
           e.target.value = "";
           return;
         }
@@ -294,7 +304,7 @@
             const base64Str = ev.target.result;
             await db.collection("saas_empresas").doc(empresaId).set({ logoBase64: base64Str }, { merge: true });
             setSubiendoLogo(false);
-            alert("Logotipo PNG guardado y sincronizado en toda la plataforma y reportes PDF.");
+            alert("Logotipo PNG guardado y sincronizado.");
           };
           reader.readAsDataURL(file);
         } catch (err) {
@@ -313,6 +323,14 @@
         e.preventDefault();
         const rutClean = limpiarRut(rutInput);
         if (rutClean.length < 7) return alert("Ingresa un RUT corporativo válido.");
+
+        // Si es PGB Distribution Chile SpA, entra directo a su aplicación intacta
+        if (rutClean === RUT_PGB) {
+          localStorage.setItem("nexus_empresa_rut", RUT_PGB);
+          window.location.href = "pgb-operacion.html";
+          return;
+        }
+
         setCargandoAuth(true);
         try {
           const docRef = db.collection("saas_empresas").doc(rutClean);
@@ -322,12 +340,17 @@
             setCargandoAuth(false);
             return;
           }
-          if (snap.data().activa === false) {
+          const data = snap.data();
+          if (data.activa === false) {
             alert("Esta organización se encuentra temporalmente inactiva.");
             setCargandoAuth(false);
             return;
           }
           localStorage.setItem("nexus_empresa_rut", rutClean);
+          if (data.archivoPrincipal) {
+            window.location.href = data.archivoPrincipal;
+            return;
+          }
           setRutActivo(rutClean);
         } catch (err) {
           alert("Error de conexión: " + err.message);
@@ -343,21 +366,22 @@
         }
         setCreandoEmpresaAdmin(true);
         try {
-          const modulosTodos = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {});
+          // Todos los módulos inician con sus switches APAGADOS (false)
+          const modulosApagados = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: false }), {});
           await db.collection("saas_empresas").doc(rutClean).set({
             rut: formatearRut(rutClean),
             nombre: nombreReg.trim(),
             rubro: rubroReg,
             activa: true,
             equipo: [{ id: Date.now().toString(), nombre: jefeReg.trim(), rol: "Jefatura / Admin" }],
-            modulosActivos: modulosTodos,
+            modulosActivos: modulosApagados,
             creadoEn: new Date().toISOString()
           }, { merge: true });
 
           setRutNuevoAdmin("");
           setNombreReg("");
           setJefeReg("");
-          alert(`Empresa "${nombreReg.trim()}" registrada y habilitada con los 18 módulos.`);
+          alert(`Empresa "${nombreReg.trim()}" registrada con los switches desactivados. Enciende solo los módulos que requiera.`);
         } catch (err) {
           alert("Error al crear empresa: " + err.message);
         }
@@ -390,9 +414,7 @@
 
       const getColeccionCatalogo = () => {
         const rutClean = limpiarRut(rutActivo);
-        return rutClean === "769497226"
-          ? db.collection("catalogo_productos")
-          : db.collection("saas_empresas").doc(rutClean).collection("catalogo");
+        return db.collection("saas_empresas").doc(rutClean).collection("catalogo");
       };
 
       const subirExcelCatalogo = async (e) => {
@@ -478,7 +500,8 @@
 
       const toggleModuloEmpresa = async (emp, modId) => {
         const actuales = emp.modulosActivos || {};
-        const nuevoValor = actuales[modId] === false ? true : false;
+        // Si el switch no estaba explícitamente en true, pasa a true; si estaba en true, pasa a false
+        const nuevoValor = actuales[modId] === true ? false : true;
         await db.collection("saas_empresas").doc(emp.id).update({
           [`modulosActivos.${modId}`]: nuevoValor
         });
@@ -508,7 +531,7 @@
         window.location.href = mod.archivo;
       };
 
-      // CONSOLA DE COMANDO SUPER ADMIN (#/comando) - ESTÉTICA CORPORATIVA BLANCA + SWITCHES + CARGADOR LOGO PNG
+      // CONSOLA DE COMANDO SUPER ADMIN (#/comando) - ESTÉTICA CORPORATIVA BLANCA + SWITCHES APAGADOS POR DEFECTO
       if (modoSuperAdmin) {
         if (!adminAutenticado) {
           return (
@@ -517,7 +540,7 @@
                 <div className="space-y-1">
                   <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Consola de Comando</span>
                   <h1 className="text-xl font-extrabold text-slate-900">Acceso Administrativo</h1>
-                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gestionar empresas, logotipos y módulos.</p>
+                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gestionar empresas, logotipos y switches.</p>
                 </div>
                 <div>
                   <input
@@ -552,7 +575,7 @@
             <div className="max-w-6xl mx-auto space-y-6">
               <div className="corp-card rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">NEXUS ERP • Administración Central</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">NEXUS ERP • Consola de Comando</span>
                   <h1 className="text-2xl font-extrabold text-slate-900">Gestión de Empresas, Logotipos PNG y Switches</h1>
                 </div>
                 <button
@@ -563,11 +586,11 @@
                 </button>
               </div>
 
-              {/* CREAR EMPRESA NUEVA (EXCLUSIVO SUPER ADMIN) */}
+              {/* CREAR EMPRESA NUEVA (EXCLUSIVO SUPER ADMIN - SWITCHES INICIAN APAGADOS) */}
               <form onSubmit={crearEmpresaDesdeSuperAdmin} className="corp-card rounded-2xl p-6 space-y-4">
                 <div>
                   <h2 className="text-base font-extrabold text-slate-900">Registrar Nueva Empresa Cliente</h2>
-                  <p className="text-xs text-slate-500">Habilita una organización con acceso inmediato a los 18 módulos del sistema sin alterar empresas existentes.</p>
+                  <p className="text-xs text-slate-500">La empresa se crea con todos los interruptores de módulos apagados para que actives solo los que necesite.</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <input
@@ -611,7 +634,7 @@
                   disabled={creandoEmpresaAdmin}
                   className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer"
                 >
-                  {creandoEmpresaAdmin ? "Registrando..." : "Crear Empresa y Habilitar Módulos"}
+                  {creandoEmpresaAdmin ? "Registrando..." : "Crear Empresa"}
                 </button>
               </form>
 
@@ -635,9 +658,10 @@
                 </div>
               </form>
 
-              {/* LISTADO DE EMPRESAS CON CARGADOR DE LOGO PNG Y SWITCHES DE MÓDULOS */}
+              {/* LISTADO DE EMPRESAS CON CARGADOR DE LOGO PNG Y SWITCHES (APAGADOS POR DEFECTO) */}
               {todasEmpresas.map((emp) => {
                 const empresaActiva = emp.activa !== false;
+                const esPgb = limpiarRut(emp.id) === RUT_PGB;
                 return (
                   <div key={emp.id} className="corp-card rounded-2xl p-6 space-y-5">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -657,7 +681,10 @@
                               {empresaActiva ? "Activa" : "Pausada"}
                             </span>
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            RUT: {emp.rut} • Rubro: {emp.rubro || "General"}
+                            {esPgb ? " • Aplicación Dedicada Intacta (pgb-operacion.html)" : ""}
+                          </p>
                         </div>
                       </div>
 
@@ -685,30 +712,34 @@
                         <button
                           onClick={() => {
                             localStorage.setItem("nexus_empresa_rut", emp.id);
+                            if (esPgb) {
+                              window.location.href = "pgb-operacion.html";
+                              return;
+                            }
                             setRutActivo(emp.id);
                             window.location.hash = "";
                             setModoSuperAdmin(false);
                           }}
                           className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
                         >
-                          Entrar al Espacio
+                          {esPgb ? "Abrir PGB Operación" : "Entrar al Espacio"}
                         </button>
                       </div>
                     </div>
 
                     <div>
                       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2.5">
-                        Interruptores de Módulos Habilitados
+                        Interruptores de Módulos (Apagados por defecto)
                       </span>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
                         {CATALOGO_18_MODULOS.map((m) => {
-                          const encendido = emp.modulosActivos?.[m.id] !== false;
+                          const encendido = emp.modulosActivos?.[m.id] === true;
                           return (
                             <div
                               key={m.id}
                               onClick={() => toggleModuloEmpresa(emp, m.id)}
                               className={`p-2.5 rounded-xl border transition cursor-pointer flex flex-col justify-between gap-2 ${
-                                encendido ? "bg-white border-slate-300 text-slate-900" : "bg-slate-50 border-slate-200 text-slate-400"
+                                encendido ? "bg-white border-slate-900 text-slate-900" : "bg-slate-50 border-slate-200 text-slate-400"
                               }`}
                             >
                               <div className="flex items-center justify-between">
@@ -801,8 +832,8 @@
         );
       }
 
-      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA (ESTÉTICA BLANCA MINIMALISTA SIN EMOJIS + LOGO PNG)
-      const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] !== false);
+      // PANEL UNIVERSAL PARA EMPRESAS NUEVAS (MUESTRA SOLO LOS MÓDULOS CON SWITCH ENCENDIDO)
+      const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] === true);
       const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
       const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
 
@@ -833,7 +864,7 @@
                   {empresa.nombre}
                 </h1>
                 <p className="text-xs sm:text-sm text-slate-500">
-                  Configura tu logotipo, estructura tu equipo, carga tu catálogo maestro y accede a tus módulos.
+                  Configura tu logotipo, estructura tu equipo, carga tu catálogo maestro y accede a tus módulos habilitados.
                 </p>
               </div>
             </div>
@@ -848,7 +879,6 @@
             </div>
           </div>
 
-          {/* CONFIGURACIÓN RÁPIDA DE LA EMPRESA */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={() => setTabPanel("equipo")}
@@ -890,7 +920,6 @@
             </button>
           </div>
 
-          {/* PESTAÑAS */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
             <button
               onClick={() => setTabPanel("modulos")}
@@ -919,40 +948,48 @@
           </div>
 
           {tabPanel === "modulos" && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {modulosHabilitados.map((mod) => (
-                <div
-                  key={mod.id}
-                  onClick={() => abrirModulo(mod)}
-                  className="corp-card rounded-2xl p-5 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-4"
-                >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                        Módulo {mod.num} • {mod.grupo}
-                      </span>
-                      <span className="text-[10px] font-bold text-emerald-700">
-                        Activo
-                      </span>
+            modulosHabilitados.length === 0 ? (
+              <div className="corp-card rounded-2xl p-10 text-center space-y-2">
+                <h3 className="text-base font-extrabold text-slate-900">No hay módulos operativos encendidos todavía</h3>
+                <p className="text-xs text-slate-500">
+                  Puedes configurar tu logotipo, equipo, catálogo Excel y credenciales API en las pestañas superiores mientras administración activa los interruptores de tus módulos.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {modulosHabilitados.map((mod) => (
+                  <div
+                    key={mod.id}
+                    onClick={() => abrirModulo(mod)}
+                    className="corp-card rounded-2xl p-5 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                          Módulo {mod.num} • {mod.grupo}
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-700">
+                          Activo
+                        </span>
+                      </div>
+                      <h3 className="text-base font-extrabold text-slate-900">
+                        {mod.nombre}
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{mod.desc}</p>
                     </div>
-                    <h3 className="text-base font-extrabold text-slate-900">
-                      {mod.nombre}
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">{mod.desc}</p>
-                  </div>
 
-                  <div className="text-xs font-bold text-slate-900 flex items-center justify-between pt-3 border-t border-slate-100">
-                    <span>Abrir módulo</span>
-                    <span>→</span>
+                    <div className="text-xs font-bold text-slate-900 flex items-center justify-between pt-3 border-t border-slate-100">
+                      <span>Abrir módulo</span>
+                      <span>→</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           )}
 
           {tabPanel === "equipo" && (
             <div className="space-y-6">
-              {/* CARGADOR DE LOGOTIPO PNG DE LA EMPRESA */}
               <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <div className="w-28 h-20 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center p-2 shrink-0">
@@ -994,7 +1031,6 @@
                 </div>
               </div>
 
-              {/* JERARQUÍA Y COLABORADORES */}
               <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
                 <div>
                   <h2 className="text-lg font-extrabold text-slate-900">Estructura y Jerarquía de la Organización</h2>
