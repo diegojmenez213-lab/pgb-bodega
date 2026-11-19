@@ -115,6 +115,16 @@
         window.location.href = "index.html";
       };
 
+      const navegarAislado = (destinoUrl) => {
+        // Barrera de seguridad absoluta: ningún cliente externo puede abrir archivos exclusivos de PGB
+        if (!destinoUrl || destinoUrl === "pgb-operacion.html" || destinoUrl === "pgb-backup.html") {
+          window.location.href = "logistica-rutas.html";
+          return;
+        }
+        localStorage.setItem("nexus_empresa_rut", rutActivo);
+        window.location.href = destinoUrl;
+      };
+
       const agregarMiembro = async (e) => {
         e.preventDefault();
         if (!nuevoNombre.trim() || !empresa) return;
@@ -204,7 +214,6 @@
         setGuardandoApis(false);
       };
 
-      // Construye solo los espacios operativos naturales según lo habilitado (sin mostrar switches ni terminología interna)
       const espaciosOperativos = useMemo(() => {
         if (!empresa) return [];
         const m = empresa.modulosActivos || {};
@@ -236,7 +245,7 @@
             area: "Despacho y Operaciones",
             titulo: "Operación Logística y Trazabilidad",
             desc: "Control de rutas, armado de pedidos, devoluciones y auditoría de movimientos.",
-            url: "pgb-operacion.html"
+            url: "logistica-rutas.html"
           });
         }
 
@@ -319,7 +328,6 @@
 
       return (
         <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-5">
-          {/* CABECERA LIMPIA DE LA EMPRESA (SIN REFERENCIA A SWITCHES NI MÓDULOS INTERNOS) */}
           <div className={`corp-card rounded-2xl p-6 sm:p-7 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
             <div className="flex items-center gap-4">
               {empresa.logoBase64 && (
@@ -346,7 +354,6 @@
             </button>
           </div>
 
-          {/* AVISOS GUIADOS PARA CONFIGURAR APIS Y CATÁLOGO */}
           {alertasPendientes.length > 0 && (
             <div className="corp-card rounded-2xl p-5 border-amber-300 bg-amber-50/30 space-y-2.5">
               <span className="text-xs font-extrabold uppercase tracking-wider text-amber-900 block">
@@ -368,7 +375,6 @@
             </div>
           )}
 
-          {/* NAVEGACIÓN NATURAL DEL CLIENTE */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
             <button onClick={() => setTab("inicio")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "inicio" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
               Operación Principal
@@ -384,7 +390,6 @@
             </button>
           </div>
 
-          {/* VISTA 1: OPERACIÓN PRINCIPAL */}
           {tab === "inicio" && (
             <div className="space-y-4">
               {espaciosOperativos.length === 0 ? (
@@ -397,7 +402,7 @@
                   {espaciosOperativos.map((esp) => (
                     <div
                       key={esp.id}
-                      onClick={() => (window.location.href = esp.url)}
+                      onClick={() => navegarAislado(esp.url)}
                       className="corp-card rounded-2xl p-6 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-5"
                     >
                       <div>
@@ -418,7 +423,6 @@
             </div>
           )}
 
-          {/* VISTA 2: CATÁLOGO MAESTRO (EXCEL Y MANUAL) */}
           {tab === "catalogo" && (
             <div className="corp-card rounded-2xl p-6 space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -488,7 +492,6 @@
             </div>
           )}
 
-          {/* VISTA 3: CONEXIONES API Y SII */}
           {tab === "apis" && (
             <form onSubmit={guardarApis} className="corp-card rounded-2xl p-6 space-y-5">
               <div>
@@ -550,7 +553,6 @@
             </form>
           )}
 
-          {/* VISTA 4: EQUIPO */}
           {tab === "equipo" && (
             <div className="corp-card rounded-2xl p-6 space-y-5">
               <div>
