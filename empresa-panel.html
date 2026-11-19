@@ -369,12 +369,10 @@
       const [empresa, setEmpresa] = useState(null);
       const [vista, setVista] = useState("inicio");
 
-      // Datos en tiempo real
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
       const [compras, setCompras] = useState([]);
 
-      // Formularios de Venta Rápida / Simulación
       const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
       const [canalNuevo, setCanalNuevo] = useState("Mercado Libre");
       const [compradorNuevo, setCompradorNuevo] = useState("");
@@ -384,23 +382,20 @@
       const [totalNuevo, setTotalNuevo] = useState(19990);
       const [vendedorSeleccionado, setVendedorSeleccionado] = useState("");
 
-      // Filtros de Ventas y Facturas
       const [filtroCanalVenta, setFiltroCanalVenta] = useState("TODOS");
       const [busquedaVenta, setBusquedaVenta] = useState("");
-      const [subTabFacturas, setSubTabFacturas] = useState("por_imprimir"); // por_imprimir | ya_impresas | lider
+      const [subTabFacturas, setSubTabFacturas] = useState("por_imprimir");
       const [seleccionLoteIds, setSeleccionLoteIds] = useState([]);
       const [loteParaImprimir, setLoteParaImprimir] = useState([]);
       const [dteVisualizando, setDteVisualizando] = useState(null);
 
-      // Catálogo
       const [busquedaCat, setBusquedaCat] = useState("");
       const [importandoExcel, setImportandoExcel] = useState(false);
       const [manualSku, setManualSku] = useState("");
       const [manualNombre, setManualNombre] = useState("");
       const [manualProveedor, setManualProveedor] = useState("");
 
-      // Configuración: APIs, Personal y Apariencia
-      const [subTabConfig, setSubTabConfig] = useState("apis"); // apis | personal | apariencia
+      const [subTabConfig, setSubTabConfig] = useState("apis");
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
         meliSecret: "",
@@ -425,7 +420,6 @@
       const [ayudaApiModal, setAyudaApiModal] = useState(null);
       const [guardandoConfig, setGuardandoConfig] = useState(false);
 
-      // Personal
       const [nuevoColabNombre, setNuevoColabNombre] = useState("");
       const [nuevoColabRol, setNuevoColabRol] = useState(ROLES[1]);
 
@@ -482,18 +476,63 @@
 
       const navegarAislado = (destinoUrl) => {
         if (!destinoUrl || destinoUrl === "pgb-operacion.html" || destinoUrl === "pgb-backup.html") {
-          window.location.href = "logistica-rutas.html";
+          window.location.href = "index.html";
           return;
         }
         localStorage.setItem("nexus_empresa_rut", rutActivo);
         window.location.href = destinoUrl;
       };
 
-      // Tema visual seleccionado por el cliente (predeterminado: claro_retail)
+      // Evaluación estricta de switches encendidos en super-admin.html
+      const areasHabilitadasPorSwitch = useMemo(() => {
+        const m = empresa?.modulosActivos || {};
+        const lista = [];
+
+        if (m.m17_compras_prov || m.m18_finanzas_bi) {
+          lista.push({
+            id: "compras",
+            titulo: "Recepción de Facturas SII / XML",
+            desc: "Carga stock automático desde proveedores",
+            url: "compras-finanzas.html"
+          });
+        }
+
+        if (m.m5_inv_general || m.m6_conteo_ciclico) {
+          lista.push({
+            id: "inventario",
+            titulo: "Toma de Inventario Físico",
+            desc: "Conteo por proveedor y planillas PDF",
+            url: "pgb-inventario.html"
+          });
+        }
+
+        if (m.m12_ruta_inc || m.m13_retornos_merma || m.m14_analitica_err || m.m7_auditoria_inv) {
+          lista.push({
+            id: "logistica",
+            titulo: "Logística, Rutas y Trazabilidad",
+            desc: "Control de despacho y movimientos",
+            url: "logistica-rutas.html"
+          });
+        }
+
+        if (m.m15_pos_ventas || m.m16_caja_cobros) {
+          lista.push({
+            id: "pos",
+            titulo: "Punto de Venta (POS) y Caja",
+            desc: "Ventas de mesón y cuentas por cobrar",
+            url: "ventas-pos.html"
+          });
+        }
+
+        return lista;
+      }, [empresa]);
+
+      const usaColaLider = Boolean(empresa?.modulosActivos?.m11_colas_print);
+      const usaLectorComprasXml = Boolean(empresa?.modulosActivos?.m17_compras_prov);
+
       const temaId = empresa?.temaVisual || (empresa?.paleta === "ejecutivo" ? "claro_ejecutivo" : empresa?.paleta === "logistica" ? "claro_esmeralda" : "claro_retail");
       const T = TEMAS_DISPONIBLES[temaId] || TEMAS_DISPONIBLES.claro_retail;
 
-      // Orden personalizado de menú del cliente
       const menuOrdenado = useMemo(() => {
         const ordenGuardado = Array.isArray(empresa?.ordenMenu) ? empresa.ordenMenu : null;
         if (!ordenGuardado || ordenGuardado.length !== VISTAS_DEFAULT.length) return VISTAS_DEFAULT;
@@ -535,7 +574,6 @@
 
       const faltanApis = !estadoConexiones.sii || (!estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
-      // Registrar venta / simulación omnicanal
       const registrarOrdenOmnicanal = async (e) => {
         e.preventDefault();
         const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
@@ -613,7 +651,6 @@
         await empRef().collection("ecommerce_ordenes").doc(orden.id).delete();
       };
 
-      // Sugerido inteligente de catálogo basado en ítems detectados en facturas de compra/venta que aún no están en catálogo
       const sugeridosCatalogo = useMemo(() => {
         const nombresEnCatalogo = new Set(catalogo.map((p) => String(p.nombre || "").trim().toUpperCase()));
         const skusEnCatalogo = new Set(catalogo.filter((p) => p.codigo).map((p) => String(p.codigo || "").trim().toUpperCase()));
@@ -651,7 +688,6 @@
         });
       };
 
-      // Ranking de productos más vendidos
       const rankingProductosVendidos = useMemo(() => {
         const mapa = {};
         ordenes.forEach((o) => {
@@ -663,7 +699,6 @@
         return Object.values(mapa).sort((a, b) => b.unidades - a.unidades);
       }, [ordenes]);
 
-      // Listas separadas de Facturas: Por Imprimir (orden llegada), Ya Impresas, y Cola Física Lider
       const facturasPorImprimir = useMemo(() => {
         return ordenes
           .filter((o) => !o.etiquetaImpresa)
@@ -703,7 +738,6 @@
         }, 300);
       };
 
-      // Catálogo acciones
       const agregarProductoManual = async (e) => {
         e.preventDefault();
         if (!manualNombre.trim()) return;
@@ -825,7 +859,6 @@
 
       return (
         <div className={`min-h-screen pb-24 lg:pb-10 transition-colors ${T.pageBg}`}>
-          {/* CONTENEDORES DE IMPRESIÓN OFICIAL SII */}
           {dteVisualizando && (
             <div className="print-only bg-white p-2">
               <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
@@ -840,7 +873,6 @@
             </div>
           )}
 
-          {/* MODAL VISTA PREVIA DTE INDIVIDUAL */}
           {dteVisualizando && (
             <div className="fixed inset-0 z-50 bg-slate-950/70 flex items-center justify-center p-4 overflow-y-auto no-print">
               <div className="bg-slate-100 text-slate-900 rounded-3xl max-w-3xl w-full p-5 space-y-4 shadow-2xl">
@@ -885,7 +917,6 @@
             </div>
           )}
 
-          {/* MODAL AYUDA API KEY */}
           {ayudaApiModal && AYUDA_APIS[ayudaApiModal] && (
             <div className="fixed inset-0 z-50 bg-slate-950/70 flex items-center justify-center p-4 no-print">
               <div className={`${T.card} rounded-2xl max-w-md w-full p-6 space-y-4`}>
@@ -905,7 +936,6 @@
             </div>
           )}
 
-          {/* MODAL NUEVA VENTA / SIMULACIÓN */}
           {modalNuevaVenta && (
             <div className="fixed inset-0 z-50 bg-slate-950/70 flex items-center justify-center p-4 no-print">
               <form onSubmit={registrarOrdenOmnicanal} className={`${T.card} rounded-3xl max-w-lg w-full p-6 space-y-4`}>
@@ -920,7 +950,7 @@
                     <select value={canalNuevo} onChange={(e) => setCanalNuevo(e.target.value)} className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold ${T.input}`}>
                       <option value="Mercado Libre">Mercado Libre</option>
                       <option value="Falabella">Falabella</option>
-                      <option value="Lider">Lider (Solo Impresión Física)</option>
+                      {usaColaLider && <option value="Lider">Lider (Solo Impresión Física)</option>}
                       <option value="Venta Directa">Venta Directa / Mesón</option>
                     </select>
                   </div>
@@ -975,7 +1005,7 @@
             </div>
           )}
 
-          {/* CABECERA EJECUTIVA + BOTONERA SUPERIOR EN COMPUTADORA */}
+          {/* CABECERA EJECUTIVA */}
           <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 space-y-4 no-print">
             <div className={`${T.card} rounded-2xl p-4 sm:p-5 border-t-4 ${T.borderTop} flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
@@ -993,7 +1023,6 @@
                 </div>
               </div>
 
-              {/* MENÚ PANORÁMICO EN COMPUTADORA (ESTILO AUTOVENTAS) */}
               <div className="hidden lg:flex items-center gap-1.5 p-1 rounded-2xl border border-slate-200/40">
                 {menuOrdenado.map((item) => (
                   <button
@@ -1013,7 +1042,6 @@
                 ))}
               </div>
 
-              {/* CONTROLES RÁPIDOS */}
               <div className="flex flex-wrap items-center gap-2">
                 <div className={`${T.cardMuted} px-3 py-2 rounded-xl flex items-center gap-2`}>
                   <span className={`text-[11px] font-bold ${T.textMain}`}>
@@ -1032,11 +1060,10 @@
               </div>
             </div>
 
-            {/* ================= VISTA 1: INICIO (RESUMEN EJECUTIVO + ÁREAS OPERATIVAS) ================= */}
+            {/* ================= VISTA 1: INICIO ================= */}
             {vista === "inicio" && (
               <div className="space-y-4">
-                {/* 4 KPI COMPACTOS */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className={`grid grid-cols-2 ${usaColaLider ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-3`}>
                   <div className={`${T.card} rounded-2xl p-4`}>
                     <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Ventas Totales</span>
                     <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>${totalVendidoClp.toLocaleString("es-CL")}</p>
@@ -1047,11 +1074,13 @@
                     <p className="text-xl font-extrabold text-amber-500 mt-1">{facturasPorImprimir.length}</p>
                     <span className={`text-[11px] ${T.textSub}`}>Listas para lote PDF →</span>
                   </div>
-                  <div onClick={() => { setVista("facturas"); setSubTabFacturas("lider"); }} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
-                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Cola Física Lider</span>
-                    <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>{colaFisicaLider.length}</p>
-                    <span className={`text-[11px] ${T.textSub}`}>Entrega física obligatoria →</span>
-                  </div>
+                  {usaColaLider && (
+                    <div onClick={() => { setVista("facturas"); setSubTabFacturas("lider"); }} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
+                      <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Cola Física Lider</span>
+                      <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>{colaFisicaLider.length}</p>
+                      <span className={`text-[11px] ${T.textSub}`}>Entrega física obligatoria →</span>
+                    </div>
+                  )}
                   <div onClick={() => setVista("catalogo")} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
                     <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Producto Más Vendido</span>
                     <p className={`text-sm font-extrabold mt-1.5 truncate ${T.textMain}`}>{productoEstrella}</p>
@@ -1059,9 +1088,7 @@
                   </div>
                 </div>
 
-                {/* DISTRIBUCIÓN PANORÁMICA 2 COLUMNAS EN PC */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                  {/* IZQUIERDA: PENDIENTES Y ACCESOS DIRECTOS */}
                   <div className="lg:col-span-5 space-y-4">
                     {faltanApis && (
                       <div className={`${T.card} rounded-2xl p-5 border-amber-400/70 space-y-2.5`}>
@@ -1091,38 +1118,29 @@
                       </div>
                     )}
 
-                    {/* MÓDULOS OPERATIVOS CONECTADOS */}
-                    <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                      <h2 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Áreas Operativas Conectadas</h2>
-                      <div className="space-y-2">
-                        <button onClick={() => navegarAislado("compras-finanzas.html")} className={`w-full p-3.5 rounded-xl text-left flex items-center justify-between cursor-pointer ${T.cardMuted}`}>
-                          <div>
-                            <p className={`text-xs font-extrabold ${T.textMain}`}>Recepción de Facturas SII / XML</p>
-                            <p className={`text-[11px] ${T.textSub}`}>Carga stock automático desde proveedores</p>
-                          </div>
-                          <span className="text-xs font-bold">→</span>
-                        </button>
-
-                        <button onClick={() => navegarAislado("pgb-inventario.html")} className={`w-full p-3.5 rounded-xl text-left flex items-center justify-between cursor-pointer ${T.cardMuted}`}>
-                          <div>
-                            <p className={`text-xs font-extrabold ${T.textMain}`}>Toma de Inventario Físico</p>
-                            <p className={`text-[11px] ${T.textSub}`}>Conteo por proveedor y planillas PDF</p>
-                          </div>
-                          <span className="text-xs font-bold">→</span>
-                        </button>
-
-                        <button onClick={() => navegarAislado("logistica-rutas.html")} className={`w-full p-3.5 rounded-xl text-left flex items-center justify-between cursor-pointer ${T.cardMuted}`}>
-                          <div>
-                            <p className={`text-xs font-extrabold ${T.textMain}`}>Logística, Rutas y Devoluciones</p>
-                            <p className={`text-[11px] ${T.textSub}`}>Control de armado, mermas y auditoría</p>
-                          </div>
-                          <span className="text-xs font-bold">→</span>
-                        </button>
+                    {/* SOLO RENDERIZA LOS MÓDULOS QUE TIENEN SU SWITCH ENCENDIDO */}
+                    {areasHabilitadasPorSwitch.length > 0 && (
+                      <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                        <h2 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Áreas Operativas Habilitadas</h2>
+                        <div className="space-y-2">
+                          {areasHabilitadasPorSwitch.map((area) => (
+                            <button
+                              key={area.id}
+                              onClick={() => navegarAislado(area.url)}
+                              className={`w-full p-3.5 rounded-xl text-left flex items-center justify-between cursor-pointer ${T.cardMuted}`}
+                            >
+                              <div>
+                                <p className={`text-xs font-extrabold ${T.textMain}`}>{area.titulo}</p>
+                                <p className={`text-[11px] ${T.textSub}`}>{area.desc}</p>
+                              </div>
+                              <span className="text-xs font-bold">→</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
-                  {/* DERECHA: ÚLTIMAS VENTAS EN VIVO */}
                   <div className="lg:col-span-7">
                     <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                       <div className="flex items-center justify-between">
@@ -1166,7 +1184,7 @@
               </div>
             )}
 
-            {/* ================= VISTA 2: VENTAS (TODAS LAS VENTAS + DESEMPEÑO PERSONAL) ================= */}
+            {/* ================= VISTA 2: VENTAS ================= */}
             {vista === "ventas" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-8 space-y-4">
@@ -1179,7 +1197,7 @@
                       className={`flex-1 rounded-xl px-4 py-2 text-xs font-semibold outline-none ${T.input}`}
                     />
                     <div className="flex flex-wrap gap-1.5">
-                      {["TODOS", "Mercado Libre", "Falabella", "Lider"].map((c) => (
+                      {["TODOS", "Mercado Libre", "Falabella", ...(usaColaLider ? ["Lider"] : [])].map((c) => (
                         <button
                           key={c}
                           onClick={() => setFiltroCanalVenta(c)}
@@ -1233,7 +1251,6 @@
                   </div>
                 </div>
 
-                {/* COLUMNA DERECHA PC: CONTROL DE VENTAS POR PERSONAL Y TOP PRODUCTOS */}
                 <div className="lg:col-span-4 space-y-4">
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                     <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Productos Más Vendidos</h3>
@@ -1276,7 +1293,7 @@
               </div>
             )}
 
-            {/* ================= VISTA 3: FACTURAS (POR IMPRIMIR | YA IMPRESAS | COLA FÍSICA LIDER) ================= */}
+            {/* ================= VISTA 3: FACTURAS ================= */}
             {vista === "facturas" && (
               <div className="space-y-4">
                 <div className={`${T.card} rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3`}>
@@ -1293,12 +1310,14 @@
                     >
                       Ya Impresas ({facturasYaImpresas.length})
                     </button>
-                    <button
-                      onClick={() => { setSubTabFacturas("lider"); setSeleccionLoteIds([]); }}
-                      className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "lider" ? T.btn : T.btnSec}`}
-                    >
-                      Cola Física Lider ({colaFisicaLider.length})
-                    </button>
+                    {usaColaLider && (
+                      <button
+                        onClick={() => { setSubTabFacturas("lider"); setSeleccionLoteIds([]); }}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "lider" ? T.btn : T.btnSec}`}
+                      >
+                        Cola Física Lider ({colaFisicaLider.length})
+                      </button>
+                    )}
                   </div>
 
                   {subTabFacturas !== "ya_impresas" && (
@@ -1363,7 +1382,7 @@
                   </div>
                 )}
 
-                {subTabFacturas === "lider" && (
+                {subTabFacturas === "lider" && usaColaLider && (
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                     <div>
                       <h2 className={`text-sm font-extrabold ${T.textMain}`}>Cola Física Exclusiva Lider ({colaFisicaLider.length})</h2>
@@ -1432,11 +1451,10 @@
               </div>
             )}
 
-            {/* ================= VISTA 4: CATÁLOGO (STOCK + SUGERIDO INTELIGENTE + MÁS VENDIDOS) ================= */}
+            {/* ================= VISTA 4: CATÁLOGO ================= */}
             {vista === "catalogo" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-8 space-y-4">
-                  {/* SUGERIDO INTELIGENTE DE CATÁLOGO */}
                   {sugeridosCatalogo.length > 0 && (
                     <div className={`${T.card} rounded-2xl p-5 border-2 border-amber-400/80 space-y-3`}>
                       <div>
@@ -1512,7 +1530,6 @@
                   </div>
                 </div>
 
-                {/* COLUMNA DERECHA PC: RANKING MÁS VENDIDOS Y ACCESO A XML */}
                 <div className="lg:col-span-4 space-y-4">
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                     <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Ranking Más Vendidos</h3>
@@ -1530,18 +1547,20 @@
                     )}
                   </div>
 
-                  <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
-                    <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>Cargar Stock desde Factura XML</h3>
-                    <p className={`text-xs ${T.textSub}`}>Sube el archivo XML del proveedor para sumar stock al catálogo automáticamente.</p>
-                    <button onClick={() => navegarAislado("compras-finanzas.html")} className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                      Abrir Lector XML SII →
-                    </button>
-                  </div>
+                  {usaLectorComprasXml && (
+                    <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
+                      <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>Cargar Stock desde Factura XML</h3>
+                      <p className={`text-xs ${T.textSub}`}>Sube el archivo XML del proveedor para sumar stock al catálogo automáticamente.</p>
+                      <button onClick={() => navegarAislado("compras-finanzas.html")} className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                        Abrir Lector XML SII →
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* ================= VISTA 5: CONFIGURACIÓN (CENTRO APIs + PERSONAL + APARIENCIA ESTILO FACEBOOK) ================= */}
+            {/* ================= VISTA 5: CONFIGURACIÓN ================= */}
             {vista === "config" && (
               <div className="space-y-4">
                 <div className={`${T.card} rounded-2xl p-3 flex flex-wrap gap-2`}>
@@ -1556,7 +1575,6 @@
                   </button>
                 </div>
 
-                {/* SUB-TAB 1: CENTRO DE CONEXIONES API */}
                 {subTabConfig === "apis" && (
                   <form onSubmit={guardarApisYEmisor} className={`${T.card} rounded-2xl p-6 space-y-5`}>
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/30 pb-3">
@@ -1628,7 +1646,6 @@
                   </form>
                 )}
 
-                {/* SUB-TAB 2: GESTIÓN DE PERSONAL */}
                 {subTabConfig === "personal" && (
                   <div className={`${T.card} rounded-2xl p-6 space-y-4`}>
                     <div>
@@ -1663,7 +1680,6 @@
                   </div>
                 )}
 
-                {/* SUB-TAB 3: APARIENCIA Y ORDEN DE BOTONES ESTILO FACEBOOK (SOLO AFECTA A ESTA EMPRESA) */}
                 {subTabConfig === "apariencia" && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className={`${T.card} rounded-2xl p-6 space-y-4`}>
@@ -1732,7 +1748,6 @@
             )}
           </div>
 
-          {/* BARRA INFERIOR FIJA EN TELÉFONO MÓVIL (5 BOTONES UNIVERSALES ESTILO ODOO + SHOPIFY POS) */}
           <nav className={`lg:hidden fixed bottom-0 inset-x-0 z-40 border-t px-2 py-2 grid grid-cols-5 gap-1 no-print ${T.navBar}`}>
             {menuOrdenado.map((item) => {
               const activo = vista === item.id;
