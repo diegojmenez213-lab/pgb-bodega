@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Plataforma Logística y Empresarial</title>
+  <title>NEXUS ERP • Infraestructura Empresarial Global</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -15,7 +15,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 12px -2px rgba(15, 23, 42, 0.04); }
+    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
   </style>
   <script>
     window.onerror = function (msg, url, line) {
@@ -57,7 +57,7 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
-    const IconLock = ({ className = "w-4 h-4" }) => (
+    const IconLock = ({ className = "w-3.5 h-3.5" }) => (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -124,10 +124,34 @@
       { id: "m18_finanzas_bi", num: "18", grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Consolidado de ingresos, egresos operativos y margen neto.", archivo: "compras-finanzas.html" }
     ];
 
+    const MODULOS_REALES_PGB = {
+      m1_empresa: true,
+      m2_jerarquia: true,
+      m3_catalogo: true,
+      m4_apis: false,
+      m5_inv_general: true,
+      m6_conteo_ciclico: true,
+      m7_auditoria_inv: true,
+      m8_omnicanal: false,
+      m9_stock_sync: false,
+      m10_sii_dte: false,
+      m11_colas_print: false,
+      m12_ruta_inc: true,
+      m13_retornos_merma: true,
+      m14_analitica_err: true,
+      m15_pos_ventas: false,
+      m16_caja_cobros: false,
+      m17_compras_prov: false,
+      m18_finanzas_bi: false
+    };
+
     const ROLES_JERARQUIA = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
 
     function App() {
-      const [rutActivo, setRutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
+      const [rutActivo, setRutActivo] = useState(() => {
+        const guardado = limpiarRut(localStorage.getItem("nexus_empresa_rut") || "");
+        return guardado === RUT_PGB ? "" : guardado;
+      });
       const [modoSuperAdmin, setModoSuperAdmin] = useState(() => window.location.hash === "#/comando");
       const [toquesCandado, setToquesCandado] = useState(0);
       const [pinAdmin, setPinAdmin] = useState("");
@@ -136,16 +160,19 @@
       const [adminAutenticado, setAdminAutenticado] = useState(false);
 
       const [rutInput, setRutInput] = useState("");
+      const [claveInput, setClaveInput] = useState("");
       const [cargandoAuth, setCargandoAuth] = useState(false);
 
       const [rutNuevoAdmin, setRutNuevoAdmin] = useState("");
       const [nombreReg, setNombreReg] = useState("");
-      const [rubroReg, setRubroReg] = useState("Distribuidora / Mayorista");
+      const [rubroReg, setRubroReg] = useState("E-Commerce / Retail Omnicanal");
       const [jefeReg, setJefeReg] = useState("");
+      const [claveNuevaEmpresa, setClaveNuevaEmpresa] = useState("1234");
       const [creandoEmpresaAdmin, setCreandoEmpresaAdmin] = useState(false);
 
       const [empresa, setEmpresa] = useState(null);
       const [todasEmpresas, setTodasEmpresas] = useState([]);
+      const [filtroSuperAdmin, setFiltroSuperAdmin] = useState("");
       const [tabPanel, setTabPanel] = useState("modulos");
       const [subiendoLogo, setSubiendoLogo] = useState(false);
 
@@ -176,21 +203,16 @@
         window.addEventListener("hashchange", onHash);
 
         auth.signInAnonymously().then(() => {
-          // Asegurar ficha de PGB en consola sin tocar su configuración ni su logo
           const pgbRef = db.collection("saas_empresas").doc(RUT_PGB);
-          pgbRef.get().then((snap) => {
-            if (!snap.exists) {
-              pgbRef.set({
-                rut: "76.949.722-6",
-                nombre: "PGB Distribution Chile SpA",
-                rubro: "Distribuidora / Mayorista",
-                activa: true,
-                archivoPrincipal: "pgb-operacion.html",
-                modulosActivos: {},
-                creadoEn: new Date().toISOString()
-              }, { merge: true });
-            }
-          }).catch(() => {});
+          pgbRef.set({
+            rut: "76.949.722-6",
+            nombre: "PGB Distribution Chile SpA",
+            rubro: "Distribuidora / Mayorista",
+            activa: true,
+            pinAcceso: "1234",
+            archivoPrincipal: "pgb-operacion.html",
+            modulosActivos: MODULOS_REALES_PGB
+          }, { merge: true }).catch(() => {});
         }).catch(() => {});
 
         const unsubCfg = db.collection("saas_config").doc("master").onSnapshot((doc) => {
@@ -204,15 +226,6 @@
           unsubCfg();
         };
       }, []);
-
-      // Redirección directa e intacta a PGB Operación cuando el RUT activo es PGB
-      useEffect(() => {
-        if (modoSuperAdmin) return;
-        const rutClean = limpiarRut(rutActivo);
-        if (rutClean === RUT_PGB) {
-          window.location.href = "pgb-operacion.html";
-        }
-      }, [rutActivo, modoSuperAdmin]);
 
       useEffect(() => {
         if (!modoSuperAdmin) return;
@@ -231,10 +244,6 @@
         const unsub = db.collection("saas_empresas").doc(rutClean).onSnapshot((doc) => {
           if (doc.exists) {
             const data = { id: doc.id, ...doc.data() };
-            if (data.archivoPrincipal) {
-              window.location.href = data.archivoPrincipal;
-              return;
-            }
             setEmpresa(data);
             if (data.apis) {
               setApisForm((prev) => ({ ...prev, ...data.apis }));
@@ -293,7 +302,7 @@
         const file = e.target.files[0];
         if (!file) return;
         if (file.size > 900 * 1024) {
-          alert("El archivo PNG supera los 900 KB. Usa una versión optimizada para reportes PDF.");
+          alert("El archivo PNG supera los 900 KB. Usa una versión optimizada.");
           e.target.value = "";
           return;
         }
@@ -321,11 +330,20 @@
 
       const ingresarConRut = async (e) => {
         e.preventDefault();
-        const rutClean = limpiarRut(rutInput);
-        if (rutClean.length < 7) return alert("Ingresa un RUT corporativo válido.");
+        const rawRut = rutInput.trim();
+        const rutClean = limpiarRut(rawRut);
 
-        // Si es PGB Distribution Chile SpA, entra directo a su aplicación intacta
+        if (rutClean.length < 7) {
+          return alert("Ingresa un RUT corporativo válido.");
+        }
+
         if (rutClean === RUT_PGB) {
+          if (rawRut !== RUT_PGB) {
+            return alert("Para esta organización debes ingresar el RUT sin puntos ni guiones.");
+          }
+          if (claveInput.trim() !== "1234") {
+            return alert("Clave de acceso incorrecta.");
+          }
           localStorage.setItem("nexus_empresa_rut", RUT_PGB);
           window.location.href = "pgb-operacion.html";
           return;
@@ -336,7 +354,7 @@
           const docRef = db.collection("saas_empresas").doc(rutClean);
           const snap = await docRef.get();
           if (!snap.exists) {
-            alert("El RUT ingresado no se encuentra habilitado en el sistema. Solicita el alta a administración.");
+            alert("El RUT ingresado no se encuentra habilitado en el sistema.");
             setCargandoAuth(false);
             return;
           }
@@ -346,11 +364,13 @@
             setCargandoAuth(false);
             return;
           }
-          localStorage.setItem("nexus_empresa_rut", rutClean);
-          if (data.archivoPrincipal) {
-            window.location.href = data.archivoPrincipal;
+          const claveEsperada = String(data.pinAcceso || "1234");
+          if (claveInput.trim() !== claveEsperada) {
+            alert("Clave de acceso incorrecta.");
+            setCargandoAuth(false);
             return;
           }
+          localStorage.setItem("nexus_empresa_rut", rutClean);
           setRutActivo(rutClean);
         } catch (err) {
           alert("Error de conexión: " + err.message);
@@ -364,15 +384,18 @@
         if (rutClean.length < 7 || !nombreReg.trim() || !jefeReg.trim()) {
           return alert("Completa RUT, Razón Social y Nombre del Administrador.");
         }
+        if (rutClean === RUT_PGB) {
+          return alert("El RUT 769497226 pertenece a PGB Distribution Chile SpA y ya está protegido.");
+        }
         setCreandoEmpresaAdmin(true);
         try {
-          // Todos los módulos inician con sus switches APAGADOS (false)
           const modulosApagados = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: false }), {});
           await db.collection("saas_empresas").doc(rutClean).set({
             rut: formatearRut(rutClean),
             nombre: nombreReg.trim(),
             rubro: rubroReg,
             activa: true,
+            pinAcceso: claveNuevaEmpresa.trim() || "1234",
             equipo: [{ id: Date.now().toString(), nombre: jefeReg.trim(), rol: "Jefatura / Admin" }],
             modulosActivos: modulosApagados,
             creadoEn: new Date().toISOString()
@@ -381,7 +404,8 @@
           setRutNuevoAdmin("");
           setNombreReg("");
           setJefeReg("");
-          alert(`Empresa "${nombreReg.trim()}" registrada con los switches desactivados. Enciende solo los módulos que requiera.`);
+          setClaveNuevaEmpresa("1234");
+          alert(`Organización "${nombreReg.trim()}" creada con todos los switches apagados. Activa solo los módulos que esta empresa utilice.`);
         } catch (err) {
           alert("Error al crear empresa: " + err.message);
         }
@@ -500,7 +524,6 @@
 
       const toggleModuloEmpresa = async (emp, modId) => {
         const actuales = emp.modulosActivos || {};
-        // Si el switch no estaba explícitamente en true, pasa a true; si estaba en true, pasa a false
         const nuevoValor = actuales[modId] === true ? false : true;
         await db.collection("saas_empresas").doc(emp.id).update({
           [`modulosActivos.${modId}`]: nuevoValor
@@ -511,6 +534,17 @@
         const nuevoEstado = emp.activa === false ? true : false;
         await db.collection("saas_empresas").doc(emp.id).update({ activa: nuevoEstado });
       };
+
+      const empresasFiltradasAdmin = useMemo(() => {
+        const q = filtroSuperAdmin.trim().toLowerCase();
+        if (!q) return todasEmpresas;
+        return todasEmpresas.filter(
+          (e) =>
+            (e.nombre || "").toLowerCase().includes(q) ||
+            (e.rut || "").toLowerCase().includes(q) ||
+            (e.id || "").toLowerCase().includes(q)
+        );
+      }, [todasEmpresas, filtroSuperAdmin]);
 
       const catalogoFiltrado = useMemo(() => {
         const q = busquedaCat.trim().toLowerCase();
@@ -531,16 +565,15 @@
         window.location.href = mod.archivo;
       };
 
-      // CONSOLA DE COMANDO SUPER ADMIN (#/comando) - ESTÉTICA CORPORATIVA BLANCA + SWITCHES APAGADOS POR DEFECTO
       if (modoSuperAdmin) {
         if (!adminAutenticado) {
           return (
             <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4">
               <form onSubmit={validarAccesoAdmin} className="max-w-sm w-full corp-card rounded-2xl p-8 space-y-5">
                 <div className="space-y-1">
-                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Consola de Comando</span>
-                  <h1 className="text-xl font-extrabold text-slate-900">Acceso Administrativo</h1>
-                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gestionar empresas, logotipos y switches.</p>
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">NEXUS Global Control</span>
+                  <h1 className="text-xl font-extrabold text-slate-900">Acceso Super Administrador</h1>
+                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gobernar todas las organizaciones.</p>
                 </div>
                 <div>
                   <input
@@ -556,43 +589,72 @@
                   type="submit"
                   className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl text-sm transition cursor-pointer"
                 >
-                  Continuar
+                  Ingresar a Plataforma Central
                 </button>
                 <button
                   type="button"
                   onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
                   className="w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-900 pt-1 cursor-pointer"
                 >
-                  Volver al inicio
+                  Volver al portal
                 </button>
               </form>
             </div>
           );
         }
 
+        const totalEmpresasActivas = todasEmpresas.filter((e) => e.activa !== false).length;
+
         return (
           <div className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-8">
             <div className="max-w-6xl mx-auto space-y-6">
-              <div className="corp-card rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
+              <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">NEXUS ERP • Consola de Comando</span>
-                  <h1 className="text-2xl font-extrabold text-slate-900">Gestión de Empresas, Logotipos PNG y Switches</h1>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                    NEXUS Enterprise Cloud • Master Console
+                  </span>
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5">
+                    Centro de Comando Global Multi-Empresa
+                  </h1>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Orquestación central de corporaciones, identidad visual y arquitectura modular aislada por organización.
+                  </p>
                 </div>
                 <button
                   onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
-                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-3 rounded-xl cursor-pointer shrink-0"
                 >
-                  Salir de Consola
+                  Cerrar Consola
                 </button>
               </div>
 
-              {/* CREAR EMPRESA NUEVA (EXCLUSIVO SUPER ADMIN - SWITCHES INICIAN APAGADOS) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="corp-card rounded-2xl p-4">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Empresas Registradas</span>
+                  <p className="text-2xl font-extrabold text-slate-900 mt-1">{todasEmpresas.length}</p>
+                </div>
+                <div className="corp-card rounded-2xl p-4">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Organizaciones Activas</span>
+                  <p className="text-2xl font-extrabold text-emerald-700 mt-1">{totalEmpresasActivas}</p>
+                </div>
+                <div className="corp-card rounded-2xl p-4">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Arquitectura Base</span>
+                  <p className="text-2xl font-extrabold text-slate-900 mt-1">18 Módulos</p>
+                </div>
+                <div className="corp-card rounded-2xl p-4">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Aislamiento de Datos</span>
+                  <p className="text-sm font-extrabold text-slate-900 mt-2">100% Independiente por RUT</p>
+                </div>
+              </div>
+
               <form onSubmit={crearEmpresaDesdeSuperAdmin} className="corp-card rounded-2xl p-6 space-y-4">
                 <div>
-                  <h2 className="text-base font-extrabold text-slate-900">Registrar Nueva Empresa Cliente</h2>
-                  <p className="text-xs text-slate-500">La empresa se crea con todos los interruptores de módulos apagados para que actives solo los que necesite.</p>
+                  <h2 className="text-base font-extrabold text-slate-900">Dar de Alta Nueva Organización</h2>
+                  <p className="text-xs text-slate-500">
+                    La organización se crea con todos los interruptores apagados para encender exclusivamente los módulos que utilice.
+                  </p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                   <input
                     type="text"
                     value={rutNuevoAdmin}
@@ -614,17 +676,25 @@
                     onChange={(e) => setRubroReg(e.target.value)}
                     className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
                   >
-                    <option>Distribuidora / Mayorista</option>
                     <option>E-Commerce / Retail Omnicanal</option>
+                    <option>Distribuidora / Mayorista</option>
                     <option>Minimarket / Almacén</option>
                     <option>Ferretería / Materiales</option>
-                    <option>Otro Rubro Comercial</option>
+                    <option>Corporación Internacional</option>
                   </select>
                   <input
                     type="text"
                     value={jefeReg}
                     onChange={(e) => setJefeReg(e.target.value)}
-                    placeholder="Nombre Jefe Administrador *"
+                    placeholder="Director / Administrador *"
+                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
+                    required
+                  />
+                  <input
+                    type="text"
+                    value={claveNuevaEmpresa}
+                    onChange={(e) => setClaveNuevaEmpresa(e.target.value)}
+                    placeholder="Clave acceso (Ej: 1234)"
                     className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
                     required
                   />
@@ -634,34 +704,40 @@
                   disabled={creandoEmpresaAdmin}
                   className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer"
                 >
-                  {creandoEmpresaAdmin ? "Registrando..." : "Crear Empresa"}
+                  {creandoEmpresaAdmin ? "Registrando..." : "Registrar Organización"}
                 </button>
               </form>
 
-              {/* CONFIGURACIÓN DE CLAVE MAESTRA */}
-              <form onSubmit={actualizarClaveMaestra} className="corp-card rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">Seguridad de Consola</h3>
-                  <p className="text-xs text-slate-500">Define tu contraseña personal definitiva para entrar al comando.</p>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2 corp-card rounded-2xl p-4 flex items-center">
+                  <input
+                    type="text"
+                    value={filtroSuperAdmin}
+                    onChange={(e) => setFiltroSuperAdmin(e.target.value)}
+                    placeholder="Filtrar organizaciones por Razón Social o RUT..."
+                    className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
+                  />
                 </div>
-                <div className="flex items-center gap-2">
+
+                <form onSubmit={actualizarClaveMaestra} className="corp-card rounded-2xl p-4 flex items-center gap-2">
                   <input
                     type="password"
                     value={nuevaClaveMaestra}
                     onChange={(e) => setNuevaClaveMaestra(e.target.value)}
                     placeholder="Nueva clave maestra..."
-                    className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
+                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
                   />
-                  <button type="submit" className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-4 py-2 rounded-xl text-xs cursor-pointer">
-                    Guardar Clave
+                  <button type="submit" className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-3.5 py-2 rounded-xl text-xs cursor-pointer shrink-0">
+                    Cambiar Clave
                   </button>
-                </div>
-              </form>
+                </form>
+              </div>
 
-              {/* LISTADO DE EMPRESAS CON CARGADOR DE LOGO PNG Y SWITCHES (APAGADOS POR DEFECTO) */}
-              {todasEmpresas.map((emp) => {
+              {empresasFiltradasAdmin.map((emp) => {
                 const empresaActiva = emp.activa !== false;
                 const esPgb = limpiarRut(emp.id) === RUT_PGB;
+                const activosCount = CATALOGO_18_MODULOS.filter((m) => emp.modulosActivos?.[m.id] === true).length;
+
                 return (
                   <div key={emp.id} className="corp-card rounded-2xl p-6 space-y-5">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -674,17 +750,21 @@
                           )}
                         </div>
                         <div>
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex flex-wrap items-center gap-2.5">
                             <h2 className="text-lg font-extrabold text-slate-900">{emp.nombre}</h2>
                             <SwitchToggle checked={empresaActiva} onChange={() => toggleEstadoEmpresa(emp)} />
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${empresaActiva ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${empresaActiva ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
                               {empresaActiva ? "Activa" : "Pausada"}
                             </span>
                           </div>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            RUT: {emp.rut} • Rubro: {emp.rubro || "General"}
-                            {esPgb ? " • Aplicación Dedicada Intacta (pgb-operacion.html)" : ""}
+                            RUT: {emp.rut} • Rubro: {emp.rubro || "General"} • Clave: {emp.pinAcceso || "1234"}
                           </p>
+                          {esPgb && (
+                            <span className="inline-block mt-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded">
+                              Entorno Dedicado Protegido (pgb-operacion.html — Solo encendidos los 9 módulos que PGB utiliza en vivo)
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -709,28 +789,30 @@
                             Quitar Logo
                           </button>
                         )}
-                        <button
-                          onClick={() => {
-                            localStorage.setItem("nexus_empresa_rut", emp.id);
-                            if (esPgb) {
-                              window.location.href = "pgb-operacion.html";
-                              return;
-                            }
-                            setRutActivo(emp.id);
-                            window.location.hash = "";
-                            setModoSuperAdmin(false);
-                          }}
-                          className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
-                        >
-                          {esPgb ? "Abrir PGB Operación" : "Entrar al Espacio"}
-                        </button>
+                        {!esPgb && (
+                          <button
+                            onClick={() => {
+                              localStorage.setItem("nexus_empresa_rut", emp.id);
+                              setRutActivo(emp.id);
+                              window.location.hash = "";
+                              setModoSuperAdmin(false);
+                            }}
+                            className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
+                          >
+                            Inspeccionar Espacio
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2.5">
-                        Interruptores de Módulos (Apagados por defecto)
-                      </span>
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          {esPgb
+                            ? `Módulos Activos en PGB (${activosCount} de 18 — Apagados los que PGB no utiliza)`
+                            : `Interruptores de Módulos (${activosCount} de 18 encendidos)`}
+                        </span>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
                         {CATALOGO_18_MODULOS.map((m) => {
                           const encendido = emp.modulosActivos?.[m.id] === true;
@@ -760,15 +842,22 @@
         );
       }
 
-      // PANTALLA DE INICIO MINIMALISTA BLANCA CORPORATIVA (SIN EMOJIS, CANDADO 5 TOQUES)
       if (!rutActivo || !empresa) {
         return (
           <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between p-4 sm:p-8">
             <header className="max-w-5xl w-full mx-auto flex items-center justify-between py-2">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 select-none">
                 <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-extrabold text-sm">
                   N
                 </div>
+                <button
+                  type="button"
+                  onClick={manejarToqueCandado}
+                  aria-label="Seguridad"
+                  className="text-slate-300 hover:text-slate-400 transition p-0.5 cursor-pointer"
+                >
+                  <IconLock className="w-3 h-3" />
+                </button>
                 <span className="font-extrabold tracking-tight text-slate-900 text-base">NEXUS ERP</span>
               </div>
               <span className="text-xs font-semibold text-slate-500">Santiago, Chile</span>
@@ -790,22 +879,35 @@
 
                 <form onSubmit={ingresarConRut} className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
                       RUT de la Empresa
                     </label>
                     <input
                       type="text"
                       value={rutInput}
                       onChange={(e) => setRutInput(e.target.value)}
-                      placeholder="Ej: 12.345.678-9"
-                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3.5 text-base font-bold text-slate-900 tracking-wide outline-none transition"
+                      placeholder="Ingresa RUT sin puntos ni guiones"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold text-slate-900 tracking-wide outline-none transition"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                      Clave de Acceso
+                    </label>
+                    <input
+                      type="password"
+                      value={claveInput}
+                      onChange={(e) => setClaveInput(e.target.value)}
+                      placeholder="Ingresa tu clave corporativa"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold text-slate-900 tracking-wide outline-none transition"
                       required
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={cargandoAuth}
-                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm shadow-sm transition cursor-pointer"
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm shadow-sm transition cursor-pointer mt-1"
                   >
                     {cargandoAuth ? "Verificando credenciales..." : "Ingresar al Sistema"}
                   </button>
@@ -813,14 +915,7 @@
 
                 <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
                   <span>Infraestructura Cloud Multi-Empresa</span>
-                  <button
-                    type="button"
-                    onClick={manejarToqueCandado}
-                    aria-label="Acceso administrativo"
-                    className="text-slate-300 hover:text-slate-500 transition p-1.5 rounded-lg cursor-pointer"
-                  >
-                    <IconLock className="w-3.5 h-3.5" />
-                  </button>
+                  <span>Acceso Cifrado</span>
                 </div>
               </div>
             </main>
@@ -832,7 +927,6 @@
         );
       }
 
-      // PANEL UNIVERSAL PARA EMPRESAS NUEVAS (MUESTRA SOLO LOS MÓDULOS CON SWITCH ENCENDIDO)
       const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] === true);
       const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
       const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
