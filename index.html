@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP Chile • Plataforma Empresarial Universal</title>
+  <title>NEXUS ERP Chile • Plataforma Empresarial</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -84,12 +84,16 @@
       const [pinAdmin, setPinAdmin] = useState("");
       const [adminAutenticado, setAdminAutenticado] = useState(false);
 
-      const [tabAuth, setTabAuth] = useState("ingresar");
+      // Login
       const [rutInput, setRutInput] = useState("");
-      const [nombreReg, setNombreReg] = useState("");
-      const [rubroReg, setRubroReg] = useState("Distribuidora / Comercio");
-      const [jefeReg, setJefeReg] = useState("");
       const [cargandoAuth, setCargandoAuth] = useState(false);
+
+      // Registro exclusivo en Super Admin
+      const [rutNuevoAdmin, setRutNuevoAdmin] = useState("");
+      const [nombreReg, setNombreReg] = useState("");
+      const [rubroReg, setRubroReg] = useState("Distribuidora / Mayorista");
+      const [jefeReg, setJefeReg] = useState("");
+      const [creandoEmpresaAdmin, setCreandoEmpresaAdmin] = useState(false);
 
       const [empresa, setEmpresa] = useState(null);
       const [todasEmpresas, setTodasEmpresas] = useState([]);
@@ -146,16 +150,9 @@
               setApisForm((prev) => ({ ...prev, ...data.apis }));
             }
           } else {
-            const base = {
-              rut: formatearRut(rutClean),
-              nombre: rutClean === "769497226" ? "PGB Distribution Chile SpA" : rutClean === "775280425" ? "Tecnoshop Company SpA" : `Empresa ${formatearRut(rutClean)}`,
-              rubro: "Comercio y Distribución",
-              activa: true,
-              equipo: [],
-              modulosActivos: CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {}),
-              creadoEn: new Date().toISOString()
-            };
-            db.collection("saas_empresas").doc(rutClean).set(base, { merge: true });
+            localStorage.removeItem("nexus_empresa_rut");
+            setRutActivo("");
+            setEmpresa(null);
           }
         });
 
@@ -178,14 +175,13 @@
       const ingresarConRut = async (e) => {
         e.preventDefault();
         const rutClean = limpiarRut(rutInput);
-        if (rutClean.length < 7) return alert("Ingresa un RUT válido (Ej: 77.528.042-5).");
+        if (rutClean.length < 7) return alert("Ingresa un RUT válido.");
         setCargandoAuth(true);
         try {
           const docRef = db.collection("saas_empresas").doc(rutClean);
           const snap = await docRef.get();
           if (!snap.exists) {
-            alert("Este RUT aún no está registrado. Completa el registro rápido en la pestaña 'Crear Empresa Nueva'.");
-            setTabAuth("registrar");
+            alert("RUT no autorizado o no registrado en el sistema. Contacta al administrador.");
             setCargandoAuth(false);
             return;
           }
@@ -202,13 +198,13 @@
         setCargandoAuth(false);
       };
 
-      const registrarNuevaEmpresa = async (e) => {
+      const crearEmpresaDesdeSuperAdmin = async (e) => {
         e.preventDefault();
-        const rutClean = limpiarRut(rutInput);
+        const rutClean = limpiarRut(rutNuevoAdmin);
         if (rutClean.length < 7 || !nombreReg.trim() || !jefeReg.trim()) {
           return alert("Completa RUT, Razón Social y Nombre del Jefe Administrador.");
         }
-        setCargandoAuth(true);
+        setCreandoEmpresaAdmin(true);
         try {
           const modulosTodos = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: true }), {});
           await db.collection("saas_empresas").doc(rutClean).set({
@@ -221,13 +217,14 @@
             creadoEn: new Date().toISOString()
           }, { merge: true });
 
-          localStorage.setItem("nexus_empresa_rut", rutClean);
-          setRutActivo(rutClean);
-          setTabPanel("equipo");
+          setRutNuevoAdmin("");
+          setNombreReg("");
+          setJefeReg("");
+          alert(`✅ Empresa "${nombreReg.trim()}" creada y habilitada con los 18 módulos.`);
         } catch (err) {
           alert("Error al crear empresa: " + err.message);
         }
-        setCargandoAuth(false);
+        setCreandoEmpresaAdmin(false);
       };
 
       const cerrarSesion = () => {
@@ -369,27 +366,33 @@
         window.location.href = mod.archivo;
       };
 
+      // CONSOLA SUPER ADMIN (#/comando)
       if (modoSuperAdmin) {
         if (!adminAutenticado) {
           return (
             <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
-              <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-7 space-y-4">
-                <span className="text-xs font-extrabold uppercase tracking-widest text-amber-400">NEXUS MASTER CONSOLE</span>
+              <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-7 space-y-4 shadow-2xl">
+                <span className="text-xs font-extrabold uppercase tracking-widest text-amber-400">🔒 NEXUS MASTER CONSOLE</span>
                 <h1 className="text-xl font-black">Acceso Fundador</h1>
                 <input
                   type="password"
                   value={pinAdmin}
                   onChange={(e) => setPinAdmin(e.target.value)}
-                  placeholder="PIN Maestro (Ej: 2026)"
+                  placeholder="Ingresa PIN Maestro"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-400"
                 />
                 <button
                   onClick={() => (pinAdmin === "2026" ? setAdminAutenticado(true) : alert("PIN incorrecto"))}
-                  className="w-full bg-amber-500 text-slate-950 font-black py-3 rounded-xl text-sm cursor-pointer"
+                  className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-sm cursor-pointer"
                 >
                   Entrar al Centro de Control
                 </button>
-                <a href="#" className="block text-center text-xs text-slate-400 pt-2">← Volver al Portal Empresas</a>
+                <button
+                  onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
+                  className="w-full text-center text-xs text-slate-400 hover:text-white pt-2 cursor-pointer"
+                >
+                  ← Volver al Inicio
+                </button>
               </div>
             </div>
           );
@@ -401,18 +404,71 @@
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
                 <div>
                   <span className="text-[11px] font-extrabold text-amber-400 uppercase tracking-widest">NEXUS SaaS • SUPER ADMIN</span>
-                  <h1 className="text-2xl font-black">Control Global de Empresas y 18 Módulos</h1>
+                  <h1 className="text-2xl font-black">Gestión de Empresas Clientes y 18 Módulos</h1>
                 </div>
-                <a href="#" className="bg-slate-800 hover:bg-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">
+                <button
+                  onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
+                  className="bg-slate-800 hover:bg-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
+                >
                   ← Salir de Super Admin
-                </a>
+                </button>
               </div>
 
+              {/* CREAR EMPRESA NUEVA (EXCLUSIVO FUNDADOR) */}
+              <form onSubmit={crearEmpresaDesdeSuperAdmin} className="bg-slate-900 border border-amber-500/30 rounded-3xl p-5 sm:p-6 space-y-4">
+                <h2 className="text-base font-black text-amber-400">➕ Dar de Alta Nueva Empresa Cliente</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <input
+                    type="text"
+                    value={rutNuevoAdmin}
+                    onChange={(e) => setRutNuevoAdmin(e.target.value)}
+                    placeholder="RUT Empresa *"
+                    className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    required
+                  />
+                  <input
+                    type="text"
+                    value={nombreReg}
+                    onChange={(e) => setNombreReg(e.target.value)}
+                    placeholder="Razón Social / Nombre *"
+                    className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    required
+                  />
+                  <select
+                    value={rubroReg}
+                    onChange={(e) => setRubroReg(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                  >
+                    <option>Distribuidora / Mayorista</option>
+                    <option>E-Commerce / Retail Omnicanal</option>
+                    <option>Minimarket / Almacén</option>
+                    <option>Ferretería / Materiales</option>
+                    <option>Otro Rubro Comercial</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={jefeReg}
+                    onChange={(e) => setJefeReg(e.target.value)}
+                    placeholder="Nombre Jefe Administrador *"
+                    className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={creandoEmpresaAdmin}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-5 py-2.5 rounded-xl text-xs cursor-pointer"
+                >
+                  {creandoEmpresaAdmin ? "Creando..." : "🚀 Crear Empresa y Liberar 18 Módulos"}
+                </button>
+              </form>
+
+              {/* LISTADO DE EMPRESAS */}
               {todasEmpresas.map((emp) => (
                 <div key={emp.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h2 className="text-lg font-black text-amber-400">{emp.nombre}</h2>
+                      <h2 className="text-lg font-black text-white">{emp.nombre}</h2>
                       <p className="text-xs text-slate-400">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
                     </div>
                     <button
@@ -420,10 +476,11 @@
                         localStorage.setItem("nexus_empresa_rut", emp.id);
                         setRutActivo(emp.id);
                         window.location.hash = "";
+                        setModoSuperAdmin(false);
                       }}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2 rounded-xl cursor-pointer"
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black px-4 py-2 rounded-xl cursor-pointer"
                     >
-                      Entrar como esta empresa ➔
+                      Entrar a esta empresa ➔
                     </button>
                   </div>
 
@@ -451,123 +508,66 @@
         );
       }
 
+      // PANTALLA DE INICIO CLÁSICA (LIMPIA, SIN REGISTRO PÚBLICO, SIN RUT DE CLIENTE Y CON CANDADO)
       if (!rutActivo || !empresa) {
         return (
-          <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center p-4">
-            <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-              <div className="text-center space-y-1">
-                <span className="inline-block px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                  NEXUS ERP CHILE • 18 MÓDULOS
-                </span>
-                <h1 className="text-2xl sm:text-3xl font-black tracking-tight pt-1">
-                  Sistema Operativo <span className="text-amber-400">Empresarial</span>
+          <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white flex flex-col justify-center items-center p-4 relative">
+            <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-7 sm:p-9 shadow-2xl space-y-6">
+              <div className="text-center space-y-2">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xl font-black mb-1">
+                  N
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                  NEXUS <span className="text-amber-400">ERP</span>
                 </h1>
                 <p className="text-xs text-slate-400">
-                  Inventario inteligente, logística, ventas POS, marketplaces y facturación SII en un solo lugar.
+                  Plataforma de Gestión Empresarial • Ingresa el RUT de tu organización para acceder.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
+              <form onSubmit={ingresarConRut} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
+                    RUT Corporativo
+                  </label>
+                  <input
+                    type="text"
+                    value={rutInput}
+                    onChange={(e) => setRutInput(e.target.value)}
+                    placeholder="Ej: 12.345.678-9"
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-2xl px-4 py-3.5 text-base font-black text-white tracking-wide outline-none transition"
+                    required
+                  />
+                </div>
                 <button
-                  type="button"
-                  onClick={() => setTabAuth("ingresar")}
-                  className={`py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${tabAuth === "ingresar" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}
+                  type="submit"
+                  disabled={cargandoAuth}
+                  className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-2xl text-sm shadow-lg transition cursor-pointer"
                 >
-                  🔑 Ingresar con RUT
+                  {cargandoAuth ? "Verificando acceso..." : "Ingresar al Sistema ➔"}
                 </button>
+              </form>
+
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+                <span>Conexión cifrada • Santiago, Chile</span>
                 <button
                   type="button"
-                  onClick={() => setTabAuth("registrar")}
-                  className={`py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${tabAuth === "registrar" ? "bg-amber-500 text-slate-950" : "text-slate-400"}`}
+                  onClick={() => {
+                    window.location.hash = "#/comando";
+                    setModoSuperAdmin(true);
+                  }}
+                  title="Consola de Comando Super Admin"
+                  className="text-slate-500 hover:text-amber-400 transition p-1.5 rounded-lg cursor-pointer"
                 >
-                  ✨ Crear Empresa Nueva
+                  🔒
                 </button>
               </div>
-
-              {tabAuth === "ingresar" ? (
-                <form onSubmit={ingresarConRut} className="space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1.5">RUT de tu Empresa *</label>
-                    <input
-                      type="text"
-                      value={rutInput}
-                      onChange={(e) => setRutInput(e.target.value)}
-                      placeholder="Ej: 77.528.042-5"
-                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-3.5 text-base font-black text-white outline-none"
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={cargandoAuth}
-                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-xl text-sm shadow-lg transition cursor-pointer"
-                  >
-                    {cargandoAuth ? "Verificando..." : "Entrar a mi Espacio de Trabajo ➔"}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={registrarNuevaEmpresa} className="space-y-3.5">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">RUT Empresa *</label>
-                    <input
-                      type="text"
-                      value={rutInput}
-                      onChange={(e) => setRutInput(e.target.value)}
-                      placeholder="Ej: 77.528.042-5"
-                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Razón Social / Nombre Comercial *</label>
-                    <input
-                      type="text"
-                      value={nombreReg}
-                      onChange={(e) => setNombreReg(e.target.value)}
-                      placeholder="Ej: Tecnoshop Company SpA"
-                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Rubro Principal</label>
-                    <select
-                      value={rubroReg}
-                      onChange={(e) => setRubroReg(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
-                    >
-                      <option>Distribuidora / Mayorista</option>
-                      <option>E-Commerce / Retail Omnicanal</option>
-                      <option>Minimarket / Almacén</option>
-                      <option>Ferretería / Materiales</option>
-                      <option>Otro Rubro Comercial</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Tu Nombre (Jefe / Administrador) *</label>
-                    <input
-                      type="text"
-                      value={jefeReg}
-                      onChange={(e) => setJefeReg(e.target.value)}
-                      placeholder="Ej: Director General"
-                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-2.5 text-sm font-bold text-white outline-none"
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={cargandoAuth}
-                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-3.5 rounded-xl text-sm shadow-lg transition cursor-pointer mt-2"
-                  >
-                    {cargandoAuth ? "Creando ecosistema..." : "🚀 Activar Empresa con 18 Módulos Liberados"}
-                  </button>
-                </form>
-              )}
             </div>
           </div>
         );
       }
 
+      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA
       const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] !== false);
       const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
       const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
@@ -581,7 +581,7 @@
                   ● RUT {empresa.rut}
                 </span>
                 <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-extrabold px-3 py-1 rounded-full">
-                  {modulosHabilitados.length} de 18 Módulos Liberados
+                  {modulosHabilitados.length} de 18 Módulos Activos
                 </span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-black text-slate-900">{empresa.nombre}</h1>
@@ -595,7 +595,7 @@
                 onClick={cerrarSesion}
                 className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
               >
-                ⇄ Cambiar Empresa
+                ⇄ Cerrar Sesión
               </button>
             </div>
           </div>
@@ -706,7 +706,7 @@
               <div>
                 <h2 className="text-xl font-black text-slate-900">👥 Estructura y Jerarquía de tu Empresa</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Agrega aquí a tus jefes, vendedores, bodegueros y choferes. Todo el sistema (rutas, ventas, compras internas y gráficos) tomará automáticamente estos nombres.
+                  Agrega aquí a tus jefes, vendedores, bodegueros y choferes. Todo el sistema tomará automáticamente estos nombres.
                 </p>
               </div>
 
@@ -764,7 +764,7 @@
                 <div>
                   <h2 className="text-xl font-black text-slate-900">📚 Catálogo Maestro Inteligente</h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Este catálogo alimenta automáticamente tu <strong>Inventario</strong>, tu <strong>Punto de Venta</strong>, tus <strong>Incidencias</strong> y tus publicaciones en <strong>Mercado Libre / Falabella / Lider</strong>.
+                    Alimenta automáticamente tu <strong>Inventario</strong>, tu <strong>Punto de Venta</strong>, tus <strong>Incidencias</strong> y tus canales online.
                   </p>
                 </div>
                 <label className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-5 py-3 rounded-xl cursor-pointer shadow-sm text-center shrink-0">
