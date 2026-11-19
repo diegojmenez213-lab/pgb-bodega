@@ -7,7 +7,6 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>NEXUS ERP • Plataforma Empresarial</title>
   <script>
-    // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE ENTRE EMPRESAS)
     (function () {
       var RUT_PGB = "769497226";
       var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
@@ -533,6 +532,7 @@
       const usaColaLider = Boolean(mods.m11_colas_print);
       const usaLectorComprasXml = Boolean(mods.m17_compras_prov);
 
+      // Evaluación estricta: M7 pertenece a Inventario; Logística solo responde a M12, M13 o M14
       const areasHabilitadasPorSwitch = useMemo(() => {
         const lista = [];
 
@@ -545,7 +545,7 @@
           });
         }
 
-        if (mods.m5_inv_general || mods.m6_conteo_ciclico) {
+        if (mods.m5_inv_general || mods.m6_conteo_ciclico || mods.m7_auditoria_inv) {
           lista.push({
             id: "inventario",
             titulo: "Toma de Inventario Físico",
@@ -554,7 +554,7 @@
           });
         }
 
-        if (mods.m12_ruta_inc || mods.m13_retornos_merma || mods.m14_analitica_err || mods.m7_auditoria_inv) {
+        if (mods.m12_ruta_inc || mods.m13_retornos_merma || mods.m14_analitica_err) {
           lista.push({
             id: "logistica",
             titulo: "Logística, Rutas y Trazabilidad",
