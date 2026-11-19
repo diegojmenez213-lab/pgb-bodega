@@ -83,7 +83,7 @@
             ? db.collection("catalogo_productos")
             : empRef.collection("catalogo");
           const u2 = colCat.onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const lista = snap.docs.map((d) => ({ id: d.id, stockOnline: 25, ...d.data() }));
             lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
             setCatalogo(lista);
           });
@@ -99,35 +99,58 @@
       }, [rutActivo]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
+      const catRef = () =>
+        rutActivo === RUT_PGB
+          ? db.collection("catalogo_productos")
+          : empRef().collection("catalogo");
 
       const registrarOperacion = async (e) => {
         e.preventDefault();
         const prod = catalogo.find((p) => p.id === productoId);
-        const total = Number(cantidad) * Number(precioUnit);
+        const cantNum = Math.max(1, Number(cantidad));
+        const total = cantNum * Number(precioUnit);
         const esCredito = medioPago === "Crédito / Fiado";
         const abonado = esCredito ? Math.min(total, Number(abonoInicial || 0)) : total;
         const saldoPendiente = Math.max(0, total - abonado);
+        const descuentaStock = tipoDoc !== "Cotización" && Boolean(prod);
 
-        await empRef().collection("ventas_pos").add({
-          cliente: cliente.trim() || "Cliente Mesón",
-          rutCliente: rutCliente.trim() ? formatearRut(rutCliente) : "",
-          tipoDoc,
-          medioPago,
-          productoNombre: prod ? `${prod.codigo ? `[${prod.codigo}] ` : ""}${prod.nombre}` : productoId,
-          cantidad: Number(cantidad),
-          total,
-          abonado,
-          saldoPendiente,
-          fecha: new Date().toLocaleString("es-CL"),
-          timestamp: Date.now()
-        });
+        try {
+          const batch = db.batch();
+          batch.set(empRef().collection("ventas_pos").doc(), {
+            cliente: cliente.trim() || "Cliente Mesón",
+            rutCliente: rutCliente.trim() ? formatearRut(rutCliente) : "",
+            tipoDoc,
+            medioPago,
+            productoId: prod ? prod.id : "",
+            productoNombre: prod ? `${prod.codigo ? `[${prod.codigo}] ` : ""}${prod.nombre}` : productoId,
+            cantidad: cantNum,
+            total,
+            abonado,
+            saldoPendiente,
+            fecha: new Date().toLocaleString("es-CL"),
+            timestamp: Date.now()
+          });
 
-        setCliente("");
-        setRutCliente("");
-        setProductoId("");
-        setCantidad(1);
-        setAbonoInicial("");
-        alert(`${tipoDoc} registrada correctamente por $${total.toLocaleString("es-CL")} CLP.`);
+          if (descuentaStock) {
+            const nuevoStock = Math.max(0, Number(prod.stockOnline ?? 25) - cantNum);
+            batch.update(catRef().doc(prod.id), { stockOnline: nuevoStock });
+          }
+
+          await batch.commit();
+
+          setCliente("");
+          setRutCliente("");
+          setProductoId("");
+          setCantidad(1);
+          setAbonoInicial("");
+          alert(
+            descuentaStock
+              ? `${tipoDoc} registrada por $${total.toLocaleString("es-CL")} CLP y descontadas ${cantNum} unds del stock compartido.`
+              : `${tipoDoc} registrada correctamente por $${total.toLocaleString("es-CL")} CLP.`
+          );
+        } catch (err) {
+          alert("Error al registrar operación: " + err.message);
+        }
       };
 
       const registrarAbono = async (v) => {
@@ -176,7 +199,7 @@
                   </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Punto de Venta (POS), Cotizaciones & Caja</h1>
-                <p className="text-xs text-slate-500 mt-0.5">Facturación rápida de mesón, control de créditos y arqueo diario.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Facturación rápida de mesón con descuento de stock sincronizado, créditos y arqueo diario.</p>
               </div>
             </div>
           </div>
@@ -230,7 +253,9 @@
                     <select value={productoId} onChange={(e) => setProductoId(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required>
                       <option value="">-- Selecciona producto --</option>
                       {catalogo.map((p) => (
-                        <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</option>
+                        <option key={p.id} value={p.id}>
+                          {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre} (Stock: {p.stockOnline ?? 25})
+                        </option>
                       ))}
                     </select>
                   ) : (
