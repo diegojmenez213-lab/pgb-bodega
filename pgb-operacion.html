@@ -4043,6 +4043,45 @@
   >
     ⇄ Salir
   </button>
+<div id="nexus-modulos-extra" style="display:none;"></div>
+<script>
+  (function () {
+    const MAPA_EXTRAS = [
+      { ids: ["m8_omnicanal", "m9_stock_sync", "m10_sii_dte", "m11_colas_print"], label: "E-Commerce & SII", url: "ecommerce-sii.html" },
+      { ids: ["m15_pos_ventas", "m16_caja_cobros"], label: "Punto de Venta & Caja", url: "ventas-pos.html" },
+      { ids: ["m17_compras_prov", "m18_finanzas_bi"], label: "Compras & Finanzas", url: "compras-finanzas.html" }
+    ];
+
+    function iniciarPuenteSwitches() {
+      if (!window.firebase || !firebase.apps.length) {
+        return setTimeout(iniciarPuenteSwitches, 600);
+      }
+      const rut = (localStorage.getItem("nexus_empresa_rut") || "769497226").replace(/[^0-9kK]/g, "").toUpperCase();
+      firebase.firestore().collection("saas_empresas").doc(rut).onSnapshot(function (doc) {
+        const box = document.getElementById("nexus-modulos-extra");
+        if (!box || !doc.exists) return;
+        const activos = doc.data().modulosActivos || {};
+        const disponibles = MAPA_EXTRAS.filter(function (g) {
+          return g.ids.some(function (id) { return activos[id] === true; });
+        });
+
+        if (disponibles.length === 0) {
+          box.style.display = "none";
+          box.innerHTML = "";
+          return;
+        }
+
+        box.style.display = "flex";
+        box.style.cssText = "position:fixed; top:12px; right:12px; z-index:9999; gap:6px; flex-wrap:wrap; background:#ffffff; border:1px solid #cbd5e1; padding:6px 10px; border-radius:12px; box-shadow:0 4px 14px rgba(15,23,42,0.08); font-family:sans-serif;";
+        box.innerHTML = '<span style="font-size:10px; font-weight:800; color:#64748b; align-self:center; margin-right:4px;">MÓDULOS ACTIVOS:</span>' +
+          disponibles.map(function (m) {
+            return '<a href="' + m.url + '" style="background:#0f172a; color:#ffffff; font-size:11px; font-weight:700; padding:5px 10px; border-radius:8px; text-decoration:none;">' + m.label + '</a>';
+          }).join("");
+      });
+    }
+    iniciarPuenteSwitches();
+  })();
+</script>
 
 </body>
 </html>
