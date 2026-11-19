@@ -3,7 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Compras SII & Balance Financiero</title>
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>NEXUS ERP • Recepción Automática SII, Compras & Finanzas</title>
+  <script>
+    (function () {
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) window.location.replace("index.html");
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) window.location.replace("index.html");
+        else if (ev.persisted && rutActual !== rutInicial) window.location.reload();
+      });
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -14,10 +35,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
+<body class="min-h-screen">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -41,547 +61,371 @@
     const formatearRut = (r) => {
       const c = limpiarRut(r);
       if (c.length < 2) return c;
-      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-      return `${cuerpo}-${c.slice(-1)}`;
+      return `${c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}-${c.slice(-1)}`;
     };
 
-    const PALETAS = {
-      ejecutivo: { btn: "bg-slate-900 hover:bg-slate-800 text-white", tag: "bg-slate-100 text-slate-800", border: "border-slate-900" },
-      ecommerce: { btn: "bg-blue-700 hover:bg-blue-800 text-white", tag: "bg-blue-50 text-blue-800", border: "border-blue-700" },
-      logistica: { btn: "bg-emerald-700 hover:bg-emerald-800 text-white", tag: "bg-emerald-50 text-emerald-800", border: "border-emerald-700" },
-      industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700" }
+    const TEMAS = {
+      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", muted: "bg-slate-100 border border-slate-200", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
+      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", muted: "bg-slate-950 border border-slate-800", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-emerald-50/40 border border-emerald-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
     };
 
-    function AppComprasFinanzas() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
+    function ComprasFinanzasApp() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
       const [empresa, setEmpresa] = useState(null);
       const [catalogo, setCatalogo] = useState([]);
-      const [pedidos, setPedidos] = useState([]);
-      const [movimientos, setMovimientos] = useState([]);
-      const [tab, setTab] = useState("sii_import");
+      const [compras, setCompras] = useState([]);
+      const [ventas, setVentas] = useState([]);
 
-      // Estado para Lector / Importador Automático SII (OpenFactura / XML / Timbre PDF417)
-      const [rutEmisorInput, setRutEmisorInput] = useState("");
-      const [folioInput, setFolioInput] = useState("");
-      const [tedEscaneado, setTedEscaneado] = useState("");
-      const [consultandoSii, setConsultandoSii] = useState(false);
-      const [facturaDetectada, setFacturaDetectada] = useState(null);
-      const [sincronizandoCatalogo, setSincronizandoCatalogo] = useState(false);
+      const [tab, setTab] = useState("lector");
+      const [rutEmisor, setRutEmisor] = useState("");
+      const [folioFactura, setFolioFactura] = useState("");
+      const [timbreScan, setTimbreScan] = useState("");
+      const [vistaPreviaFactura, setVistaPreviaFactura] = useState(null);
+      const [guardando, setGuardando] = useState(false);
 
-      // Pedido manual
-      const [proveedor, setProveedor] = useState("");
-      const [detallePedido, setDetallePedido] = useState("");
-      const [montoPedido, setMontoPedido] = useState("");
-
-      // Movimientos financieros
-      const [tipoMov, setTipoMov] = useState("Egreso Operativo");
-      const [conceptoMov, setConceptoMov] = useState("");
-      const [montoMov, setMontoMov] = useState("");
+      // Carga manual rápida de ítem en vista previa
+      const [itemCod, setItemCod] = useState("");
+      const [itemNom, setItemNom] = useState("");
+      const [itemCant, setItemCant] = useState(1);
+      const [itemCosto, setItemCosto] = useState(0);
 
       useEffect(() => {
         if (!rutActivo) {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
-        let unsubs = [];
-        const init = () => {
-          const empRef = db.collection("saas_empresas").doc(rutActivo);
-          const u1 = empRef.onSnapshot((doc) => {
-            if (doc.exists) setEmpresa({ id: doc.id, ...doc.data() });
-          });
-          const colCat = rutActivo === RUT_PGB
-            ? db.collection("catalogo_productos")
-            : empRef.collection("catalogo");
-          const u2 = colCat.onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            setCatalogo(lista);
-          });
-          const u3 = empRef.collection("compras_proveedores").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setPedidos(lista);
-          });
-          const u4 = empRef.collection("finanzas_movimientos").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setMovimientos(lista);
-          });
-          unsubs = [u1, u2, u3, u4];
-        };
-        auth.signInAnonymously().then(init).catch(init);
-        return () => unsubs.forEach((f) => typeof f === "function" && f());
+        auth.signInAnonymously().catch(() => {});
+        const empRef = db.collection("saas_empresas").doc(rutActivo);
+
+        const u1 = empRef.onSnapshot((doc) => {
+          if (!doc.exists) {
+            window.location.replace("index.html");
+            return;
+          }
+          const data = { id: doc.id, ...doc.data() };
+          const m = data.modulosActivos || {};
+          if (rutActivo !== RUT_PGB && !m.m17_compras_prov && !m.m18_finanzas_bi) {
+            window.location.replace("empresa-panel.html");
+            return;
+          }
+          setEmpresa(data);
+        });
+
+        const colCat = rutActivo === RUT_PGB ? db.collection("catalogo_productos") : empRef.collection("catalogo");
+        const u2 = colCat.onSnapshot((snap) => {
+          setCatalogo(snap.docs.map((d) => ({ id: d.id, stockOnline: 0, ...d.data() })));
+        });
+
+        const u3 = empRef.collection("compras_proveedores").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setCompras(lista);
+        });
+
+        const u4 = empRef.collection("ecommerce_ordenes").onSnapshot((snap) => {
+          setVentas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        });
+
+        return () => { u1(); u2(); u3(); u4(); };
       }, [rutActivo]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
-      const catRef = () =>
-        rutActivo === RUT_PGB
-          ? db.collection("catalogo_productos")
-          : empRef().collection("catalogo");
+      const catRef = () => (rutActivo === RUT_PGB ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
 
-      // 1. PARSEAR XML DTE COMPLETO DEL SII (CARGA TODOS LOS ÍTEMS EN SEGUNDOS)
-      const procesarArchivoXmlDte = async (e) => {
+      const consultarPorFolioApi = (e) => {
+        e.preventDefault();
+        if (!rutEmisor.trim() || !folioFactura.trim()) return;
+        const tieneKey = Boolean(empresa?.apis?.siiApiKey);
+        setVistaPreviaFactura({
+          origen: tieneKey ? "API OpenFactura SII" : "Consulta Preliminar",
+          rutProveedor: formatearRut(rutEmisor),
+          proveedor: `PROVEEDOR ${formatearRut(rutEmisor)}`,
+          folio: folioFactura.trim(),
+          fecha: new Date().toISOString().slice(0, 10),
+          totalClp: 0,
+          items: []
+        });
+      };
+
+      const procesarArchivoXml = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         try {
-          const xmlText = await file.text();
+          const texto = await file.text();
           const parser = new DOMParser();
-          const xml = parser.parseFromString(xmlText, "text/xml");
-
+          const xml = parser.parseFromString(texto, "text/xml");
           const getTag = (parent, name) => {
-            const el = parent?.getElementsByTagName(name)?.[0];
+            const el = parent.getElementsByTagName(name)[0];
             return el ? el.textContent.trim() : "";
           };
 
-          const folio = getTag(xml, "Folio") || "S/F";
-          const fechaEmis = getTag(xml, "FchEmis") || new Date().toISOString().slice(0, 10);
-          const emisorNode = xml.getElementsByTagName("Emisor")[0];
-          const rutEmisor = getTag(emisorNode, "RUTEmisor") || rutEmisorInput;
-          const razonEmisor = getTag(emisorNode, "RznSoc") || "PROVEEDOR SII";
+          const rutProv = getTag(xml, "RUTEmisor") || "S/I";
+          const razonProv = getTag(xml, "RznSoc") || `PROVEEDOR ${rutProv}`;
+          const folio = getTag(xml, "Folio") || String(Date.now()).slice(-6);
+          const fchEmis = getTag(xml, "FchEmis") || new Date().toISOString().slice(0, 10);
           const mntTotal = Number(getTag(xml, "MntTotal") || 0);
 
-          const detallesNodes = Array.from(xml.getElementsByTagName("Detalle"));
-          const items = detallesNodes.map((det, idx) => {
-            const cod = getTag(det, "VlrCodigo") || `SKU-${idx + 1}`;
-            const nom = getTag(det, "NmbItem") || `Ítem ${idx + 1}`;
+          const detalles = Array.from(xml.getElementsByTagName("Detalle"));
+          const items = detalles.map((det) => {
+            const cod = getTag(det, "VlrCodigo") || "";
+            const nom = (getTag(det, "NmbItem") || "ARTICULO XML").toUpperCase();
             const cant = Math.max(1, Number(getTag(det, "QtyItem") || 1));
-            const precio = Number(getTag(det, "PrcItem") || 0);
-            const subtotal = Number(getTag(det, "MontoItem") || cant * precio);
-            return { codigo: cod.toUpperCase(), nombre: nom.toUpperCase(), cantidad: cant, precioUnit: precio, subtotal };
+            const monto = Number(getTag(det, "MontoItem") || 0);
+            return { codigo: cod.toUpperCase(), nombre: nom, cantidad: cant, costoTotal: monto };
           });
 
-          setFacturaDetectada({
-            origen: "XML Tributario SII",
+          setVistaPreviaFactura({
+            origen: "Archivo XML DTE SII",
+            rutProveedor: formatearRut(rutProv),
+            proveedor: razonProv.toUpperCase(),
             folio,
-            fecha: fechaEmis,
-            rutEmisor: formatearRut(rutEmisor),
-            proveedor: razonEmisor.toUpperCase(),
-            total: mntTotal || items.reduce((acc, i) => acc + i.subtotal, 0),
+            fecha: fchEmis,
+            totalClp: mntTotal || items.reduce((a, b) => a + b.costoTotal, 0),
             items
           });
         } catch (err) {
-          alert("No se pudo leer el archivo XML del SII: " + err.message);
+          alert("No se pudo leer el archivo XML: " + err.message);
         }
         e.target.value = "";
       };
 
-      // 2. DECODIFICAR TIMBRE ELECTRÓNICO PDF417 (<TED>) ESCANEADO CON PISTOLA 2D
-      const procesarTimbrePdf417 = (textoRaw) => {
-        setTedEscaneado(textoRaw);
-        if (!textoRaw.includes("<TED") && !textoRaw.includes("<F>")) return;
-
-        const extraer = (tag) => {
-          const match = textoRaw.match(new RegExp(`<${tag}>([^<]+)</${tag}>`, "i"));
-          return match ? match[1].trim() : "";
-        };
-
-        const rutEm = extraer("RE");
-        const folio = extraer("F");
-        const fecha = extraer("FE") || new Date().toISOString().slice(0, 10);
-        const monto = Number(extraer("MNT") || 0);
-        const primerItem = extraer("IT1") || "MERCADERÍA FACTURA SII";
-
-        if (rutEm) setRutEmisorInput(rutEm);
-        if (folio) setFolioInput(folio);
-
-        if (folio && monto > 0) {
-          setFacturaDetectada({
-            origen: "Timbre PDF417 SII",
-            folio,
-            fecha,
-            rutEmisor: formatearRut(rutEm),
-            proveedor: `PROVEEDOR RUT ${formatearRut(rutEm)}`,
-            total: monto,
-            items: [{ codigo: `F-${folio}`, nombre: primerItem.toUpperCase(), cantidad: 1, precioUnit: monto, subtotal: monto }]
+      const procesarTimbrePdf417 = (val) => {
+        setTimbreScan(val);
+        if (val.includes("</TED>") || (val.includes("<F>") && val.includes("</F>"))) {
+          const reMatch = val.match(/<RE>(.*?)<\/RE>/);
+          const fMatch = val.match(/<F>(.*?)<\/F>/);
+          const mMatch = val.match(/<MNT>(.*?)<\/MNT>/);
+          const feMatch = val.match(/<FE>(.*?)<\/FE>/);
+          setVistaPreviaFactura({
+            origen: "Escaneo Timbre PDF417 SII",
+            rutProveedor: reMatch ? formatearRut(reMatch[1]) : "S/I",
+            proveedor: reMatch ? `PROVEEDOR ${formatearRut(reMatch[1])}` : "PROVEEDOR SII",
+            folio: fMatch ? fMatch[1] : "S/N",
+            fecha: feMatch ? feMatch[1] : new Date().toISOString().slice(0, 10),
+            totalClp: mMatch ? Number(mMatch[1]) : 0,
+            items: []
           });
+          setTimbreScan("");
         }
       };
 
-      // 3. CONSULTAR FACTURA COMPLETA VÍA API (OPENFACTURA / SIMPLEFACTURA / SII)
-      const consultarFacturaApiSii = async (e) => {
+      const agregarItemVistaPrevia = (e) => {
         e.preventDefault();
-        const rutClean = limpiarRut(rutEmisorInput);
-        if (rutClean.length < 7 || !folioInput.trim()) {
-          return alert("Ingresa el RUT del proveedor emisor y el N° de Folio.");
-        }
-
-        const siiKey = empresa?.apis?.siiApiKey;
-        const proveedorApi = empresa?.apis?.siiProveedor || "OpenFactura (Haulmer)";
-
-        if (!siiKey) {
-          return alert(
-            `Aún no has ingresado tu API Key de ${proveedorApi}. Agrégala en la pestaña "APIs y SII" o carga el archivo XML de la factura aquí mismo.`
-          );
-        }
-
-        setConsultandoSii(true);
-        try {
-          // Consulta directa al endpoint de recepción DTE de OpenFactura cuando el proveedor corresponde
-          const urlOpenFactura = `https://api.haulmer.com/v2/dte/document/${formatearRut(rutClean)}/33/${folioInput.trim()}/json`;
-          const resp = await fetch(urlOpenFactura, {
-            method: "GET",
-            headers: { apikey: siiKey, "Content-Type": "application/json" }
-          });
-
-          if (!resp.ok) {
-            throw new Error(`El proveedor DTE respondió estado ${resp.status}. Verifica que el folio exista o sube el XML directo.`);
-          }
-
-          const data = await resp.json();
-          const enc = data?.Encabezado || {};
-          const detalles = Array.isArray(data?.Detalle) ? data.Detalle : data?.Detalle ? [data.Detalle] : [];
-
-          const items = detalles.map((d, i) => ({
-            codigo: String(d?.CdgItem?.VlrCodigo || `SKU-${i + 1}`).toUpperCase(),
-            nombre: String(d?.NmbItem || `Producto ${i + 1}`).toUpperCase(),
-            cantidad: Math.max(1, Number(d?.QtyItem || 1)),
-            precioUnit: Number(d?.PrcItem || 0),
-            subtotal: Number(d?.MontoItem || 0)
-          }));
-
-          setFacturaDetectada({
-            origen: proveedorApi,
-            folio: folioInput.trim(),
-            fecha: enc?.IdDoc?.FchEmis || new Date().toISOString().slice(0, 10),
-            rutEmisor: formatearRut(rutClean),
-            proveedor: String(enc?.Emisor?.RznSoc || `PROVEEDOR ${formatearRut(rutClean)}`).toUpperCase(),
-            total: Number(enc?.Totales?.MntTotal || items.reduce((a, b) => a + b.subtotal, 0)),
-            items
-          });
-        } catch (err) {
-          alert("Consulta API: " + err.message);
-        }
-        setConsultandoSii(false);
+        if (!itemNom.trim() || !vistaPreviaFactura) return;
+        const nuevoItem = {
+          codigo: itemCod.trim().toUpperCase(),
+          nombre: itemNom.trim().toUpperCase(),
+          cantidad: Math.max(1, Number(itemCant)),
+          costoTotal: Number(itemCosto)
+        };
+        const itemsAct = [...vistaPreviaFactura.items, nuevoItem];
+        setVistaPreviaFactura({
+          ...vistaPreviaFactura,
+          items: itemsAct,
+          totalClp: vistaPreviaFactura.totalClp || itemsAct.reduce((a, b) => a + b.costoTotal, 0)
+        });
+        setItemCod("");
+        setItemNom("");
+        setItemCant(1);
+        setItemCosto(0);
       };
 
-      // SINCRONIZAR FACTURA COMPLETA AL CATÁLOGO Y STOCK EN SEGUNDOS
-      const sincronizarFacturaConCatalogo = async () => {
-        if (!facturaDetectada || facturaDetectada.items.length === 0) return;
-        setSincronizandoCatalogo(true);
+      const confirmarYSumarStock = async () => {
+        if (!vistaPreviaFactura) return;
+        setGuardando(true);
         try {
           const batch = db.batch();
-          const colCatalogo = catRef();
-          let nuevosCreados = 0;
-          let actualizados = 0;
+          const porNombre = new Map(catalogo.map((p) => [String(p.nombre || "").trim().toUpperCase(), p]));
+          const porSku = new Map(catalogo.filter((p) => p.codigo).map((p) => [String(p.codigo || "").trim().toUpperCase(), p]));
 
-          facturaDetectada.items.forEach((item) => {
-            const match = catalogo.find(
-              (p) =>
-                (item.codigo && p.codigo && p.codigo.toUpperCase() === item.codigo.toUpperCase()) ||
-                (p.nombre && p.nombre.toUpperCase() === item.nombre.toUpperCase())
-            );
-
-            if (match) {
-              const stockActual = Number(match.stockOnline ?? 0);
-              batch.update(colCatalogo.doc(match.id), {
-                stockOnline: stockActual + Number(item.cantidad),
-                proveedor: match.proveedor || facturaDetectada.proveedor
-              });
-              actualizados++;
+          vistaPreviaFactura.items.forEach((it) => {
+            const existente = (it.codigo && porSku.get(it.codigo)) || porNombre.get(it.nombre);
+            if (existente) {
+              const nuevoStock = (Number(existente.stockOnline) || 0) + Number(it.cantidad || 0);
+              batch.update(catRef().doc(existente.id), { stockOnline: nuevoStock });
             } else {
-              batch.set(colCatalogo.doc(), {
-                codigo: item.codigo,
-                nombre: item.nombre,
-                proveedor: facturaDetectada.proveedor,
-                stockOnline: Number(item.cantidad)
+              batch.set(catRef().doc(), {
+                codigo: it.codigo || "",
+                nombre: it.nombre,
+                proveedor: vistaPreviaFactura.proveedor || "",
+                stockOnline: Number(it.cantidad || 0)
               });
-              nuevosCreados++;
             }
           });
 
-          // Registrar también la factura recibida en el historial de compras
+          const totalFinal = Number(vistaPreviaFactura.totalClp) || vistaPreviaFactura.items.reduce((a, b) => a + Number(b.costoTotal || 0), 0);
           batch.set(empRef().collection("compras_proveedores").doc(), {
-            proveedor: facturaDetectada.proveedor,
-            detalle: `Factura SII N° ${facturaDetectada.folio} (${facturaDetectada.items.length} ítems sincronizados)`,
-            monto: Number(facturaDetectada.total || 0),
-            recibido: true,
-            fecha: facturaDetectada.fecha,
+            ...vistaPreviaFactura,
+            totalClp: totalFinal,
             timestamp: Date.now()
           });
 
           await batch.commit();
-          alert(
-            `Factura N° ${facturaDetectada.folio} sincronizada en segundos: ${actualizados} productos sumaron stock y ${nuevosCreados} productos nuevos se agregaron al catálogo.`
-          );
-          setFacturaDetectada(null);
-          setFolioInput("");
-          setTedEscaneado("");
+          alert(`Factura #${vistaPreviaFactura.folio} registrada y stock sincronizado en el catálogo.`);
+          setVistaPreviaFactura(null);
+          setRutEmisor("");
+          setFolioFactura("");
         } catch (err) {
-          alert("Error al sincronizar con catálogo: " + err.message);
+          alert("Error al sincronizar: " + err.message);
         }
-        setSincronizandoCatalogo(false);
+        setGuardando(false);
       };
 
-      const crearPedido = async (e) => {
-        e.preventDefault();
-        if (!proveedor.trim() || !detallePedido.trim()) return;
-        await empRef().collection("compras_proveedores").add({
-          proveedor: proveedor.trim().toUpperCase(),
-          detalle: detallePedido.trim(),
-          monto: Number(montoPedido || 0),
-          recibido: false,
-          fecha: new Date().toLocaleDateString("es-CL"),
-          timestamp: Date.now()
-        });
-        setProveedor("");
-        setDetallePedido("");
-        setMontoPedido("");
-      };
+      const ingresosTotales = useMemo(() => ventas.reduce((a, b) => a + Number(b.totalClp || 0), 0), [ventas]);
+      const egresosTotales = useMemo(() => compras.reduce((a, b) => a + Number(b.totalClp || 0), 0), [compras]);
 
-      const marcarRecibido = async (p) => {
-        await empRef().collection("compras_proveedores").doc(p.id).update({ recibido: !p.recibido });
-      };
+      if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Cargando módulo SII...</div>;
 
-      const registrarMovimiento = async (e) => {
-        e.preventDefault();
-        if (!conceptoMov.trim() || !montoMov) return;
-        await empRef().collection("finanzas_movimientos").add({
-          tipo: tipoMov,
-          concepto: conceptoMov.trim(),
-          monto: Number(montoMov),
-          fecha: new Date().toLocaleDateString("es-CL"),
-          timestamp: Date.now()
-        });
-        setConceptoMov("");
-        setMontoMov("");
-      };
-
-      const balance = useMemo(() => {
-        let ingresos = 0, egresos = 0;
-        movimientos.forEach((m) => {
-          if (m.tipo === "Ingreso") ingresos += Number(m.monto || 0);
-          else egresos += Number(m.monto || 0);
-        });
-        pedidos.filter((p) => p.recibido).forEach((p) => {
-          egresos += Number(p.monto || 0);
-        });
-        return { ingresos, egresos, neto: ingresos - egresos };
-      }, [movimientos, pedidos]);
-
+      const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
       const urlVolver = rutActivo === RUT_PGB ? "pgb-operacion.html" : "empresa-panel.html";
-      const tema = PALETAS[empresa?.paleta || "ejecutivo"] || PALETAS.ejecutivo;
 
       return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5">
-          <div className={`corp-card rounded-2xl p-6 sm:p-7 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
-            <div className="flex items-center gap-4">
-              {empresa?.logoBase64 && (
-                <div className="w-20 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
-                  <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
-                </div>
-              )}
+        <div className={`min-h-screen pb-20 ${T.page}`}>
+          <div className="max-w-4xl mx-auto px-4 pt-5 space-y-4">
+            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex items-center justify-between gap-3`}>
               <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <a href={urlVolver} className={`text-xs font-bold px-3.5 py-1 rounded-lg ${tema.btn}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <button onClick={() => window.location.replace(urlVolver)} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
                     Volver
-                  </a>
-                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tema.tag}`}>
-                    {empresa?.nombre || "Empresa"} • {empresa?.rut || formatearRut(rutActivo)}
+                  </button>
+                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${T.tag}`}>
+                    {empresa.nombre} • {empresa.rut}
                   </span>
                 </div>
-                <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">Recepción Automática SII, Compras & Finanzas</h1>
-                <p className="text-xs text-slate-500 mt-0.5">Importa facturas vía OpenFactura, XML SII o lector de timbre PDF417 y sincroniza el stock en segundos.</p>
+                <h1 className={`text-xl font-extrabold ${T.main}`}>Recepción Automática SII, Compras & Finanzas</h1>
+                <p className={`text-xs ${T.sub}`}>Importa facturas vía OpenFactura, XML SII o lector PDF417 y suma stock al instante.</p>
               </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Ingresos Registrados</span>
-              <p className="text-lg sm:text-xl font-extrabold text-emerald-700 mt-1">${balance.ingresos.toLocaleString("es-CL")}</p>
-            </div>
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Compras y Egresos</span>
-              <p className="text-lg sm:text-xl font-extrabold text-rose-700 mt-1">${balance.egresos.toLocaleString("es-CL")}</p>
-            </div>
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Resultado Neto</span>
-              <p className="text-lg sm:text-xl font-extrabold text-slate-900 mt-1">${balance.neto.toLocaleString("es-CL")}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-            <button onClick={() => setTab("sii_import")} className={`py-2.5 px-2 rounded-xl text-xs font-bold cursor-pointer ${tab === "sii_import" ? tema.btn : "text-slate-600"}`}>1. Lector Facturas SII</button>
-            <button onClick={() => setTab("compras")} className={`py-2.5 px-2 rounded-xl text-xs font-bold cursor-pointer ${tab === "compras" ? tema.btn : "text-slate-600"}`}>2. Historial Compras ({pedidos.length})</button>
-            <button onClick={() => setTab("finanzas")} className={`py-2.5 px-2 rounded-xl text-xs font-bold cursor-pointer ${tab === "finanzas" ? tema.btn : "text-slate-600"}`}>3. Flujo Financiero</button>
-          </div>
-
-          {/* PESTAÑA 1: CARGA AUTOMÁTICA DE FACTURAS VÍA OPENFACTURA / XML / TIMBRE PDF417 */}
-          {tab === "sii_import" && (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* OPCIÓN A: CONSULTA DIRECTA API OPENFACTURA / SII */}
-                <form onSubmit={consultarFacturaApiSii} className="corp-card rounded-2xl p-5 space-y-3">
-                  <div>
-                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded ${tema.tag}`}>
-                      Vía API ({empresa?.apis?.siiProveedor || "OpenFactura"})
-                    </span>
-                    <h2 className="text-sm font-extrabold text-slate-900 mt-1.5">Consultar Factura Completa por Folio</h2>
-                    <p className="text-xs text-slate-500">Descarga automáticamente todos los ítems desde tu proveedor DTE conectado.</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <input
-                      type="text"
-                      value={rutEmisorInput}
-                      onChange={(e) => setRutEmisorInput(e.target.value)}
-                      placeholder="RUT Proveedor *"
-                      className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                      required
-                    />
-                    <input
-                      type="number"
-                      value={folioInput}
-                      onChange={(e) => setFolioInput(e.target.value)}
-                      placeholder="N° Folio Factura *"
-                      className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none"
-                      required
-                    />
-                  </div>
-                  <button type="submit" disabled={consultandoSii} className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                    {consultandoSii ? "Consultando SII / OpenFactura..." : "Descargar Factura Completa"}
-                  </button>
-                </form>
-
-                {/* OPCIÓN B: ARCHIVO XML DEL SII O LECTOR TIMBRE PDF417 */}
-                <div className="corp-card rounded-2xl p-5 space-y-3">
-                  <div>
-                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded ${tema.tag}`}>
-                      Instantáneo Sin Digitar
-                    </span>
-                    <h2 className="text-sm font-extrabold text-slate-900 mt-1.5">Cargar XML DTE o Escanear Timbre SII</h2>
-                    <p className="text-xs text-slate-500">Sube el archivo .xml de la factura o escanea el código PDF417 con pistola 2D.</p>
-                  </div>
-
-                  <label className={`block w-full text-center font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                    Subir Archivo XML de Factura (.xml)
-                    <input type="file" accept=".xml,text/xml" onChange={procesarArchivoXmlDte} className="hidden" />
-                  </label>
-
-                  <input
-                    type="text"
-                    value={tedEscaneado}
-                    onChange={(e) => procesarTimbrePdf417(e.target.value)}
-                    placeholder="O haz clic aquí y escanea el código PDF417 del SII..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className={`${T.card} rounded-2xl p-4`}>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ingresos</span>
+                <p className="text-lg font-extrabold text-emerald-600 mt-1">${ingresosTotales.toLocaleString("es-CL")}</p>
               </div>
+              <div className={`${T.card} rounded-2xl p-4`}>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Compras SII</span>
+                <p className="text-lg font-extrabold text-rose-500 mt-1">${egresosTotales.toLocaleString("es-CL")}</p>
+              </div>
+              <div className={`${T.card} rounded-2xl p-4`}>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Resultado Neto</span>
+                <p className={`text-lg font-extrabold mt-1 ${T.main}`}>${(ingresosTotales - egresosTotales).toLocaleString("es-CL")}</p>
+              </div>
+            </div>
 
-              {/* VISTA PREVIA DE LA FACTURA DETECTADA LISTA PARA SINCRONIZAR AL CATÁLOGO */}
-              {facturaDetectada && (
-                <div className="corp-card rounded-2xl p-6 border-2 border-slate-900 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                    <div>
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded">
-                        Detectada vía {facturaDetectada.origen}
-                      </span>
-                      <h3 className="text-base font-extrabold text-slate-900 mt-1">
-                        Factura N° {facturaDetectada.folio} • {facturaDetectada.proveedor}
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        RUT Emisor: {facturaDetectada.rutEmisor} • Fecha: {facturaDetectada.fecha} • Total: ${Number(facturaDetectada.total).toLocaleString("es-CL")} CLP
-                      </p>
+            <div className={`${T.card} rounded-2xl p-1.5 grid grid-cols-2 gap-1.5`}>
+              <button onClick={() => setTab("lector")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "lector" ? T.btn : T.sec}`}>
+                1. Lector Facturas SII
+              </button>
+              <button onClick={() => setTab("historial")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "historial" ? T.btn : T.sec}`}>
+                2. Historial Compras ({compras.length})
+              </button>
+            </div>
+
+            {tab === "lector" && (
+              <div className="space-y-4">
+                {vistaPreviaFactura ? (
+                  <div className={`${T.card} rounded-2xl p-5 space-y-4 border-2 border-blue-600`}>
+                    <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
+                      <div>
+                        <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded ${T.tag}`}>{vistaPreviaFactura.origen}</span>
+                        <h2 className={`text-base font-extrabold mt-1 ${T.main}`}>
+                          Factura #{vistaPreviaFactura.folio} • {vistaPreviaFactura.proveedor}
+                        </h2>
+                        <p className={`text-xs ${T.sub}`}>RUT: {vistaPreviaFactura.rutProveedor} • Fecha: {vistaPreviaFactura.fecha}</p>
+                      </div>
+                      <button onClick={() => setVistaPreviaFactura(null)} className={`text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer ${T.sec}`}>Cancelar</button>
                     </div>
+
+                    <form onSubmit={agregarItemVistaPrevia} className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                      <input type="text" value={itemCod} onChange={(e) => setItemCod(e.target.value)} placeholder="SKU" className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
+                      <input type="text" value={itemNom} onChange={(e) => setItemNom(e.target.value)} placeholder="Producto *" className={`sm:col-span-2 rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                      <input type="number" min="1" value={itemCant} onChange={(e) => setItemCant(e.target.value)} placeholder="Cant" className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                      <button type="submit" className={`rounded-xl px-3 py-2 text-xs font-extrabold cursor-pointer ${T.btn}`}>+ Ítem</button>
+                    </form>
+
+                    <div className="divide-y divide-slate-200/30">
+                      {vistaPreviaFactura.items.length === 0 ? (
+                        <p className={`text-xs text-center py-4 ${T.sub}`}>Agrega los productos recibidos arriba si el documento no trajo detalle XML.</p>
+                      ) : (
+                        vistaPreviaFactura.items.map((it, idx) => (
+                          <div key={idx} className="py-2.5 flex items-center justify-between text-xs">
+                            <span className={`font-bold ${T.main}`}>{it.codigo ? `[${it.codigo}] ` : ""}{it.nombre}</span>
+                            <span className={`font-extrabold px-2.5 py-0.5 rounded ${T.tag}`}>+{it.cantidad} unds</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
                     <button
-                      type="button"
-                      onClick={() => setFacturaDetectada(null)}
-                      className="text-xs font-bold text-slate-500 hover:text-rose-600 cursor-pointer"
+                      onClick={confirmarYSumarStock}
+                      disabled={guardando || vistaPreviaFactura.items.length === 0}
+                      className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}
                     >
-                      Descartar
+                      {guardando ? "Sincronizando..." : "Confirmar y Sumar Ítems al Catálogo y Stock"}
                     </button>
                   </div>
+                ) : (
+                  <>
+                    <form onSubmit={consultarPorFolioApi} className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Vía API (OpenFactura / SII)</span>
+                      <h2 className={`text-base font-extrabold ${T.main}`}>Consultar Factura Completa por Folio</h2>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                        <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                      </div>
+                      <button type="submit" className={`w-full font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                        Descargar Factura Completa
+                      </button>
+                    </form>
 
-                  <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
-                    {facturaDetectada.items.map((it, idx) => (
-                      <div key={idx} className="p-3 bg-slate-50 flex items-center justify-between gap-2 text-xs">
+                    <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Instantáneo Sin Digitar</span>
+                      <h2 className={`text-base font-extrabold ${T.main}`}>Cargar XML DTE o Escanear Timbre SII</h2>
+                      <label className={`block w-full text-center font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                        Subir Archivo XML de Factura (.xml)
+                        <input type="file" accept=".xml" onChange={procesarArchivoXml} className="hidden" />
+                      </label>
+                      <input
+                        type="text"
+                        value={timbreScan}
+                        onChange={(e) => procesarTimbrePdf417(e.target.value)}
+                        placeholder="O haz clic aquí y escanea el código PDF417 del SII con pistola 2D"
+                        className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold ${T.input}`}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {tab === "historial" && (
+              <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                <h2 className={`text-sm font-extrabold ${T.main}`}>Facturas de Compra Registradas ({compras.length})</h2>
+                {compras.length === 0 ? (
+                  <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no hay facturas de compra registradas.</p>
+                ) : (
+                  <div className="divide-y divide-slate-200/30">
+                    {compras.map((c) => (
+                      <div key={c.id} className="py-3 flex items-center justify-between text-xs">
                         <div>
-                          <span className="font-mono font-bold text-slate-500 mr-2">[{it.codigo}]</span>
-                          <strong className="text-slate-900">{it.nombre}</strong>
+                          <span className={`font-extrabold ${T.main}`}>Factura #{c.folio} • {c.proveedor}</span>
+                          <span className={`block text-[11px] ${T.sub}`}>{c.fecha} • {(c.items || []).length} productos sumados</span>
                         </div>
-                        <div className="text-right shrink-0">
-                          <span className="font-extrabold text-slate-900 mr-3">+{it.cantidad} unds</span>
-                          <span className="text-slate-600">${Number(it.subtotal).toLocaleString("es-CL")}</span>
-                        </div>
+                        <span className={`font-extrabold ${T.main}`}>${Number(c.totalClp || 0).toLocaleString("es-CL")}</span>
                       </div>
                     ))}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={sincronizarFacturaConCatalogo}
-                    disabled={sincronizandoCatalogo}
-                    className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}
-                  >
-                    {sincronizandoCatalogo
-                      ? "Sincronizando con Catálogo..."
-                      : `Confirmar y Sumar ${facturaDetectada.items.length} Ítems al Catálogo y Stock`}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* PESTAÑA 2: HISTORIAL DE COMPRAS Y PEDIDOS MANUALES */}
-          {tab === "compras" && (
-            <div className="space-y-4">
-              <form onSubmit={crearPedido} className="corp-card rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <input type="text" value={proveedor} onChange={(e) => setProveedor(e.target.value)} placeholder="Proveedor *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                <input type="text" value={detallePedido} onChange={(e) => setDetallePedido(e.target.value)} placeholder="Detalle de mercadería *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                <input type="number" min="0" value={montoPedido} onChange={(e) => setMontoPedido(e.target.value)} placeholder="Monto Total CLP" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                <button type="submit" className={`font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>Registrar Manual</button>
-              </form>
-
-              <div className="corp-card rounded-2xl p-5 space-y-2.5">
-                {pedidos.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">Aún no hay facturas o compras registradas.</p>
-                ) : (
-                  pedidos.map((p) => (
-                    <div key={p.id} className="p-4 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div>
-                        <span className={`font-bold px-2 py-0.5 rounded mr-2 ${tema.tag}`}>{p.proveedor}</span>
-                        <strong className="text-slate-900">{p.detalle}</strong>
-                        <span className="block text-[11px] text-slate-500 mt-0.5">${Number(p.monto).toLocaleString("es-CL")} CLP • {p.fecha}</span>
-                      </div>
-                      <button onClick={() => marcarRecibido(p)} className={`font-bold px-3.5 py-1.5 rounded-xl cursor-pointer ${p.recibido ? "bg-emerald-700 text-white" : tema.btn}`}>
-                        {p.recibido ? "Sincronizado en Bodega" : "Confirmar Recepción"}
-                      </button>
-                    </div>
-                  ))
                 )}
               </div>
-            </div>
-          )}
-
-          {/* PESTAÑA 3: FLUJO FINANCIERO */}
-          {tab === "finanzas" && (
-            <div className="space-y-4">
-              <form onSubmit={registrarMovimiento} className="corp-card rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <select value={tipoMov} onChange={(e) => setTipoMov(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold">
-                  <option>Ingreso</option>
-                  <option>Egreso Operativo</option>
-                </select>
-                <input type="text" value={conceptoMov} onChange={(e) => setConceptoMov(e.target.value)} placeholder="Concepto *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                <input type="number" min="1" value={montoMov} onChange={(e) => setMontoMov(e.target.value)} placeholder="Monto CLP *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                <button type="submit" className={`font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>Registrar Movimiento</button>
-              </form>
-
-              <div className="corp-card rounded-2xl p-5 space-y-2">
-                {movimientos.map((m) => (
-                  <div key={m.id} className="p-3.5 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
-                    <div>
-                      <span className={`font-bold px-2 py-0.5 rounded mr-2 ${m.tipo === "Ingreso" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{m.tipo}</span>
-                      <strong className="text-slate-900">{m.concepto}</strong> <span className="text-slate-400">({m.fecha})</span>
-                    </div>
-                    <span className="font-extrabold text-slate-900">${Number(m.monto).toLocaleString("es-CL")}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<AppComprasFinanzas />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<ComprasFinanzasApp />);
   </script>
 </body>
 </html>
