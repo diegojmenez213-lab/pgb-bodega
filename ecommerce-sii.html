@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXUS ERP • E-Commerce Omnicanal & Motor SII</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05); }
+    .print-only { display: none; }
+    @media print {
+      body { background: white !important; color: black !important; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+    }
+  </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-amber-400 selection:text-slate-950">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
+      authDomain: "pgb-bodegad.firebaseapp.com",
+      projectId: "pgb-bodegad",
+      storageBucket: "pgb-bodegad.firebasestorage.app",
+      messagingSenderId: "497839332750",
+      appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
+    };
+
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+    const formatearRut = (r) => {
+      const c = limpiarRut(r);
+      if (c.length < 2) return c;
+      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      return `${cuerpo}-${c.slice(-1)}`;
+    };
+
+    const CANALES = {
+      "Mercado Libre": { badge: "bg-amber-100 text-amber-900 border-amber-300", icon: "🟡", cola: "general" },
+      "Falabella": { badge: "bg-emerald-100 text-emerald-900 border-emerald-300", icon: "🟢", cola: "general" },
+      "Lider": { badge: "bg-sky-100 text-sky-900 border-sky-300", icon: "🔵", cola: "lider" }
+    };
+
+    function AppEcommerceSII() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "775280425");
+      const [conectado, setConectado] = useState(false);
+      const [empresa, setEmpresa] = useState(null);
+      const [catalogo, setCatalogo] = useState([]);
+      const [ordenes, setOrdenes] = useState([]);
+      const [cafConfig, setCafConfig] = useState({
+        boleta39Actual: 14820,
+        boleta39Limite: 15000,
+        factura33Actual: 3290,
+        factura33Limite: 3500
+      });
+
+      const [tab, setTab] = useState("ordenes"); // ordenes | stock | sii_caf | impresion
+      const [filtroCanal, setFiltroCanal] = useState("TODOS");
+      const [busqueda, setBusqueda] = useState("");
+      const [colaImprimir, setColaImprimir] = useState(null); // "general" | "lider"
+
+      // Formulario Nueva Orden / Simulador Demo
+      const [mostrarNuevaOrden, setMostrarNuevaOrden] = useState(false);
+      const [canalNuevo, setCanalNuevo] = useState("Mercado Libre");
+      const [ordenExtNuevo, setOrdenExtNuevo] = useState("");
+      const [compradorNuevo, setCompradorNuevo] = useState("");
+      const [rutCompradorNuevo, setRutCompradorNuevo] = useState("");
+      const [skuSeleccionado, setSkuSeleccionado] = useState("");
+      const [cantidadNueva, setCantidadNueva] = useState(1);
+      const [totalNuevo, setTotalNuevo] = useState(19990);
+
+      useEffect(() => {
+        let unsubs = [];
+
+        const conectar = () => {
+          const empRef = db.collection("saas_empresas").doc(rutActivo);
+
+          const u1 = empRef.onSnapshot((doc) => {
+            setConectado(true);
+            if (doc.exists) {
+              const data = { id: doc.id, ...doc.data() };
+              setEmpresa(data);
+              if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
+            } else {
+              setEmpresa({
+                id: rutActivo,
+                rut: formatearRut(rutActivo),
+                nombre: rutActivo === "775280425" ? "Tecnoshop Company SpA" : `Empresa ${formatearRut(rutActivo)}`
+              });
+            }
+          });
+
+          const colCat = rutActivo === "769497226"
+            ? db.collection("catalogo_productos")
+            : empRef.collection("catalogo");
+
+          const u2 = colCat.onSnapshot((snap) => {
+            const lista = snap.docs.map((d) => ({
+              id: d.id,
+              stockOnline: 25,
+              ...d.data()
+            }));
+            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+            setCatalogo(lista);
+          });
+
+          const u3 = empRef.collection("ecommerce_ordenes").onSnapshot((snap) => {
+            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setOrdenes(lista);
+          });
+
+          unsubs = [u1, u2, u3];
+        };
+
+        auth.signInAnonymously().then(conectar).catch(conectar);
+        return () => unsubs.forEach((fn) => typeof fn === "function" && fn());
+      }, [rutActivo]);
+
+      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
+      const catRef = () =>
+        rutActivo === "769497226"
+          ? db.collection("catalogo_productos")
+          : empRef().collection("catalogo");
+
+      // CREAR ORDEN + DESCUENTO AUTOMÁTICO DE STOCK + EMISIÓN DTE (33 vs 39)
+      const registrarOrdenOmnicanal = async (e) => {
+        e.preventDefault();
+        const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
+          id: "manual",
+          codigo: "SKU-001",
+          nombre: skuSeleccionado || "PRODUCTO E-COMMERCE",
+          stockOnline: 10
+        };
+
+        const rutLim = limpiarRut(rutCompradorNuevo);
+        const esFactura33 = rutLim.length >= 7;
+        const tipoDte = esFactura33 ? 33 : 39;
+        const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
+        const colaDestino = canalNuevo === "Lider" ? "lider" : "general";
+
+        const nuevaOrden = {
+          canal: canalNuevo,
+          ordenExterna: ordenExtNuevo.trim() || `${canalNuevo.slice(0, 3).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`,
+          comprador: compradorNuevo.trim() || "Cliente Marketplace",
+          rutComprador: esFactura33 ? formatearRut(rutLim) : "",
+          productoId: prodObj.id,
+          codigoSku: prodObj.codigo || "S/C",
+          productoNombre: prodObj.nombre,
+          cantidad: Number(cantidadNueva),
+          totalClp: Number(totalNuevo),
+          tipoDte,
+          folioSii: folioAsignado,
+          estadoSii: "Aceptado SII (DTE Emitido)",
+          colaImpresion: colaDestino,
+          etiquetaImpresa: false,
+          despachado: false,
+          fecha: new Date().toLocaleString("es-CL"),
+          timestamp: Date.now()
+        };
+
+        try {
+          const batch = db.batch();
+          batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaOrden);
+
+          // Descontar stock compartido en vivo
+          if (prodObj.id && prodObj.id !== "manual") {
+            const nuevoStock = Math.max(0, (Number(prodObj.stockOnline) || 0) - Number(cantidadNueva));
+            batch.update(catRef().doc(prodObj.id), { stockOnline: nuevoStock });
+          }
+
+          // Avanzar correlativo CAF en SII
+          const nuevoCaf = {
+            ...cafConfig,
+            factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
+            boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
+          };
+          batch.set(empRef(), { cafConfig: nuevoCaf }, { merge: true });
+
+          await batch.commit();
+          setMostrarNuevaOrden(false);
+          setOrdenExtNuevo("");
+          setCompradorNuevo("");
+          setRutCompradorNuevo("");
+          alert(`✅ Orden ingresada, stock descontado en los 3 canales y ${esFactura33 ? "Factura 33" : "Boleta 39"} Folio #${folioAsignado} emitida al SII.`);
+        } catch (err) {
+          alert("Error al procesar orden: " + err.message);
+        }
+      };
+
+      const actualizarStockProducto = async (prodId, nuevoStock) => {
+        try {
+          await catRef().doc(prodId).update({ stockOnline: Math.max(0, Number(nuevoStock)) });
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+
+      const guardarNuevosFoliosCaf = async (e) => {
+        e.preventDefault();
+        try {
+          await empRef().set({ cafConfig }, { merge: true });
+          alert("✅ Rango de folios CAF actualizado en el motor tributario.");
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+
+      const imprimirLoteEtiquetas = async (tipoCola) => {
+        const pendientesCola = ordenes.filter((o) => o.colaImpresion === tipoCola && !o.etiquetaImpresa);
+        if (pendientesCola.length === 0) {
+          return alert("No hay etiquetas pendientes en esta bandeja.");
+        }
+        setColaImprimir(tipoCola);
+        setTimeout(async () => {
+          window.print();
+          const batch = db.batch();
+          pendientesCola.forEach((o) => {
+            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), { etiquetaImpresa: true });
+          });
+          await batch.commit();
+          setColaImprimir(null);
+        }, 250);
+      };
+
+      const marcarDespachado = async (id, actual) => {
+        await empRef().collection("ecommerce_ordenes").doc(id).update({ despachado: !actual });
+      };
+
+      // KPIs y Alertas CAF
+      const disponibles39 = cafConfig.boleta39Limite - cafConfig.boleta39Actual;
+      const disponibles33 = cafConfig.factura33Limite - cafConfig.factura33Actual;
+      const alertaCafCritica = disponibles39 < 50 || disponibles33 < 30;
+
+      const colaGeneralPendiente = useMemo(
+        () => ordenes.filter((o) => o.colaImpresion === "general" && !o.etiquetaImpresa),
+        [ordenes]
+      );
+      const colaLiderPendiente = useMemo(
+        () => ordenes.filter((o) => o.colaImpresion === "lider" && !o.etiquetaImpresa),
+        [ordenes]
+      );
+
+      const ordenesFiltradas = useMemo(() => {
+        const q = busqueda.trim().toLowerCase();
+        return ordenes.filter((o) => {
+          if (filtroCanal !== "TODOS" && o.canal !== filtroCanal) return false;
+          if (!q) return true;
+          return (
+            (o.ordenExterna || "").toLowerCase().includes(q) ||
+            (o.comprador || "").toLowerCase().includes(q) ||
+            (o.productoNombre || "").toLowerCase().includes(q) ||
+            String(o.folioSii || "").includes(q)
+          );
+        });
+      }, [ordenes, filtroCanal, busqueda]);
+
+      const apisConectadas = empresa?.apis || {};
+
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900">
+          {/* PLANTILLA DE IMPRESIÓN DE ETIQUETAS TÉRMICAS / LOGÍSTICAS */}
+          {colaImprimir && (
+            <div className="print-only bg-white text-black p-6">
+              <div className="border-b-2 border-black pb-3 mb-4">
+                <h2 className="text-base font-black uppercase">
+                  {colaImprimir === "lider"
+                    ? "🔵 COLA FÍSICA EXCLUSIVA LIDER / WALMART MARKETPLACE"
+                    : "🟡🟢 LOTE DESPACHO MERCADO LIBRE & FALABELLA"}
+                </h2>
+                <p className="text-xs">
+                  Remitente: <strong>{empresa?.nombre}</strong> ({empresa?.rut}) • Fecha: {new Date().toLocaleString("es-CL")}
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4">
+                {(colaImprimir === "lider" ? colaLiderPendiente : colaGeneralPendiente).map((o) => (
+                  <div key={o.id} className="border-2 border-black p-4 rounded-lg text-xs space-y-1">
+                    <div className="flex justify-between font-black text-sm border-b border-gray-400 pb-1">
+                      <span>CANAL: {o.canal.toUpperCase()}</span>
+                      <span>ORDEN: #{o.ordenExterna}</span>
+                    </div>
+                    <p><strong>Destinatario:</strong> {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""}</p>
+                    <p><strong>SKU / Producto:</strong> [{o.codigoSku}] {o.productoNombre} — <strong>Cant: {o.cantidad}</strong></p>
+                    <p><strong>Documento SII:</strong> {o.tipoDte === 33 ? "FACTURA ELECTRÓNICA (33)" : "BOLETA ELECTRÓNICA (39)"} • <strong>Folio #{o.folioSii}</strong></p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* INTERFAZ PRINCIPAL */}
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-6 no-print">
+            {/* ALERTA PREVENTIVA CAF */}
+            {alertaCafCritica && (
+              <div className="bg-rose-600 text-white p-4 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs sm:text-sm font-black">
+                  ⚠️ ALERTA FOLIOS CAF SII: Quedan {disponibles39} folios Boleta (39) y {disponibles33} folios Factura (33). Renueva en SII para evitar detención automática.
+                </span>
+                <button
+                  onClick={() => setTab("sii_caf")}
+                  className="bg-white text-rose-700 text-xs font-black px-3.5 py-1.5 rounded-xl cursor-pointer"
+                >
+                  Gestionar CAF ➔
+                </button>
+              </div>
+            )}
+
+            {/* CABECERA */}
+            <div className="card-clean rounded-3xl p-5 sm:p-7 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <a
+                    href="index.html"
+                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl transition"
+                  >
+                    ← Volver al Núcleo
+                  </a>
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-extrabold px-3 py-1 rounded-full">
+                    ● {empresa?.nombre || "Cargando..."} ({empresa?.rut || formatearRut(rutActivo)})
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+                  🛒 E-COMMERCE OMNICANAL & <span className="text-indigo-600">MOTOR SII</span>
+                </h1>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Sincronización 24/7 (Mercado Libre • Falabella • Lider), stock compartido y emisión automática Boleta 39 / Factura 33.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setMostrarNuevaOrden(!mostrarNuevaOrden)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm px-5 py-3.5 rounded-2xl shadow-md transition cursor-pointer shrink-0"
+              >
+                {mostrarNuevaOrden ? "✕ Cerrar Simulador" : "⚡ Simular / Ingresar Orden"}
+              </button>
+            </div>
+
+            {/* SIMULADOR / INGRESO MANUAL DE ORDEN OMNICANAL */}
+            {mostrarNuevaOrden && (
+              <form onSubmit={registrarOrdenOmnicanal} className="card-clean rounded-3xl p-6 border-2 border-indigo-400 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                  <div>
+                    <h2 className="text-base font-black text-indigo-900">⚡ Ingreso de Orden Entrante (Demo / Manual)</h2>
+                    <p className="text-xs text-slate-500">
+                      Descuenta stock al instante, emite Boleta 39 (sin RUT) o Factura 33 (con RUT) y envía la etiqueta a su cola correspondiente.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Canal de Venta *</label>
+                    <select
+                      value={canalNuevo}
+                      onChange={(e) => setCanalNuevo(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-black outline-none"
+                    >
+                      <option value="Mercado Libre">🟡 Mercado Libre</option>
+                      <option value="Falabella">🟢 Falabella</option>
+                      <option value="Lider">🔵 Lider (Cola Física Exclusiva)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Comprador / Empresa *</label>
+                    <input
+                      type="text"
+                      value={compradorNuevo}
+                      onChange={(e) => setCompradorNuevo(e.target.value)}
+                      placeholder="Ej: Comercializadora Sur SpA"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-indigo-700 block mb-1">
+                      RUT Comprador <span className="font-normal">(Vacío = Boleta 39 | Con RUT = Factura 33)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={rutCompradorNuevo}
+                      onChange={(e) => setRutCompradorNuevo(e.target.value)}
+                      placeholder="Ej: 76.123.456-7 (Opcional)"
+                      className="w-full bg-indigo-50/50 border border-indigo-300 rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Producto del Catálogo *</label>
+                    {catalogo.length > 0 ? (
+                      <select
+                        value={skuSeleccionado}
+                        onChange={(e) => setSkuSeleccionado(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none"
+                        required
+                      >
+                        <option value="">-- Selecciona producto del catálogo --</option>
+                        {catalogo.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre} (Stock: {p.stockOnline ?? 25})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={skuSeleccionado}
+                        onChange={(e) => setSkuSeleccionado(e.target.value)}
+                        placeholder="Nombre producto (Sube tu Excel en el Núcleo para lista automática)"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none"
+                        required
+                      />
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Cant *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={cantidadNueva}
+                        onChange={(e) => setCantidadNueva(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-black outline-none"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Total CLP *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={totalNuevo}
+                        onChange={(e) => setTotalNuevo(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-black outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-2xl text-sm shadow-md transition cursor-pointer"
+                >
+                  🚀 Procesar Orden + Descontar Stock + Emitir DTE ({limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"})
+                </button>
+              </form>
+            )}
+
+            {/* KPIS PRINCIPALES */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="card-clean rounded-2xl p-4">
+                <span className="text-[11px] font-extrabold uppercase text-slate-500">Órdenes Totales</span>
+                <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">{ordenes.length}</p>
+              </div>
+              <div className="card-clean rounded-2xl p-4 border-amber-200 bg-amber-50/40">
+                <span className="text-[11px] font-extrabold uppercase text-amber-800">Cola MeLi + Falabella</span>
+                <p className="text-2xl sm:text-3xl font-black text-amber-600 mt-1">{colaGeneralPendiente.length}</p>
+              </div>
+              <div className="card-clean rounded-2xl p-4 border-sky-200 bg-sky-50/40">
+                <span className="text-[11px] font-extrabold uppercase text-sky-800">Cola Exclusiva Lider</span>
+                <p className="text-2xl sm:text-3xl font-black text-sky-600 mt-1">{colaLiderPendiente.length}</p>
+              </div>
+              <div className="card-clean rounded-2xl p-4 border-indigo-200 bg-indigo-50/40">
+                <span className="text-[11px] font-extrabold uppercase text-indigo-800">Folios CAF Disponibles</span>
+                <p className="text-sm font-black text-indigo-900 mt-1.5">
+                  B39: {disponibles39} • F33: {disponibles33}
+                </p>
+              </div>
+            </div>
+
+            {/* PESTAÑAS DE NAVEGACIÓN DE LOS 4 SUBMÓDULOS */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+              <button
+                onClick={() => setTab("ordenes")}
+                className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tab === "ordenes" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+              >
+                🛒 Consola 24/7 ({ordenes.length})
+              </button>
+              <button
+                onClick={() => setTab("stock")}
+                className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tab === "stock" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+              >
+                🔄 Stock Compartido ({catalogo.length})
+              </button>
+              <button
+                onClick={() => setTab("sii_caf")}
+                className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tab === "sii_caf" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+              >
+                🧾 Motor SII & CAF
+              </button>
+              <button
+                onClick={() => setTab("impresion")}
+                className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tab === "impresion" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+              >
+                🖨️ Colas Impresión ({colaGeneralPendiente.length + colaLiderPendiente.length})
+              </button>
+            </div>
+
+            {/* MÓDULO 8: CONSOLA OMNICANAL 24/7 */}
+            {tab === "ordenes" && (
+              <div className="space-y-4">
+                <div className="card-clean rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="🔍 Buscar por Nº Orden, comprador, producto o folio SII..."
+                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {["TODOS", "Mercado Libre", "Falabella", "Lider"].map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setFiltroCanal(c)}
+                        className={`px-3 py-2 rounded-xl text-xs font-black border cursor-pointer ${
+                          filtroCanal === c ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-700 border-slate-300"
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {ordenesFiltradas.length === 0 ? (
+                  <div className="card-clean rounded-3xl p-12 text-center space-y-3">
+                    <p className="text-4xl">🛒</p>
+                    <h3 className="text-lg font-black text-slate-900">Consola Omnicanal Lista</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Aún no hay órdenes registradas. Toca <strong>"⚡ Simular / Ingresar Orden"</strong> arriba para probar la emisión automática de Boleta 39 / Factura 33 y el descuento de stock.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {ordenesFiltradas.map((o) => {
+                      const canalMeta = CANALES[o.canal] || { badge: "bg-slate-100 text-slate-800 border-slate-300", icon: "📦" };
+                      return (
+                        <div key={o.id} className={`card-clean rounded-2xl p-5 space-y-3 border ${o.despachado ? "border-emerald-300 bg-emerald-50/20" : "border-slate-200"}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-xs font-black px-3 py-1 rounded-lg border ${canalMeta.badge}`}>
+                              {canalMeta.icon} {o.canal} • #{o.ordenExterna}
+                            </span>
+                            <span className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg ${o.tipoDte === 33 ? "bg-indigo-100 text-indigo-900" : "bg-slate-100 text-slate-700"}`}>
+                              {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
+                            </span>
+                          </div>
+
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <p className="text-sm font-black text-slate-900">
+                              {o.cantidad}x [{o.codigoSku}] {o.productoNombre}
+                            </p>
+                            <p className="text-xs text-slate-600 mt-1">
+                              👤 {o.comprador} {o.rutComprador ? `• RUT: ${o.rutComprador}` : "• Consumidor Final"}
+                            </p>
+                            <p className="text-xs font-extrabold text-emerald-700 mt-0.5">
+                              Total: ${Number(o.totalClp || 0).toLocaleString("es-CL")} CLP
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs pt-1">
+                            <span className={`font-bold ${o.etiquetaImpresa ? "text-emerald-700" : "text-amber-700"}`}>
+                              {o.etiquetaImpresa ? "✓ Etiqueta impresa" : `⏳ En cola: ${o.colaImpresion === "lider" ? "Lider Exclusiva" : "Lote MeLi/Falabella"}`}
+                            </span>
+                            <button
+                              onClick={() => marcarDespachado(o.id, o.despachado)}
+                              className={`px-3 py-1.5 rounded-xl font-black cursor-pointer ${
+                                o.despachado ? "bg-emerald-600 text-white" : "bg-slate-900 text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              {o.despachado ? "✅ Despachado" : "Marcar Despachado"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* MÓDULO 9: SINCRONIZADOR DE STOCK COMPARTIDO */}
+            {tab === "stock" && (
+              <div className="card-clean rounded-3xl p-6 space-y-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-900">🔄 Stock Compartido en Tiempo Real (Anti-Sobreventa)</h2>
+                  <p className="text-xs text-slate-500">
+                    Cualquier venta en Mercado Libre, Falabella o Lider descuenta de este pool único y actualiza la disponibilidad en todos los canales.
+                  </p>
+                </div>
+
+                {catalogo.length === 0 ? (
+                  <p className="text-xs text-slate-500 bg-slate-50 p-8 rounded-2xl text-center">
+                    No hay productos en el catálogo de esta empresa. Súbelos en <strong>index.html $\rightarrow$ Catálogo Inteligente</strong>.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-600 uppercase">
+                        <tr>
+                          <th className="p-3 rounded-l-xl">SKU / Producto</th>
+                          <th className="p-3">Canales Activos</th>
+                          <th className="p-3 text-center">Stock Compartido</th>
+                          <th className="p-3 rounded-r-xl text-right">Ajuste Rápido</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {catalogo.slice(0, 100).map((p) => {
+                          const st = Number(p.stockOnline ?? 25);
+                          return (
+                            <tr key={p.id}>
+                              <td className="p-3 font-black text-slate-900">
+                                {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}
+                              </td>
+                              <td className="p-3">
+                                <span className="inline-flex gap-1 text-[10px] font-bold">
+                                  <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded">MeLi</span>
+                                  <span className="bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">Falabella</span>
+                                  <span className="bg-sky-100 text-sky-900 px-2 py-0.5 rounded">Lider</span>
+                                </span>
+                              </td>
+                              <td className="p-3 text-center">
+                                <span className={`px-3 py-1 rounded-full font-black ${st <= 3 ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"}`}>
+                                  {st} unds
+                                </span>
+                              </td>
+                              <td className="p-3 text-right space-x-1">
+                                <button
+                                  onClick={() => actualizarStockProducto(p.id, st - 1)}
+                                  className="bg-slate-200 hover:bg-slate-300 px-2.5 py-1 rounded-lg font-black cursor-pointer"
+                                >
+                                  -1
+                                </button>
+                                <button
+                                  onClick={() => actualizarStockProducto(p.id, st + 5)}
+                                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-2.5 py-1 rounded-lg font-black cursor-pointer"
+                                >
+                                  +5
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* MÓDULO 10: MOTOR TRIBUTARIO SII Y FOLIOS CAF */}
+            {tab === "sii_caf" && (
+              <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900">🧾 Motor Tributario SII ({apisConectadas.siiProveedor || "OpenFactura / SII"})</h2>
+                    <p className="text-xs text-slate-500">
+                      Emisión automática de DTE 39 (Boleta) o DTE 33 (Factura) y control preventivo de rangos CAF autorizados.
+                    </p>
+                  </div>
+                  <span className={`text-xs font-black px-3 py-1.5 rounded-xl border ${apisConectadas.siiApiKey ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-800 border-amber-200"}`}>
+                    {apisConectadas.siiApiKey ? "● API Conectada en Producción" : "⚠️ Modo Simulación (Falta API Key en Núcleo)"}
+                  </span>
+                </div>
+
+                <form onSubmit={guardarNuevosFoliosCaf} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                    <h3 className="text-sm font-black text-slate-900">Boleta Electrónica (DTE 39)</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Actual</label>
+                        <input
+                          type="number"
+                          value={cafConfig.boleta39Actual}
+                          onChange={(e) => setCafConfig({ ...cafConfig, boleta39Actual: Number(e.target.value) })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-black"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Tope CAF</label>
+                        <input
+                          type="number"
+                          value={cafConfig.boleta39Limite}
+                          onChange={(e) => setCafConfig({ ...cafConfig, boleta39Limite: Number(e.target.value) })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-black"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs font-bold text-emerald-700">Disponibles: {disponibles39} folios</p>
+                  </div>
+
+                  <div className="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-4 space-y-3">
+                    <h3 className="text-sm font-black text-indigo-950">Factura Electrónica (DTE 33)</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] font-bold text-indigo-900 block mb-1">Folio Actual</label>
+                        <input
+                          type="number"
+                          value={cafConfig.factura33Actual}
+                          onChange={(e) => setCafConfig({ ...cafConfig, factura33Actual: Number(e.target.value) })}
+                          className="w-full bg-white border border-indigo-300 rounded-xl px-3 py-2 text-sm font-black"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-indigo-900 block mb-1">Folio Tope CAF</label>
+                        <input
+                          type="number"
+                          value={cafConfig.factura33Limite}
+                          onChange={(e) => setCafConfig({ ...cafConfig, factura33Limite: Number(e.target.value) })}
+                          className="w-full bg-white border border-indigo-300 rounded-xl px-3 py-2 text-sm font-black"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs font-bold text-indigo-700">Disponibles: {disponibles33} folios</p>
+                  </div>
+
+                  <button type="submit" className="md:col-span-2 bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-2xl text-sm cursor-pointer">
+                    💾 Actualizar Rangos CAF
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* MÓDULO 11: COLAS DE IMPRESIÓN SEPARADAS (GENERAL VS LIDER EXCLUSIVA) */}
+            {tab === "impresion" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="card-clean rounded-3xl p-6 border-2 border-amber-300 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-black text-amber-900">🟡🟢 Cola General (MeLi + Falabella)</h3>
+                    <span className="bg-amber-100 text-amber-900 text-xs font-black px-3 py-1 rounded-full">
+                      {colaGeneralPendiente.length} pendientes
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Agrupa todas las etiquetas de Mercado Libre y Falabella listas para salida de bodega en un solo lote.
+                  </p>
+                  <button
+                    onClick={() => imprimirLoteEtiquetas("general")}
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-3.5 rounded-2xl text-xs sm:text-sm shadow-sm cursor-pointer"
+                  >
+                    🖨️ Imprimir Lote MeLi + Falabella ({colaGeneralPendiente.length})
+                  </button>
+                </div>
+
+                <div className="card-clean rounded-3xl p-6 border-2 border-sky-400 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-black text-sky-900">🔵 Bandeja Física Exclusiva Lider</h3>
+                    <span className="bg-sky-100 text-sky-900 text-xs font-black px-3 py-1 rounded-full">
+                      {colaLiderPendiente.length} pendientes
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Cola física completamente separada para cumplir con el etiquetado y despacho dedicado de Walmart / Lider.
+                  </p>
+                  <button
+                    onClick={() => imprimirLoteEtiquetas("lider")}
+                    className="w-full bg-sky-600 hover:bg-sky-700 text-white font-black py-3.5 rounded-2xl text-xs sm:text-sm shadow-sm cursor-pointer"
+                  >
+                    🖨️ Imprimir Cola Exclusiva Lider ({colaLiderPendiente.length})
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<AppEcommerceSII />);
+  </script>
+</body>
+</html>
