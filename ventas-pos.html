@@ -3,7 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Punto de Venta (POS) & Cobranzas</title>
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>NEXUS ERP • Punto de Venta (POS) y Caja</title>
+  <script>
+    (function () {
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) window.location.replace("index.html");
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) window.location.replace("index.html");
+        else if (ev.persisted && rutActual !== rutInicial) window.location.reload();
+      });
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -14,14 +35,13 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
+<body class="min-h-screen">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -36,307 +56,152 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    const RUT_PGB = "769497226";
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
-    const formatearRut = (r) => {
-      const c = limpiarRut(r);
-      if (c.length < 2) return c;
-      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-      return `${cuerpo}-${c.slice(-1)}`;
+    const TEMAS = {
+      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
+      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
     };
 
-    const PALETAS = {
-      ejecutivo: { btn: "bg-slate-900 hover:bg-slate-800 text-white", tag: "bg-slate-100 text-slate-800", border: "border-slate-900" },
-      ecommerce: { btn: "bg-blue-700 hover:bg-blue-800 text-white", tag: "bg-blue-50 text-blue-800", border: "border-blue-700" },
-      logistica: { btn: "bg-emerald-700 hover:bg-emerald-800 text-white", tag: "bg-emerald-50 text-emerald-800", border: "border-emerald-700" },
-      industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700" }
-    };
-
-    function AppVentasPOS() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
+    function VentasPosApp() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
       const [empresa, setEmpresa] = useState(null);
       const [catalogo, setCatalogo] = useState([]);
-      const [ventas, setVentas] = useState([]);
-      const [tab, setTab] = useState("pos");
+      const [ventasPos, setVentasPos] = useState([]);
 
-      const [cliente, setCliente] = useState("");
-      const [rutCliente, setRutCliente] = useState("");
-      const [tipoDoc, setTipoDoc] = useState("Boleta 39");
-      const [medioPago, setMedioPago] = useState("Efectivo");
-      const [productoId, setProductoId] = useState("");
+      const [cliente, setCliente] = useState("Cliente Mesón");
+      const [prodId, setProdId] = useState("");
       const [cantidad, setCantidad] = useState(1);
-      const [precioUnit, setPrecioUnit] = useState(10000);
-      const [abonoInicial, setAbonoInicial] = useState("");
+      const [monto, setMonto] = useState(10000);
+      const [medioPago, setMedioPago] = useState("Transferencia / Tarjeta");
+      const [estadoCobro, setEstadoCobro] = useState("Pagado");
 
       useEffect(() => {
         if (!rutActivo) {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
-        let unsubs = [];
-        const init = () => {
-          const empRef = db.collection("saas_empresas").doc(rutActivo);
-          const u1 = empRef.onSnapshot((doc) => {
-            if (doc.exists) setEmpresa({ id: doc.id, ...doc.data() });
-          });
-          const colCat = rutActivo === RUT_PGB
-            ? db.collection("catalogo_productos")
-            : empRef.collection("catalogo");
-          const u2 = colCat.onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, stockOnline: 25, ...d.data() }));
-            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
-            setCatalogo(lista);
-          });
-          const u3 = empRef.collection("ventas_pos").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setVentas(lista);
-          });
-          unsubs = [u1, u2, u3];
-        };
-        auth.signInAnonymously().then(init).catch(init);
-        return () => unsubs.forEach((f) => typeof f === "function" && f());
+        auth.signInAnonymously().catch(() => {});
+        const empRef = db.collection("saas_empresas").doc(rutActivo);
+
+        const u1 = empRef.onSnapshot((doc) => {
+          if (!doc.exists) {
+            window.location.replace("index.html");
+            return;
+          }
+          const data = { id: doc.id, ...doc.data() };
+          const m = data.modulosActivos || {};
+          if (!m.m15_pos_ventas && !m.m16_caja_cobros) {
+            window.location.replace("empresa-panel.html");
+            return;
+          }
+          setEmpresa(data);
+        });
+
+        const u2 = empRef.collection("catalogo").onSnapshot((snap) => {
+          setCatalogo(snap.docs.map((d) => ({ id: d.id, stockOnline: 0, ...d.data() })));
+        });
+
+        const u3 = empRef.collection("ventas_pos").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setVentasPos(lista);
+        });
+
+        return () => { u1(); u2(); u3(); };
       }, [rutActivo]);
 
-      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
-      const catRef = () =>
-        rutActivo === RUT_PGB
-          ? db.collection("catalogo_productos")
-          : empRef().collection("catalogo");
-
-      const registrarOperacion = async (e) => {
+      const registrarVentaPos = async (e) => {
         e.preventDefault();
-        const prod = catalogo.find((p) => p.id === productoId);
-        const cantNum = Math.max(1, Number(cantidad));
-        const total = cantNum * Number(precioUnit);
-        const esCredito = medioPago === "Crédito / Fiado";
-        const abonado = esCredito ? Math.min(total, Number(abonoInicial || 0)) : total;
-        const saldoPendiente = Math.max(0, total - abonado);
-        const descuentaStock = tipoDoc !== "Cotización" && Boolean(prod);
+        const prod = catalogo.find((p) => p.id === prodId) || { id: "", nombre: prodId || "Venta Sala", stockOnline: 0 };
+        const batch = db.batch();
+        const empRef = db.collection("saas_empresas").doc(rutActivo);
 
-        try {
-          const batch = db.batch();
-          batch.set(empRef().collection("ventas_pos").doc(), {
-            cliente: cliente.trim() || "Cliente Mesón",
-            rutCliente: rutCliente.trim() ? formatearRut(rutCliente) : "",
-            tipoDoc,
-            medioPago,
-            productoId: prod ? prod.id : "",
-            productoNombre: prod ? `${prod.codigo ? `[${prod.codigo}] ` : ""}${prod.nombre}` : productoId,
-            cantidad: cantNum,
-            total,
-            abonado,
-            saldoPendiente,
-            fecha: new Date().toLocaleString("es-CL"),
-            timestamp: Date.now()
+        batch.set(empRef.collection("ventas_pos").doc(), {
+          cliente: cliente.trim() || "Cliente Mesón",
+          producto: prod.nombre,
+          cantidad: Number(cantidad),
+          monto: Number(monto),
+          medioPago,
+          estadoCobro,
+          fecha: new Date().toLocaleString("es-CL"),
+          timestamp: Date.now()
+        });
+
+        if (prod.id) {
+          batch.update(empRef.collection("catalogo").doc(prod.id), {
+            stockOnline: Math.max(0, (Number(prod.stockOnline) || 0) - Number(cantidad))
           });
-
-          if (descuentaStock) {
-            const nuevoStock = Math.max(0, Number(prod.stockOnline ?? 25) - cantNum);
-            batch.update(catRef().doc(prod.id), { stockOnline: nuevoStock });
-          }
-
-          await batch.commit();
-
-          setCliente("");
-          setRutCliente("");
-          setProductoId("");
-          setCantidad(1);
-          setAbonoInicial("");
-          alert(
-            descuentaStock
-              ? `${tipoDoc} registrada por $${total.toLocaleString("es-CL")} CLP y descontadas ${cantNum} unds del stock compartido.`
-              : `${tipoDoc} registrada correctamente por $${total.toLocaleString("es-CL")} CLP.`
-          );
-        } catch (err) {
-          alert("Error al registrar operación: " + err.message);
         }
+
+        await batch.commit();
+        setCantidad(1);
       };
 
-      const registrarAbono = async (v) => {
-        const montoStr = prompt(`Saldo pendiente: $${Number(v.saldoPendiente).toLocaleString("es-CL")}. Ingresa monto a abonar:`, v.saldoPendiente);
-        const monto = Number(montoStr);
-        if (!monto || monto <= 0) return;
-        const nuevoAbonado = Number(v.abonado || 0) + monto;
-        const nuevoSaldo = Math.max(0, Number(v.total) - nuevoAbonado);
-        await empRef().collection("ventas_pos").doc(v.id).update({
-          abonado: nuevoAbonado,
-          saldoPendiente: nuevoSaldo
-        });
-      };
-
-      const resumenCaja = useMemo(() => {
-        let efectivo = 0, digital = 0, porCobrar = 0;
-        ventas.forEach((v) => {
-          if (v.tipoDoc === "Cotización") return;
-          if (v.medioPago === "Efectivo") efectivo += Number(v.abonado || 0);
-          else if (v.medioPago !== "Crédito / Fiado") digital += Number(v.abonado || 0);
-          else efectivo += Number(v.abonado || 0);
-          porCobrar += Number(v.saldoPendiente || 0);
-        });
-        return { efectivo, digital, porCobrar };
-      }, [ventas]);
-
-      const urlVolver = rutActivo === RUT_PGB ? "pgb-operacion.html" : "empresa-panel.html";
-      const tema = PALETAS[empresa?.paleta || "ejecutivo"] || PALETAS.ejecutivo;
+      if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Verificando permisos POS...</div>;
+      const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
 
       return (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-6">
-          <div className={`corp-card rounded-2xl p-6 sm:p-8 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
-            <div className="flex items-center gap-4">
-              {empresa?.logoBase64 && (
-                <div className="w-24 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
-                  <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
-                </div>
-              )}
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                  <a href={urlVolver} className={`text-xs font-bold px-3.5 py-1.5 rounded-xl ${tema.btn}`}>
-                    Volver
-                  </a>
-                  <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${tema.tag}`}>
-                    {empresa?.nombre || "Cargando..."} • {empresa?.rut || formatearRut(rutActivo)}
-                  </span>
-                </div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Punto de Venta (POS), Cotizaciones & Caja</h1>
-                <p className="text-xs text-slate-500 mt-0.5">Facturación rápida de mesón con descuento de stock sincronizado, créditos y arqueo diario.</p>
+        <div className={`min-h-screen pb-20 ${T.page}`}>
+          <div className="max-w-4xl mx-auto px-4 pt-5 space-y-4">
+            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <button onClick={() => window.location.replace("empresa-panel.html")} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
+                  Volver
+                </button>
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${T.tag}`}>{empresa.nombre} • {empresa.rut}</span>
               </div>
+              <h1 className={`text-xl font-extrabold ${T.main}`}>Punto de Venta (POS) y Caja</h1>
             </div>
-          </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Efectivo en Caja</span>
-              <p className="text-xl font-extrabold text-slate-900 mt-1">${resumenCaja.efectivo.toLocaleString("es-CL")}</p>
-            </div>
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Tarjetas / Transferencias</span>
-              <p className="text-xl font-extrabold text-slate-900 mt-1">${resumenCaja.digital.toLocaleString("es-CL")}</p>
-            </div>
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Cuentas por Cobrar</span>
-              <p className="text-xl font-extrabold text-rose-700 mt-1">${resumenCaja.porCobrar.toLocaleString("es-CL")}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-            <button onClick={() => setTab("pos")} className={`py-2.5 rounded-xl text-xs font-bold cursor-pointer ${tab === "pos" ? tema.btn : "text-slate-600"}`}>Nueva Venta / Cotización</button>
-            <button onClick={() => setTab("cobros")} className={`py-2.5 rounded-xl text-xs font-bold cursor-pointer ${tab === "cobros" ? tema.btn : "text-slate-600"}`}>Cuentas por Cobrar</button>
-            <button onClick={() => setTab("historial")} className={`py-2.5 rounded-xl text-xs font-bold cursor-pointer ${tab === "historial" ? tema.btn : "text-slate-600"}`}>Historial ({ventas.length})</button>
-          </div>
-
-          {tab === "pos" && (
-            <form onSubmit={registrarOperacion} className="corp-card rounded-2xl p-6 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Tipo Documento</label>
-                  <select value={tipoDoc} onChange={(e) => setTipoDoc(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold">
-                    <option>Boleta 39</option>
-                    <option>Factura 33</option>
-                    <option>Cotización</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Cliente</label>
-                  <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Nombre o Razón Social" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">RUT Cliente (Para Factura 33)</label>
-                  <input type="text" value={rutCliente} onChange={(e) => setRutCliente(e.target.value)} placeholder="76.123.456-7" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Producto *</label>
-                  {catalogo.length > 0 ? (
-                    <select value={productoId} onChange={(e) => setProductoId(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required>
-                      <option value="">-- Selecciona producto --</option>
-                      {catalogo.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre} (Stock: {p.stockOnline ?? 25})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input type="text" value={productoId} onChange={(e) => setProductoId(e.target.value)} placeholder="Descripción del producto..." className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Cantidad *</label>
-                  <input type="number" min="1" value={cantidad} onChange={(e) => setCantidad(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Precio Unitario CLP *</label>
-                  <input type="number" min="1" value={precioUnit} onChange={(e) => setPrecioUnit(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                </div>
-              </div>
-
+            <form onSubmit={registrarVentaPos} className={`${T.card} rounded-2xl p-5 space-y-3`}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Medio de Pago</label>
-                  <select value={medioPago} onChange={(e) => setMedioPago(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold">
-                    <option>Efectivo</option>
-                    <option>Transferencia</option>
-                    <option>Tarjeta Débito / Crédito</option>
-                    <option>Crédito / Fiado</option>
+                <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Cliente *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                {catalogo.length > 0 ? (
+                  <select value={prodId} onChange={(e) => setProdId(e.target.value)} className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required>
+                    <option value="">-- Producto del catálogo --</option>
+                    {catalogo.map((p) => <option key={p.id} value={p.id}>{p.nombre} (Stock: {Number(p.stockOnline ?? 0)})</option>)}
                   </select>
-                </div>
-                {medioPago === "Crédito / Fiado" && (
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1">Abono Inicial CLP</label>
-                    <input type="number" min="0" value={abonoInicial} onChange={(e) => setAbonoInicial(e.target.value)} placeholder="0" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                  </div>
+                ) : (
+                  <input type="text" value={prodId} onChange={(e) => setProdId(e.target.value)} placeholder="Producto *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
                 )}
               </div>
-
-              <button type="submit" className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                Registrar {tipoDoc} (${(Number(cantidad) * Number(precioUnit)).toLocaleString("es-CL")} CLP)
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <input type="number" min="1" value={cantidad} onChange={(e) => setCantidad(e.target.value)} className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                <input type="number" min="1" value={monto} onChange={(e) => setMonto(e.target.value)} className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                <select value={medioPago} onChange={(e) => setMedioPago(e.target.value)} className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}>
+                  <option>Transferencia / Tarjeta</option>
+                  <option>Efectivo</option>
+                </select>
+                <select value={estadoCobro} onChange={(e) => setEstadoCobro(e.target.value)} className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}>
+                  <option>Pagado</option>
+                  <option>Por Cobrar</option>
+                </select>
+              </div>
+              <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                Registrar Venta en Caja
               </button>
             </form>
-          )}
 
-          {tab === "cobros" && (
-            <div className="corp-card rounded-2xl p-6 space-y-3">
-              <h2 className="text-base font-extrabold text-slate-900">Saldos Pendientes de Cobro</h2>
-              {ventas.filter((v) => Number(v.saldoPendiente) > 0).length === 0 ? (
-                <p className="text-xs text-slate-500 py-6 text-center">No hay cuentas pendientes de cobro.</p>
-              ) : (
-                ventas.filter((v) => Number(v.saldoPendiente) > 0).map((v) => (
-                  <div key={v.id} className="p-4 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div>
-                      <p className="font-extrabold text-slate-900">{v.cliente} {v.rutCliente ? `(${v.rutCliente})` : ""}</p>
-                      <p className="text-slate-500">{v.cantidad}x {v.productoNombre} • {v.fecha}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-extrabold text-rose-700">Saldo: ${Number(v.saldoPendiente).toLocaleString("es-CL")}</span>
-                      <button onClick={() => registrarAbono(v)} className={`font-bold px-3 py-1.5 rounded-xl cursor-pointer ${tema.btn}`}>Registrar Abono</button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {tab === "historial" && (
-            <div className="corp-card rounded-2xl p-6 space-y-2.5">
-              {ventas.map((v) => (
-                <div key={v.id} className="p-3.5 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
+            <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
+              <h2 className={`text-sm font-extrabold ${T.main}`}>Ventas en Sala ({ventasPos.length})</h2>
+              {ventasPos.map((v) => (
+                <div key={v.id} className="py-2.5 border-b border-slate-200/30 flex items-center justify-between text-xs">
                   <div>
-                    <span className={`font-bold px-2 py-0.5 rounded mr-2 ${tema.tag}`}>{v.tipoDoc}</span>
-                    <strong className="text-slate-900">{v.cliente}</strong> — {v.cantidad}x {v.productoNombre}
-                    <span className="block text-[11px] text-slate-500 mt-0.5">{v.medioPago} • {v.fecha}</span>
+                    <span className={`font-extrabold ${T.main}`}>{v.cliente} • {v.cantidad}x {v.producto}</span>
+                    <span className={`block text-[11px] ${T.sub}`}>{v.medioPago} • {v.fecha}</span>
                   </div>
-                  <span className="font-extrabold text-slate-900">${Number(v.total).toLocaleString("es-CL")}</span>
+                  <span className={`font-extrabold ${T.main}`}>${Number(v.monto || 0).toLocaleString("es-CL")} ({v.estadoCobro})</span>
                 </div>
               ))}
             </div>
-          )}
+          </div>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<AppVentasPOS />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<VentasPosApp />);
   </script>
 </body>
 </html>
