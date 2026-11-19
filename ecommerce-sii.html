@@ -18,9 +18,20 @@
     .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
     .print-only { display: none; }
     @media print {
-      body { background: white !important; color: black !important; margin: 0; padding: 0; }
+      @page { size: auto; margin: 10mm; }
+      body { background: white !important; color: black !important; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .no-print { display: none !important; }
       .print-only { display: block !important; }
+      .hoja-sii {
+        page-break-after: always;
+        break-after: page;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .hoja-sii:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
     }
   </style>
   <script>
@@ -122,9 +133,8 @@
       </button>
     );
 
-    // Simulación visual fiel del Timbre Electrónico PDF417 del SII
     const TimbrePdf417Svg = () => (
-      <svg viewBox="0 0 260 68" className="w-full max-w-[250px] h-16 mx-auto my-2" aria-label="Timbre Electrónico SII">
+      <svg viewBox="0 0 260 68" className="w-full max-w-[240px] h-14 mx-auto" aria-label="Timbre Electrónico SII">
         <rect x="0" y="0" width="260" height="68" fill="#ffffff" />
         {Array.from({ length: 64 }).map((_, i) => {
           const x = 4 + i * 3.9;
@@ -135,17 +145,133 @@
       </svg>
     );
 
-    // Documento Térmico Oficial (Formato Boleta 39 y Factura 33)
-    const DocumentoTermicoSii = ({ orden, empresa, datosEmisor }) => {
+    // HOJA OFICIAL SII: FACTURA ELECTRÓNICA (DTE 33 - HOJA COMPLETA) O BOLETA ELECTRÓNICA (DTE 39)
+    const HojaDocumentoOficialSii = ({ orden, empresa, datosEmisor }) => {
       if (!orden) return null;
       const esFactura = orden.tipoDte === 33;
       const total = Number(orden.totalClp || 0);
       const neto = Math.round(total / 1.19);
       const iva = total - neto;
+      const cant = Math.max(1, Number(orden.cantidad || 1));
+      const precioUnitNeto = Math.round(neto / cant);
       const fechaIso = orden.fechaIso || new Date(orden.timestamp || Date.now()).toISOString().slice(0, 10);
 
+      // FORMATO HOJA COMPLETA FACTURA ELECTRÓNICA DEL SII (SIN MENCIONES A MARKETPLACES)
+      if (esFactura) {
+        return (
+          <div className="hoja-sii bg-white text-black p-6 sm:p-8 max-w-[780px] mx-auto border border-slate-300 text-xs">
+            {/* CABECERA OFICIAL SII */}
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-5 border-b border-slate-300">
+              <div className="space-y-1 max-w-md">
+                {empresa?.logoBase64 && (
+                  <img src={empresa.logoBase64} alt={empresa.nombre} className="h-12 object-contain mb-2" />
+                )}
+                <p className="text-base font-extrabold uppercase tracking-tight">
+                  {(empresa?.nombre || "TECNOSHOP COMPANY SPA").toUpperCase()}
+                </p>
+                <p className="text-[11px] uppercase">
+                  Giro: {datosEmisor.giro || "VENTAS POR INTERNET DE ARTICULOS PARA EL HOGAR, DEPORTE Y OTROS"}
+                </p>
+                <p className="text-[11px] uppercase">
+                  Casa Matriz: {datosEmisor.direccion || "MERCED 838 A INT OF 117"}, {datosEmisor.comuna || "Santiago"}
+                </p>
+              </div>
+
+              {/* RECUADRO OFICIAL SII */}
+              <div className="border-2 border-red-600 text-red-600 px-5 py-3 text-center font-extrabold shrink-0 min-w-[230px]">
+                <p className="text-xs">R.U.T.: {empresa?.rut || "77.528.042-5"}</p>
+                <p className="text-sm my-1">FACTURA ELECTRÓNICA</p>
+                <p className="text-sm">N° {Number(orden.folioSii || 0).toLocaleString("es-CL")}</p>
+                <p className="text-[10px] mt-1 tracking-wider">S.I.I. - SANTIAGO CENTRO</p>
+              </div>
+            </div>
+
+            {/* FECHA Y DATOS DEL RECEPTOR */}
+            <div className="mt-4 border border-slate-400 p-3.5 space-y-1.5 text-[11px]">
+              <div className="flex justify-between">
+                <span><strong>Señor(es):</strong> <span className="uppercase">{orden.comprador}</span></span>
+                <span><strong>Fecha Emisión:</strong> {fechaIso}</span>
+              </div>
+              <div className="flex justify-between">
+                <span><strong>R.U.T.:</strong> {orden.rutComprador || "S/I"}</span>
+                <span><strong>Forma de Pago:</strong> Contado</span>
+              </div>
+              <div>
+                <span><strong>Giro:</strong> Comercial</span>
+              </div>
+              <div>
+                <span><strong>Dirección:</strong> {orden.direccionCliente || "Santiago"}</span>
+              </div>
+            </div>
+
+            {/* TABLA FORMAL DE DETALLE DE FACTURA */}
+            <div className="mt-5">
+              <table className="w-full border-collapse border border-slate-400 text-[11px]">
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-400">
+                    <th className="border-r border-slate-400 p-2 text-left w-20">Código</th>
+                    <th className="border-r border-slate-400 p-2 text-left">Descripción</th>
+                    <th className="border-r border-slate-400 p-2 text-center w-16">Cant.</th>
+                    <th className="border-r border-slate-400 p-2 text-right w-24">Precio Unit.</th>
+                    <th className="p-2 text-right w-28">Valor Neto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-slate-300">
+                    <td className="border-r border-slate-400 p-2 font-mono">{orden.codigoSku || "001"}</td>
+                    <td className="border-r border-slate-400 p-2 uppercase">{orden.productoNombre}</td>
+                    <td className="border-r border-slate-400 p-2 text-center">{cant}</td>
+                    <td className="border-r border-slate-400 p-2 text-right">${precioUnitNeto.toLocaleString("es-CL")}</td>
+                    <td className="p-2 text-right font-bold">${neto.toLocaleString("es-CL")}</td>
+                  </tr>
+                  <tr className="h-36">
+                    <td className="border-r border-slate-400"></td>
+                    <td className="border-r border-slate-400"></td>
+                    <td className="border-r border-slate-400"></td>
+                    <td className="border-r border-slate-400"></td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* PIE DE FACTURA: TIMBRE ELECTRÓNICO SII + TOTALES NETO/IVA/TOTAL */}
+            <div className="mt-6 flex flex-col sm:flex-row justify-between items-start gap-6">
+              <div className="text-center max-w-[260px]">
+                <TimbrePdf417Svg />
+                <p className="text-[10px] font-bold mt-1">Timbre Electrónico SII</p>
+                <p className="text-[10px]">Res. 80 de 2014 • Verifique documento en www.sii.cl</p>
+              </div>
+
+              <div className="border border-slate-400 min-w-[230px] text-[11px] ml-auto">
+                <div className="flex justify-between px-3 py-1.5 border-b border-slate-300">
+                  <span className="font-bold">MONTO NETO</span>
+                  <span>$ {neto.toLocaleString("es-CL")}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 border-b border-slate-300">
+                  <span className="font-bold">I.V.A. (19%)</span>
+                  <span>$ {iva.toLocaleString("es-CL")}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-slate-100 font-extrabold text-xs">
+                  <span>TOTAL</span>
+                  <span>$ {total.toLocaleString("es-CL")}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 border border-slate-400 p-2.5 text-[10px] flex justify-between">
+              <span>Nombre: ___________________________</span>
+              <span>R.U.T.: ___________________</span>
+              <span>Fecha: _____________</span>
+              <span>Firma: _______________</span>
+            </div>
+          </div>
+        );
+      }
+
+      // FORMATO OFICIAL BOLETA ELECTRÓNICA (DTE 39)
       return (
-        <div className="bg-white text-black p-6 max-w-[360px] mx-auto border border-slate-300 shadow-sm font-ticket text-[12px] leading-relaxed">
+        <div className="hoja-sii bg-white text-black p-6 max-w-[360px] mx-auto border border-slate-300 font-ticket text-[12px] leading-relaxed">
           <div className="space-y-0.5 text-left">
             <p className="font-bold uppercase text-[13px]">{(empresa?.nombre || "TECNOSHOP COMPANY SPA").toUpperCase()}</p>
             <p>{empresa?.rut || "77.528.042-5"}</p>
@@ -153,43 +279,27 @@
             <p className="uppercase">{datosEmisor.direccion || "MERCED 838 A INT OF 117"}</p>
             <p>{datosEmisor.comuna || "Santiago"}</p>
             <p className="pt-1 font-bold">
-              {esFactura ? "FACTURA ELECTRÓNICA" : "BOLETA ELECTRÓNICA"} NUMERO: {Number(orden.folioSii || 0).toLocaleString("es-CL")}
+              BOLETA ELECTRÓNICA NUMERO: {Number(orden.folioSii || 0).toLocaleString("es-CL")}
             </p>
             <p>REF. VENDEDOR: {orden.ordenExterna}</p>
             <p>Fecha: {fechaIso}</p>
           </div>
 
-          <div className="mt-4 pt-2 border-t border-dashed border-slate-400 space-y-1">
-            {esFactura ? (
-              <>
-                <p>Señor(es): <span className="uppercase">{orden.comprador}</span></p>
-                <p>RUT Receptor: {orden.rutComprador}</p>
-                <p>Dirección: {orden.direccionCliente || "Santiago"}</p>
-              </>
-            ) : (
-              <p>Dirección: {orden.direccionCliente || "Santiago"}</p>
-            )}
+          <div className="mt-4 pt-2 border-t border-dashed border-slate-400">
+            <p>Dirección: {orden.direccionCliente || "Santiago"}</p>
           </div>
 
           <div className="mt-4 space-y-1.5">
             <div className="flex justify-between items-start gap-2">
               <span className="uppercase">
-                {orden.cantidad > 1 ? `${orden.cantidad}x ` : ""}{orden.productoNombre || "Venta"}
+                {cant > 1 ? `${cant}x ` : ""}{orden.productoNombre || "Venta"}
               </span>
               <span className="font-bold shrink-0">$ {total.toLocaleString("es-CL")}</span>
             </div>
 
-            {esFactura ? (
-              <div className="pt-3 border-t border-dashed border-slate-400 space-y-0.5 text-right">
-                <p>Monto Neto: $ {neto.toLocaleString("es-CL")}</p>
-                <p>IVA (19%): $ {iva.toLocaleString("es-CL")}</p>
-                <p className="font-bold text-[13px]">Total Factura: $ {total.toLocaleString("es-CL")}</p>
-              </div>
-            ) : (
-              <p className="pt-3">
-                El IVA incluido en esta boleta es de: $ {iva.toLocaleString("es-CL")}
-              </p>
-            )}
+            <p className="pt-3">
+              El IVA incluido en esta boleta es de: $ {iva.toLocaleString("es-CL")}
+            </p>
           </div>
 
           <div className="mt-5 text-center">
@@ -200,12 +310,6 @@
               <p>Verifique documento en sii.cl</p>
             </div>
           </div>
-
-          {orden.esSimulacion !== false && (
-            <div className="mt-4 pt-2 border-t border-amber-300 text-center text-[10px] font-sans font-bold text-amber-800 bg-amber-50 py-1 rounded">
-              VISTA DE SIMULACIÓN (Aún no timbrada en vivo por SII)
-            </div>
-          )}
         </div>
       );
     };
@@ -246,7 +350,8 @@
       const [tab, setTab] = useState("ordenes");
       const [filtroCanal, setFiltroCanal] = useState("TODOS");
       const [busqueda, setBusqueda] = useState("");
-      const [colaImprimir, setColaImprimir] = useState(null);
+      const [seleccionLoteIds, setSeleccionLoteIds] = useState([]);
+      const [loteParaImprimir, setLoteParaImprimir] = useState([]);
       const [dteVisualizando, setDteVisualizando] = useState(null);
 
       const [mostrarNuevaOrden, setMostrarNuevaOrden] = useState(false);
@@ -360,6 +465,7 @@
         const colaDestino = canalNuevo === "Lider" ? "lider" : "general";
         const autoSii = apisForm.siiModoAutomatico !== false;
         const esRealSii = Boolean(estadoConexiones.sii);
+        const ahora = Date.now();
 
         const nuevaOrden = {
           canal: canalNuevo,
@@ -378,9 +484,10 @@
           colaImpresion: colaDestino,
           etiquetaImpresa: false,
           despachado: false,
-          fechaIso: new Date().toISOString().slice(0, 10),
-          fecha: new Date().toLocaleString("es-CL"),
-          timestamp: Date.now()
+          fechaIso: new Date(ahora).toISOString().slice(0, 10),
+          horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+          fecha: new Date(ahora).toLocaleString("es-CL"),
+          timestamp: ahora
         };
 
         try {
@@ -429,19 +536,37 @@
         alert("Datos tributarios y folios CAF guardados.");
       };
 
-      const imprimirLoteEtiquetas = async (tipoCola) => {
-        const pendientesCola = ordenes.filter((o) => o.colaImpresion === tipoCola && !o.etiquetaImpresa);
-        if (pendientesCola.length === 0) return alert("No hay etiquetas pendientes en esta bandeja.");
-        setColaImprimir(tipoCola);
+      const toggleSeleccionLote = (id) => {
+        setSeleccionLoteIds((prev) =>
+          prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+        );
+      };
+
+      const seleccionarTodosPendientesLote = () => {
+        const pendientes = ordenes.filter((o) => !o.etiquetaImpresa).map((o) => o.id);
+        setSeleccionLoteIds(pendientes);
+      };
+
+      // GENERA UN ÚNICO PDF CON UNA HOJA POR DOCUMENTO EN ORDEN CRONOLÓGICO ESTRICTO
+      const generarEImprimirLotePdf = () => {
+        if (seleccionLoteIds.length === 0) {
+          return alert("Selecciona al menos una factura o boleta de la lista para generar el lote.");
+        }
+        const seleccionadosOrdenados = ordenes
+          .filter((o) => seleccionLoteIds.includes(o.id))
+          .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        setLoteParaImprimir(seleccionadosOrdenados);
         setTimeout(async () => {
           window.print();
           const batch = db.batch();
-          pendientesCola.forEach((o) => {
+          seleccionadosOrdenados.forEach((o) => {
             batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), { etiquetaImpresa: true });
           });
           await batch.commit();
-          setColaImprimir(null);
-        }, 250);
+          setLoteParaImprimir([]);
+          setSeleccionLoteIds([]);
+        }, 300);
       };
 
       const marcarDespachado = async (id, actual) => {
@@ -451,12 +576,12 @@
       const disponibles39 = cafConfig.boleta39Limite - cafConfig.boleta39Actual;
       const disponibles33 = cafConfig.factura33Limite - cafConfig.factura33Actual;
 
-      const colaGeneralPendiente = useMemo(
-        () => ordenes.filter((o) => o.colaImpresion === "general" && !o.etiquetaImpresa),
-        [ordenes]
-      );
-      const colaLiderPendiente = useMemo(
-        () => ordenes.filter((o) => o.colaImpresion === "lider" && !o.etiquetaImpresa),
+      const ordenesCronologicas = useMemo(() => {
+        return [...ordenes].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      }, [ordenes]);
+
+      const pendientesImpresionCount = useMemo(
+        () => ordenes.filter((o) => !o.etiquetaImpresa).length,
         [ordenes]
       );
 
@@ -479,57 +604,44 @@
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900">
-          {/* ZONA DE IMPRESIÓN: DTE INDIVIDUAL O LOTE DE ETIQUETAS */}
+          {/* ZONA DE IMPRESIÓN: DOCUMENTO INDIVIDUAL O LOTE PDF EN HOJAS SEPARADAS */}
           {dteVisualizando && (
-            <div className="print-only bg-white p-4">
-              <DocumentoTermicoSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+            <div className="print-only bg-white p-2">
+              <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
             </div>
           )}
 
-          {!dteVisualizando && colaImprimir && (
-            <div className="print-only bg-white text-black p-6">
-              <div className="border-b-2 border-black pb-3 mb-4">
-                <h2 className="text-base font-black uppercase">
-                  {colaImprimir === "lider"
-                    ? "COLA FÍSICA EXCLUSIVA LIDER / WALMART"
-                    : "LOTE DESPACHO MERCADO LIBRE & FALABELLA"}
-                </h2>
-                <p className="text-xs">{empresa?.nombre} ({empresa?.rut}) • {new Date().toLocaleString("es-CL")}</p>
-              </div>
-              <div className="space-y-4">
-                {(colaImprimir === "lider" ? colaLiderPendiente : colaGeneralPendiente).map((o) => (
-                  <div key={o.id} className="border-2 border-black p-4 rounded text-xs space-y-1">
-                    <div className="flex justify-between font-black text-sm border-b border-gray-400 pb-1">
-                      <span>{o.canal.toUpperCase()}</span>
-                      <span>REF: {o.ordenExterna}</span>
-                    </div>
-                    <p><strong>Cliente:</strong> {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""}</p>
-                    <p><strong>Producto:</strong> {o.cantidad}x {o.productoNombre}</p>
-                    <p><strong>SII:</strong> {o.tipoDte === 33 ? "FACTURA 33" : "BOLETA 39"} N° {o.folioSii}</p>
-                  </div>
-                ))}
-              </div>
+          {!dteVisualizando && loteParaImprimir.length > 0 && (
+            <div className="print-only bg-white">
+              {loteParaImprimir.map((docItem) => (
+                <HojaDocumentoOficialSii
+                  key={docItem.id}
+                  orden={docItem}
+                  empresa={empresa}
+                  datosEmisor={datosEmisor}
+                />
+              ))}
             </div>
           )}
 
-          {/* MODAL PARA VER E IMPRIMIR BOLETA / FACTURA */}
+          {/* MODAL VISTA PREVIA DOCUMENTO INDIVIDUAL */}
           {dteVisualizando && (
             <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto no-print">
-              <div className="bg-slate-100 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+              <div className="bg-slate-100 rounded-3xl max-w-3xl w-full p-5 space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold uppercase text-slate-700">
-                    Vista Previa Documento SII
+                    Vista Previa Documento Oficial SII ({dteVisualizando.tipoDte === 33 ? `Factura 33 N° ${dteVisualizando.folioSii}` : `Boleta 39 N° ${dteVisualizando.folioSii}`})
                   </span>
                   <button
                     onClick={() => setDteVisualizando(null)}
-                    className="bg-white border border-slate-300 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer"
+                    className="bg-white border border-slate-300 text-slate-800 text-xs font-bold px-3.5 py-1.5 rounded-xl cursor-pointer"
                   >
                     Cerrar
                   </button>
                 </div>
 
-                <div className="max-h-[70vh] overflow-y-auto py-1">
-                  <DocumentoTermicoSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+                <div className="max-h-[72vh] overflow-y-auto py-1">
+                  <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
                 </div>
 
                 <div className="flex gap-2">
@@ -537,7 +649,7 @@
                     onClick={() => window.print()}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}
                   >
-                    Imprimir Documento
+                    Imprimir / Guardar PDF
                   </button>
                   {dteVisualizando.esSimulacion !== false && (
                     <button
@@ -583,9 +695,8 @@
             </div>
           )}
 
-          {/* CONTENIDO PRINCIPAL */}
+          {/* INTERFAZ PRINCIPAL */}
           <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
-            {/* CABECERA COMPACTA Y ORDENADA */}
             <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
                 {empresa?.logoBase64 && (
@@ -616,7 +727,6 @@
               </button>
             </div>
 
-            {/* BANNER DE API KEYS PENDIENTES */}
             {faltanCredencialesCriticas && (
               <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -636,7 +746,6 @@
               </div>
             )}
 
-            {/* FORMULARIO PARA SIMULAR O REGISTRAR ORDEN */}
             {mostrarNuevaOrden && (
               <form onSubmit={registrarOrdenOmnicanal} className="corp-card rounded-2xl p-5 space-y-4 border-slate-400">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -695,13 +804,12 @@
               </form>
             )}
 
-            {/* 4 PESTAÑAS LIMPIAS Y ORDENADAS */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
               <button onClick={() => setTab("ordenes")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "ordenes" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
                 1. Ventas y DTE ({ordenes.length})
               </button>
               <button onClick={() => setTab("impresion")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "impresion" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-                2. Colas Impresión ({colaGeneralPendiente.length + colaLiderPendiente.length})
+                2. Lotes PDF ({pendientesImpresionCount})
               </button>
               <button onClick={() => setTab("stock")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "stock" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
                 3. Stock & Folios CAF
@@ -776,7 +884,7 @@
                               {o.comprador} {o.rutComprador ? `• RUT: ${o.rutComprador}` : "• Boleta Consumidor Final"}
                             </p>
                             <p className="text-xs font-extrabold text-slate-900 mt-1">
-                              Total: ${Number(o.totalClp || 0).toLocaleString("es-CL")} CLP
+                              Total: ${Number(o.totalClp || 0).toLocaleString("es-CL")} CLP • <span className="font-normal text-slate-500">{o.fecha}</span>
                             </p>
                           </div>
 
@@ -816,34 +924,104 @@
               </div>
             )}
 
-            {/* PESTAÑA 2: COLAS DE IMPRESIÓN */}
+            {/* PESTAÑA 2: SELECCIÓN INDIVIDUAL Y GENERACIÓN DE LOTE PDF EN ORDEN CRONOLÓGICO */}
             {tab === "impresion" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="corp-card rounded-2xl p-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-extrabold text-slate-900">Cola General (MeLi + Falabella)</h3>
-                    <span className={`text-xs font-extrabold px-3 py-1 rounded-full ${tema.tag}`}>
-                      {colaGeneralPendiente.length} pendientes
-                    </span>
+              <div className="corp-card rounded-2xl p-6 space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900">Generador de Lote PDF (Una Hoja por Documento)</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Marca los documentos que deseas imprimir. Se unirán en <strong>un solo PDF</strong> ordenado cronológicamente (primero el más antiguo), cada uno en su propia hoja oficial del SII.
+                    </p>
                   </div>
-                  <p className="text-xs text-slate-500">Agrupa etiquetas de Mercado Libre y Falabella en un solo lote.</p>
-                  <button onClick={() => imprimirLoteEtiquetas("general")} className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                    Imprimir Lote MeLi + Falabella ({colaGeneralPendiente.length})
-                  </button>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={seleccionarTodosPendientesLote}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Marcar Pendientes ({pendientesImpresionCount})
+                    </button>
+                    {seleccionLoteIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSeleccionLoteIds([])}
+                        className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2.5 py-2.5 cursor-pointer"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="corp-card rounded-2xl p-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-extrabold text-slate-900">Bandeja Física Exclusiva Lider</h3>
-                    <span className={`text-xs font-extrabold px-3 py-1 rounded-full ${tema.tag}`}>
-                      {colaLiderPendiente.length} pendientes
-                    </span>
+                {ordenesCronologicas.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-8 bg-slate-50 rounded-xl">
+                    No hay facturas ni boletas disponibles para formar lote todavía.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl overflow-hidden">
+                    {ordenesCronologicas.map((o, index) => {
+                      const marcado = seleccionLoteIds.includes(o.id);
+                      const horaTexto = o.horaCorta || (o.timestamp ? new Date(o.timestamp).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) : "");
+                      return (
+                        <div
+                          key={o.id}
+                          onClick={() => toggleSeleccionLote(o.id)}
+                          className={`p-4 flex items-center justify-between gap-3 cursor-pointer transition ${
+                            marcado ? "bg-slate-100/90" : "bg-white hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={marcado}
+                              onChange={() => {}}
+                              className="w-4 h-4 rounded border-slate-400 cursor-pointer shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-extrabold text-slate-900">
+                                  {o.tipoDte === 33 ? `Factura Electrónica N° ${o.folioSii}` : `Boleta Electrónica N° ${o.folioSii}`}
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-500">
+                                  • Hora: {horaTexto}
+                                </span>
+                                {o.etiquetaImpresa ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Impresa</span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Pendiente</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-600 truncate mt-0.5">
+                                {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""} — {o.cantidad}x {o.productoNombre}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-xs font-extrabold text-slate-900 block">
+                              ${Number(o.totalClp || 0).toLocaleString("es-CL")}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">
+                              Orden #{index + 1}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <p className="text-xs text-slate-500">Cola física separada para pedidos de Walmart / Lider Marketplace.</p>
-                  <button onClick={() => imprimirLoteEtiquetas("lider")} className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                    Imprimir Cola Exclusiva Lider ({colaLiderPendiente.length})
-                  </button>
-                </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={generarEImprimirLotePdf}
+                  disabled={seleccionLoteIds.length === 0}
+                  className={`w-full font-extrabold py-4 rounded-2xl text-xs transition cursor-pointer ${
+                    seleccionLoteIds.length > 0 ? tema.btn : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  Imprimir / Generar Lote PDF ({seleccionLoteIds.length} {seleccionLoteIds.length === 1 ? "hoja seleccionada" : "hojas en orden cronológico"})
+                </button>
               </div>
             )}
 
@@ -854,7 +1032,7 @@
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div>
                       <h2 className="text-sm font-extrabold text-slate-900">Datos del Emisor SII & Folios CAF</h2>
-                      <p className="text-xs text-slate-500">Aparecen en el encabezado de cada Boleta 39 y Factura 33 impresa.</p>
+                      <p className="text-xs text-slate-500">Aparecen en el encabezado de cada Factura 33 y Boleta 39 impresa.</p>
                     </div>
                     <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
                       <span className="text-xs font-bold">Emisión Automática</span>
@@ -969,7 +1147,7 @@
                       <h3 className="text-xs font-extrabold uppercase text-slate-800">4. Lider / Walmart Marketplace</h3>
                       <button type="button" onClick={() => setAyudaAbierta("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
                     </div>
-                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
                 </div>
 
