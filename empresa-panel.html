@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Espacio Empresarial</title>
+  <title>NEXUS ERP • Plataforma Empresarial</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -54,33 +54,12 @@
       lider: "En Walmart/Lider Seller Center → Configuración → Credenciales API, copia tu Token / Client Secret."
     };
 
-    const MODULOS_BASE = [
-      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Identidad y Logo PNG", desc: "Logotipo corporativo para sistema y documentos.", tab: "equipo" },
-      { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, ventas, bodega y despacho.", tab: "equipo" },
-      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro (Excel y Manual)", desc: "Carga masiva en Excel (.xlsx) o ingreso manual.", tab: "catalogo" },
-      { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Credenciales de Mercado Libre, Falabella, Lider y SII.", tab: "apis" },
-      { id: "m5_inv_general", num: "05", grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Filtrado por proveedor para toma física.", url: "pgb-inventario.html" },
-      { id: "m6_conteo_ciclico", num: "06", grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería.", url: "pgb-inventario.html" },
-      { id: "m7_auditoria_inv", num: "07", grupo: "Inventario", nombre: "Auditoría Acumulativa de Stock", desc: "Aprobación e historial de ajustes de inventario.", url: "pgb-operacion.html" },
-      { id: "m8_omnicanal", num: "08", grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes centralizadas de Mercado Libre, Falabella y Lider.", url: "ecommerce-sii.html" },
-      { id: "m9_stock_sync", num: "09", grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento sincronizado multi-canal.", url: "ecommerce-sii.html" },
-      { id: "m10_sii_dte", num: "10", grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Boleta 39 o Factura 33 y control de folios CAF.", url: "ecommerce-sii.html" },
-      { id: "m11_colas_print", num: "11", grupo: "E-Commerce & SII", nombre: "Colas de Impresión Logística", desc: "Lote general MeLi/Falabella y bandeja física Lider.", url: "ecommerce-sii.html" },
-      { id: "m12_ruta_inc", num: "12", grupo: "Logística", nombre: "Tablero de Incidencias y Ruta", desc: "Control de faltantes, cruces, rechazos y errores.", url: "pgb-operacion.html" },
-      { id: "m13_retornos_merma", num: "13", grupo: "Logística", nombre: "Retornos y Mermas Internas", desc: "Devoluciones, roturas y compras internas.", url: "pgb-operacion.html" },
-      { id: "m14_analitica_err", num: "14", grupo: "Logística", nombre: "Analítica Operativa 100%", desc: "Indicadores mensuales por área y colaborador.", url: "pgb-operacion.html" },
-      { id: "m15_pos_ventas", num: "15", grupo: "Comercial", nombre: "Punto de Venta (POS) y Cotizaciones", desc: "Facturación de mesón y cotizaciones.", url: "ventas-pos.html" },
-      { id: "m16_caja_cobros", num: "16", grupo: "Comercial", nombre: "Cuentas por Cobrar y Arqueo", desc: "Créditos, abonos parciales y cierre de caja.", url: "ventas-pos.html" },
-      { id: "m17_compras_prov", num: "17", grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición por proveedor y recepción a inventario.", url: "compras-finanzas.html" },
-      { id: "m18_finanzas_bi", num: "18", grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Ingresos, egresos operativos y margen neto.", url: "compras-finanzas.html" }
-    ];
-
     const ROLES = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
 
     function EmpresaPanelApp() {
       const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
       const [empresa, setEmpresa] = useState(null);
-      const [tab, setTab] = useState("modulos");
+      const [tab, setTab] = useState("inicio");
 
       const [nuevoNombre, setNuevoNombre] = useState("");
       const [nuevoRol, setNuevoRol] = useState(ROLES[1]);
@@ -89,7 +68,6 @@
       const [busquedaCat, setBusquedaCat] = useState("");
       const [importando, setImportando] = useState(false);
 
-      // Campos para agregar producto manualmente
       const [manualSku, setManualSku] = useState("");
       const [manualNombre, setManualNombre] = useState("");
       const [manualProveedor, setManualProveedor] = useState("");
@@ -219,35 +197,104 @@
         setGuardandoApis(true);
         try {
           await db.collection("saas_empresas").doc(rutActivo).update({ apis: apisForm });
-          alert("Credenciales y configuración SII guardadas.");
+          alert("Conexiones API y SII sincronizadas correctamente.");
         } catch (err) {
           alert("Error: " + err.message);
         }
         setGuardandoApis(false);
       };
 
-      const modulosActivos = useMemo(() => {
+      // Construye solo los espacios operativos naturales según lo habilitado (sin mostrar switches ni terminología interna)
+      const espaciosOperativos = useMemo(() => {
         if (!empresa) return [];
-        return MODULOS_BASE.filter((m) => empresa.modulosActivos?.[m.id] === true);
-      }, [empresa]);
+        const m = empresa.modulosActivos || {};
+        const espacios = [];
 
-      const tieneEcommerceActivo = useMemo(() => {
-        if (!empresa) return false;
-        return ["m4_apis", "m8_omnicanal", "m9_stock_sync", "m10_sii_dte", "m11_colas_print"].some(
-          (id) => empresa.modulosActivos?.[id] === true
-        );
-      }, [empresa]);
-
-      const faltanDatosEsenciales = useMemo(() => {
-        if (!empresa) return [];
-        const faltantes = [];
-        if (catalogo.length === 0) faltantes.push("Catálogo Maestro de Productos (Excel o manual)");
-        if (tieneEcommerceActivo && !apisForm.siiApiKey) faltantes.push("API Key de SII / OpenFactura para facturación automática");
-        if (tieneEcommerceActivo && !apisForm.meliClientId && !apisForm.falabellaApiKey && !apisForm.liderApiKey) {
-          faltantes.push("Credenciales de al menos un canal de venta (Mercado Libre, Falabella o Lider)");
+        if (m.m8_omnicanal || m.m9_stock_sync || m.m10_sii_dte || m.m11_colas_print) {
+          espacios.push({
+            id: "ecommerce",
+            area: "Canales Digitales y SII",
+            titulo: "Ventas Omnicanal & Facturación SII",
+            desc: "Gestión de pedidos de Mercado Libre, Falabella y Lider, stock sincronizado y emisión automática de Boletas y Facturas.",
+            url: "ecommerce-sii.html"
+          });
         }
-        return faltantes;
-      }, [empresa, catalogo.length, tieneEcommerceActivo, apisForm]);
+
+        if (m.m5_inv_general || m.m6_conteo_ciclico) {
+          espacios.push({
+            id: "inventario",
+            area: "Bodega y Existencias",
+            titulo: "Control de Inventario y Toma Física",
+            desc: "Revisión de stock por proveedor, conteos cíclicos y generación de planillas de verificación.",
+            url: "pgb-inventario.html"
+          });
+        }
+
+        if (m.m12_ruta_inc || m.m13_retornos_merma || m.m14_analitica_err || m.m7_auditoria_inv) {
+          espacios.push({
+            id: "logistica",
+            area: "Despacho y Operaciones",
+            titulo: "Operación Logística y Trazabilidad",
+            desc: "Control de rutas, armado de pedidos, devoluciones y auditoría de movimientos.",
+            url: "pgb-operacion.html"
+          });
+        }
+
+        if (m.m15_pos_ventas || m.m16_caja_cobros) {
+          espacios.push({
+            id: "pos",
+            area: "Sala de Ventas",
+            titulo: "Punto de Venta (POS) y Caja",
+            desc: "Emisión rápida en mesón, cotizaciones, cuentas por cobrar y cierre diario.",
+            url: "ventas-pos.html"
+          });
+        }
+
+        if (m.m17_compras_prov || m.m18_finanzas_bi) {
+          espacios.push({
+            id: "compras",
+            area: "Abastecimiento y Finanzas",
+            titulo: "Recepción de Facturas SII y Balance",
+            desc: "Importación automática de facturas de proveedores vía SII/XML, reposición de stock y flujo financiero.",
+            url: "compras-finanzas.html"
+          });
+        }
+
+        return espacios;
+      }, [empresa]);
+
+      const usaCanalesOIntegracion = useMemo(() => {
+        if (!empresa) return false;
+        const m = empresa.modulosActivos || {};
+        return Boolean(m.m4_apis || m.m8_omnicanal || m.m9_stock_sync || m.m10_sii_dte || m.m11_colas_print || m.m17_compras_prov);
+      }, [empresa]);
+
+      const alertasPendientes = useMemo(() => {
+        if (!empresa) return [];
+        const lista = [];
+        if (catalogo.length === 0) {
+          lista.push({
+            texto: "Carga tu catálogo de productos (por Excel o manual) para sincronizar tu inventario.",
+            accion: "Ir a Catálogo",
+            tabDestino: "catalogo"
+          });
+        }
+        if (usaCanalesOIntegracion && !apisForm.siiApiKey) {
+          lista.push({
+            texto: "Conecta tu API Key de SII / OpenFactura para habilitar la emisión y lectura automática de documentos.",
+            accion: "Configurar APIs",
+            tabDestino: "apis"
+          });
+        }
+        if (usaCanalesOIntegracion && !apisForm.meliClientId && !apisForm.falabellaApiKey && !apisForm.liderApiKey) {
+          lista.push({
+            texto: "Ingresa las credenciales de tus canales de venta (Mercado Libre, Falabella o Lider) para sincronizar pedidos.",
+            accion: "Conectar Canales",
+            tabDestino: "apis"
+          });
+        }
+        return lista;
+      }, [empresa, catalogo.length, usaCanalesOIntegracion, apisForm]);
 
       const catalogoFiltrado = useMemo(() => {
         const q = busquedaCat.trim().toLowerCase();
@@ -262,7 +309,7 @@
       if (!empresa) {
         return (
           <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <p className="text-xs font-bold text-slate-500">Cargando entorno de la organización...</p>
+            <p className="text-xs font-bold text-slate-500">Iniciando espacio de trabajo...</p>
           </div>
         );
       }
@@ -272,6 +319,7 @@
 
       return (
         <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-5">
+          {/* CABECERA LIMPIA DE LA EMPRESA (SIN REFERENCIA A SWITCHES NI MÓDULOS INTERNOS) */}
           <div className={`corp-card rounded-2xl p-6 sm:p-7 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
             <div className="flex items-center gap-4">
               {empresa.logoBase64 && (
@@ -285,11 +333,11 @@
                     RUT {empresa.rut}
                   </span>
                   <span className="bg-emerald-50 text-emerald-700 text-[11px] font-bold px-3 py-0.5 rounded-full">
-                    {modulosActivos.length} Módulos Activos
+                    En Línea
                   </span>
                 </div>
                 <h1 className="text-2xl font-extrabold text-slate-900">{empresa.nombre}</h1>
-                <p className="text-xs text-slate-500 mt-0.5">{empresa.rubro || "Entorno Empresarial Dedicado"}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{empresa.rubro || "Gestión Empresarial Centralizada"}</p>
               </div>
             </div>
 
@@ -298,75 +346,84 @@
             </button>
           </div>
 
-          {faltanDatosEsenciales.length > 0 && (
-            <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <span className="text-xs font-extrabold text-amber-900 block">Datos pendientes para operar al 100%:</span>
-                <p className="text-xs text-slate-700 mt-0.5">{faltanDatosEsenciales.join(" • ")}</p>
-              </div>
-              <button
-                onClick={() => setTab(tieneEcommerceActivo && !apisForm.siiApiKey ? "apis" : "catalogo")}
-                className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
-              >
-                Completar
-              </button>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-            <button onClick={() => setTab("modulos")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "modulos" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              1. Módulos ({modulosActivos.length})
-            </button>
-            <button onClick={() => setTab("catalogo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "catalogo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              2. Catálogo ({catalogo.length})
-            </button>
-            <button onClick={() => setTab("apis")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "apis" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              3. APIs y SII
-            </button>
-            <button onClick={() => setTab("equipo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "equipo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              4. Equipo ({equipo.length})
-            </button>
-          </div>
-
-          {tab === "modulos" && (
-            modulosActivos.length === 0 ? (
-              <div className="corp-card rounded-2xl p-10 text-center space-y-2">
-                <h2 className="text-base font-extrabold text-slate-900">Aún no hay módulos encendidos para esta empresa</h2>
-                <p className="text-xs text-slate-500">Enciende los interruptores correspondientes en Super Admin para habilitar sus accesos aquí.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {modulosActivos.map((m) => (
-                  <div
-                    key={m.id}
-                    onClick={() => (m.tab ? setTab(m.tab) : (window.location.href = m.url))}
-                    className="corp-card rounded-2xl p-5 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-4"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md ${tema.tag}`}>
-                          M{m.num} • {m.grupo}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-700">Activo</span>
-                      </div>
-                      <h3 className="text-base font-extrabold text-slate-900">{m.nombre}</h3>
-                      <p className="text-xs text-slate-500 mt-1">{m.desc}</p>
-                    </div>
-                    <div className="text-xs font-bold text-slate-900 pt-3 border-t border-slate-100 flex justify-between">
-                      <span>Abrir</span>
-                      <span>→</span>
-                    </div>
+          {/* AVISOS GUIADOS PARA CONFIGURAR APIS Y CATÁLOGO */}
+          {alertasPendientes.length > 0 && (
+            <div className="corp-card rounded-2xl p-5 border-amber-300 bg-amber-50/30 space-y-2.5">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-900 block">
+                Pasos recomendados para completar tu sincronización
+              </span>
+              <div className="space-y-2">
+                {alertasPendientes.map((al, idx) => (
+                  <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/80 p-3 rounded-xl border border-amber-200/70">
+                    <span className="text-xs font-semibold text-slate-700">{al.texto}</span>
+                    <button
+                      onClick={() => setTab(al.tabDestino)}
+                      className={`text-xs font-bold px-3.5 py-1.5 rounded-lg cursor-pointer shrink-0 ${tema.btn}`}
+                    >
+                      {al.accion}
+                    </button>
                   </div>
                 ))}
               </div>
-            )
+            </div>
           )}
 
+          {/* NAVEGACIÓN NATURAL DEL CLIENTE */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
+            <button onClick={() => setTab("inicio")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "inicio" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+              Operación Principal
+            </button>
+            <button onClick={() => setTab("catalogo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "catalogo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+              Catálogo ({catalogo.length})
+            </button>
+            <button onClick={() => setTab("apis")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "apis" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+              Conexiones API & SII
+            </button>
+            <button onClick={() => setTab("equipo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "equipo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+              Equipo ({equipo.length})
+            </button>
+          </div>
+
+          {/* VISTA 1: OPERACIÓN PRINCIPAL */}
+          {tab === "inicio" && (
+            <div className="space-y-4">
+              {espaciosOperativos.length === 0 ? (
+                <div className="corp-card rounded-2xl p-10 text-center space-y-2">
+                  <h2 className="text-base font-extrabold text-slate-900">Tu entorno está siendo preparado</h2>
+                  <p className="text-xs text-slate-500">Mientras tanto, puedes cargar tu catálogo de productos o configurar tus llaves API en las pestañas superiores.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {espaciosOperativos.map((esp) => (
+                    <div
+                      key={esp.id}
+                      onClick={() => (window.location.href = esp.url)}
+                      className="corp-card rounded-2xl p-6 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-5"
+                    >
+                      <div>
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md inline-block mb-2 ${tema.tag}`}>
+                          {esp.area}
+                        </span>
+                        <h2 className="text-lg font-extrabold text-slate-900">{esp.titulo}</h2>
+                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{esp.desc}</p>
+                      </div>
+                      <div className="text-xs font-bold text-slate-900 pt-3 border-t border-slate-100 flex items-center justify-between">
+                        <span>Ingresar</span>
+                        <span>→</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VISTA 2: CATÁLOGO MAESTRO (EXCEL Y MANUAL) */}
           {tab === "catalogo" && (
             <div className="corp-card rounded-2xl p-6 space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo Maestro de Productos</h2>
+                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo de Productos</h2>
                   <p className="text-xs text-slate-500">Agrega productos uno a uno manualmente o importa un archivo Excel (.xlsx) completo.</p>
                 </div>
                 <label className={`text-xs font-bold px-5 py-3 rounded-xl cursor-pointer text-center shrink-0 ${tema.btn}`}>
@@ -375,7 +432,6 @@
                 </label>
               </div>
 
-              {/* INGRESO MANUAL DE PRODUCTO */}
               <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <input
                   type="text"
@@ -414,7 +470,7 @@
 
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-xl">
                 {catalogoFiltrado.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">Aún no hay productos cargados para esta organización.</p>
+                  <p className="p-8 text-center text-xs text-slate-500">Aún no hay productos cargados.</p>
                 ) : (
                   catalogoFiltrado.slice(0, 150).map((p) => (
                     <div key={p.id} className="px-4 py-2.5 text-xs flex items-center justify-between gap-2">
@@ -432,11 +488,12 @@
             </div>
           )}
 
+          {/* VISTA 3: CONEXIONES API Y SII */}
           {tab === "apis" && (
             <form onSubmit={guardarApis} className="corp-card rounded-2xl p-6 space-y-5">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Credenciales API y Facturación Automática SII</h2>
-                <p className="text-xs text-slate-500">Toca el icono <strong>?</strong> en cada bloque para ver cómo obtener la clave en esa plataforma.</p>
+                <h2 className="text-lg font-extrabold text-slate-900">Sincronización de Canales y Facturación SII</h2>
+                <p className="text-xs text-slate-500">Ingresa las llaves API de las plataformas que utilizas. Toca <strong>?</strong> si necesitas ver dónde obtener cada clave.</p>
               </div>
 
               {ayudaTip && (
@@ -488,16 +545,17 @@
               </div>
 
               <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                {guardandoApis ? "Guardando..." : "Guardar Configuración"}
+                {guardandoApis ? "Sincronizando..." : "Guardar y Sincronizar Conexiones"}
               </button>
             </form>
           )}
 
+          {/* VISTA 4: EQUIPO */}
           {tab === "equipo" && (
             <div className="corp-card rounded-2xl p-6 space-y-5">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Equipo y Responsables de la Empresa</h2>
-                <p className="text-xs text-slate-500">Los módulos operativos leerán automáticamente este directorio.</p>
+                <h2 className="text-lg font-extrabold text-slate-900">Equipo y Responsables</h2>
+                <p className="text-xs text-slate-500">Colaboradores registrados en tu organización.</p>
               </div>
               <form onSubmit={agregarMiembro} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre del colaborador..." className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none" required />
