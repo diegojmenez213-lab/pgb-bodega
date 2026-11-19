@@ -3,22 +3,49 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Plataforma Empresarial</title>
+  <title>NEXUS ERP • E-Commerce Omnicanal & Motor SII</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-ticket { font-family: 'JetBrains Mono', monospace; }
     .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
+    .print-only { display: none; }
+    @media print {
+      @page { size: auto; margin: 10mm; }
+      body { background: white !important; color: black !important; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      .hoja-sii {
+        page-break-after: always;
+        break-after: page;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .hoja-sii:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+    }
   </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
@@ -39,40 +66,253 @@
 
     const RUT_PGB = "769497226";
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+    const formatearRut = (r) => {
+      const c = limpiarRut(r);
+      if (c.length < 2) return c;
+      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      return `${cuerpo}-${c.slice(-1)}`;
+    };
 
     const PALETAS = {
-      ejecutivo: { btn: "bg-slate-900 hover:bg-slate-800 text-white", tag: "bg-slate-100 text-slate-800", border: "border-slate-900" },
-      ecommerce: { btn: "bg-blue-700 hover:bg-blue-800 text-white", tag: "bg-blue-50 text-blue-800", border: "border-blue-700" },
-      logistica: { btn: "bg-emerald-700 hover:bg-emerald-800 text-white", tag: "bg-emerald-50 text-emerald-800", border: "border-emerald-700" },
-      industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700" }
+      ejecutivo: { btn: "bg-slate-900 hover:bg-slate-800 text-white", tag: "bg-slate-100 text-slate-800", border: "border-slate-900", sw: "bg-slate-900" },
+      ecommerce: { btn: "bg-blue-700 hover:bg-blue-800 text-white", tag: "bg-blue-50 text-blue-800", border: "border-blue-700", sw: "bg-blue-700" },
+      logistica: { btn: "bg-emerald-700 hover:bg-emerald-800 text-white", tag: "bg-emerald-50 text-emerald-800", border: "border-emerald-700", sw: "bg-emerald-700" },
+      industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700", sw: "bg-amber-700" }
     };
 
     const AYUDA_APIS = {
-      sii: "En OpenFactura (Haulmer) o tu proveedor DTE, entra a Configuración → API Keys y copia tu llave de producción.",
-      meli: "En developers.mercadolibre.cl → Mis Aplicaciones, copia el App ID (Client ID) y el Client Secret.",
-      falabella: "En Falabella Seller Center → Configuración → Administrar Usuarios, copia tu correo y tu API Key.",
-      lider: "En Walmart/Lider Seller Center → Configuración → Credenciales API, copia tu Token / Client Secret."
+      sii: {
+        titulo: "Cómo obtener tu API Key en OpenFactura / SII",
+        pasos: [
+          "1. Inicia sesión en tu portal de OpenFactura (Haulmer) o tu proveedor DTE autorizado por el SII.",
+          "2. Ve al menú Configuración → Integraciones / API Keys.",
+          "3. Copia tu API Key de Producción. OpenFactura asignará automáticamente tus folios CAF (33 y 39) en cada emisión."
+        ]
+      },
+      meli: {
+        titulo: "Cómo obtener Client ID y Secret en Mercado Libre",
+        pasos: [
+          "1. Entra a developers.mercadolibre.cl con la cuenta principal de la tienda.",
+          "2. Abre 'Mis Aplicaciones' → 'Crear nueva aplicación' (permisos: Órdenes, Ítems y Facturación).",
+          "3. Copia el App ID (Client ID) y el Client Secret generados en la ficha de la app."
+        ]
+      },
+      falabella: {
+        titulo: "Cómo obtener API Key en Falabella Seller Center",
+        pasos: [
+          "1. Ingresa a sellercenter.falabella.com con usuario administrador.",
+          "2. Haz clic en Configuración (arriba a la derecha) → 'Administrar Usuarios'.",
+          "3. Copia el Correo (User ID) y la columna 'API Key' de tu usuario."
+        ]
+      },
+      lider: {
+        titulo: "Cómo obtener el Token en Lider / Walmart Marketplace",
+        pasos: [
+          "1. Entra a marketplace.walmartchile.cl (Seller Center Lider).",
+          "2. Dirígete a Configuración → Credenciales API / Integración.",
+          "3. Genera o copia el Client Secret / Token de acceso."
+        ]
+      }
     };
 
-    const ROLES = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
+    const SwitchToggle = ({ checked, onChange, colorClass = "bg-slate-900" }) => (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+          checked ? colorClass : "bg-slate-200"
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+            checked ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
+    );
 
-    function EmpresaPanelApp() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
+    const TimbrePdf417Svg = () => (
+      <svg viewBox="0 0 260 68" className="w-full max-w-[240px] h-14 mx-auto" aria-label="Timbre Electrónico SII">
+        <rect x="0" y="0" width="260" height="68" fill="#ffffff" />
+        {Array.from({ length: 64 }).map((_, i) => {
+          const x = 4 + i * 3.9;
+          const h1 = ((i * 7 + 3) % 5) * 4 + 38;
+          const w = (i % 3 === 0) ? 2.4 : 1.4;
+          return <rect key={i} x={x} y={(68 - h1) / 2} width={w} height={h1} fill="#0f172a" />;
+        })}
+      </svg>
+    );
+
+    const HojaDocumentoOficialSii = ({ orden, empresa, datosEmisor }) => {
+      if (!orden) return null;
+      const esFactura = orden.tipoDte === 33;
+      const total = Number(orden.totalClp || 0);
+      const neto = Math.round(total / 1.19);
+      const iva = total - neto;
+      const cant = Math.max(1, Number(orden.cantidad || 1));
+      const precioUnitNeto = Math.round(neto / cant);
+      const fechaIso = orden.fechaIso || new Date(orden.timestamp || Date.now()).toISOString().slice(0, 10);
+
+      if (esFactura) {
+        return (
+          <div className="hoja-sii bg-white text-black p-6 sm:p-8 max-w-[780px] mx-auto border border-slate-300 text-xs">
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-5 border-b border-slate-300">
+              <div className="space-y-1 max-w-md">
+                {empresa?.logoBase64 && (
+                  <img src={empresa.logoBase64} alt={empresa.nombre} className="h-12 object-contain mb-2" />
+                )}
+                <p className="text-base font-extrabold uppercase tracking-tight">
+                  {(empresa?.nombre || "EMPRESA").toUpperCase()}
+                </p>
+                <p className="text-[11px] uppercase">
+                  Giro: {datosEmisor.giro || "COMERCIAL"}
+                </p>
+                <p className="text-[11px] uppercase">
+                  Casa Matriz: {datosEmisor.direccion || "SANTIAGO"}, {datosEmisor.comuna || "Santiago"}
+                </p>
+              </div>
+
+              <div className="border-2 border-red-600 text-red-600 px-5 py-3 text-center font-extrabold shrink-0 min-w-[230px]">
+                <p className="text-xs">R.U.T.: {empresa?.rut || ""}</p>
+                <p className="text-sm my-1">FACTURA ELECTRÓNICA</p>
+                <p className="text-sm">N° {Number(orden.folioSii || 0).toLocaleString("es-CL")}</p>
+                <p className="text-[10px] mt-1 tracking-wider">S.I.I. - SANTIAGO CENTRO</p>
+              </div>
+            </div>
+
+            <div className="mt-4 border border-slate-400 p-3.5 space-y-1.5 text-[11px]">
+              <div className="flex justify-between">
+                <span><strong>Señor(es):</strong> <span className="uppercase">{orden.comprador}</span></span>
+                <span><strong>Fecha Emisión:</strong> {fechaIso}</span>
+              </div>
+              <div className="flex justify-between">
+                <span><strong>R.U.T.:</strong> {orden.rutComprador || "S/I"}</span>
+                <span><strong>Forma de Pago:</strong> Contado</span>
+              </div>
+              <div>
+                <span><strong>Giro:</strong> Comercial</span>
+              </div>
+              <div>
+                <span><strong>Dirección:</strong> {orden.direccionCliente || "Santiago"}</span>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <table className="w-full border-collapse border border-slate-400 text-[11px]">
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-400">
+                    <th className="border-r border-slate-400 p-2 text-left w-20">Código</th>
+                    <th className="border-r border-slate-400 p-2 text-left">Descripción</th>
+                    <th className="border-r border-slate-400 p-2 text-center w-16">Cant.</th>
+                    <th className="border-r border-slate-400 p-2 text-right w-24">Precio Unit.</th>
+                    <th className="p-2 text-right w-28">Valor Neto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-slate-300">
+                    <td className="border-r border-slate-400 p-2 font-mono">{orden.codigoSku || "001"}</td>
+                    <td className="border-r border-slate-400 p-2 uppercase">{orden.productoNombre}</td>
+                    <td className="border-r border-slate-400 p-2 text-center">{cant}</td>
+                    <td className="border-r border-slate-400 p-2 text-right">${precioUnitNeto.toLocaleString("es-CL")}</td>
+                    <td className="p-2 text-right font-bold">${neto.toLocaleString("es-CL")}</td>
+                  </tr>
+                  <tr className="h-36">
+                    <td className="border-r border-slate-400"></td>
+                    <td className="border-r border-slate-400"></td>
+                    <td className="border-r border-slate-400"></td>
+                    <td className="border-r border-slate-400"></td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row justify-between items-start gap-6">
+              <div className="text-center max-w-[260px]">
+                <TimbrePdf417Svg />
+                <p className="text-[10px] font-bold mt-1">Timbre Electrónico SII</p>
+                <p className="text-[10px]">Res. 80 de 2014 • Verifique documento en www.sii.cl</p>
+              </div>
+
+              <div className="border border-slate-400 min-w-[230px] text-[11px] ml-auto">
+                <div className="flex justify-between px-3 py-1.5 border-b border-slate-300">
+                  <span className="font-bold">MONTO NETO</span>
+                  <span>$ {neto.toLocaleString("es-CL")}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 border-b border-slate-300">
+                  <span className="font-bold">I.V.A. (19%)</span>
+                  <span>$ {iva.toLocaleString("es-CL")}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-slate-100 font-extrabold text-xs">
+                  <span>TOTAL</span>
+                  <span>$ {total.toLocaleString("es-CL")}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 border border-slate-400 p-2.5 text-[10px] flex justify-between">
+              <span>Nombre: ___________________________</span>
+              <span>R.U.T.: ___________________</span>
+              <span>Fecha: _____________</span>
+              <span>Firma: _______________</span>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="hoja-sii bg-white text-black p-6 max-w-[360px] mx-auto border border-slate-300 font-ticket text-[12px] leading-relaxed">
+          <div className="space-y-0.5 text-left">
+            <p className="font-bold uppercase text-[13px]">{(empresa?.nombre || "EMPRESA").toUpperCase()}</p>
+            <p>{empresa?.rut || ""}</p>
+            <p className="uppercase">Giro: {datosEmisor.giro || "COMERCIAL"}</p>
+            <p className="uppercase">{datosEmisor.direccion || "SANTIAGO"}</p>
+            <p>{datosEmisor.comuna || "Santiago"}</p>
+            <p className="pt-1 font-bold">
+              BOLETA ELECTRÓNICA NUMERO: {Number(orden.folioSii || 0).toLocaleString("es-CL")}
+            </p>
+            <p>REF. VENDEDOR: {orden.ordenExterna}</p>
+            <p>Fecha: {fechaIso}</p>
+          </div>
+
+          <div className="mt-4 pt-2 border-t border-dashed border-slate-400">
+            <p>Dirección: {orden.direccionCliente || "Santiago"}</p>
+          </div>
+
+          <div className="mt-4 space-y-1.5">
+            <div className="flex justify-between items-start gap-2">
+              <span className="uppercase">
+                {cant > 1 ? `${cant}x ` : ""}{orden.productoNombre || "Venta"}
+              </span>
+              <span className="font-bold shrink-0">$ {total.toLocaleString("es-CL")}</span>
+            </div>
+
+            <p className="pt-3">
+              El IVA incluido en esta boleta es de: $ {iva.toLocaleString("es-CL")}
+            </p>
+          </div>
+
+          <div className="mt-5 text-center">
+            <TimbrePdf417Svg />
+            <div className="text-left text-[11px] mt-1 space-y-0.5">
+              <p>Timbre Electrónico SII</p>
+              <p>Res. 99 de 2014</p>
+              <p>Verifique documento en sii.cl</p>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    function AppEcommerceSII() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
       const [empresa, setEmpresa] = useState(null);
-      const [tab, setTab] = useState("inicio");
-
-      const [nuevoNombre, setNuevoNombre] = useState("");
-      const [nuevoRol, setNuevoRol] = useState(ROLES[1]);
-
       const [catalogo, setCatalogo] = useState([]);
-      const [ordenesLiderPendientes, setOrdenesLiderPendientes] = useState([]);
-      const [busquedaCat, setBusquedaCat] = useState("");
-      const [importando, setImportando] = useState(false);
+      const [ordenes, setOrdenes] = useState([]);
 
-      const [manualSku, setManualSku] = useState("");
-      const [manualNombre, setManualNombre] = useState("");
-      const [manualProveedor, setManualProveedor] = useState("");
-
+      // Arranca por defecto en modo Manual (siiModoAutomatico: false) para pruebas seguras antes de activar piloto automático
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
         meliSecret: "",
@@ -83,541 +323,875 @@
         siiApiKey: "",
         siiModoAutomatico: false
       });
-      const [ayudaTip, setAyudaTip] = useState(null);
+
+      const [datosEmisor, setDatosEmisor] = useState({
+        giro: "VENTAS POR INTERNET DE ARTICULOS PARA EL HOGAR, DEPORTE Y OTROS",
+        direccion: "MERCED 838 A INT OF 117",
+        comuna: "Santiago"
+      });
+
+      const [ayudaAbierta, setAyudaAbierta] = useState(null);
       const [guardandoApis, setGuardandoApis] = useState(false);
+
+      const [cafConfig, setCafConfig] = useState({
+        boleta39Actual: 1,
+        boleta39Limite: 5000,
+        factura33Actual: 1,
+        factura33Limite: 5000
+      });
+
+      const [tab, setTab] = useState("ordenes");
+      const [filtroCanal, setFiltroCanal] = useState("TODOS");
+      const [busqueda, setBusqueda] = useState("");
+      const [seleccionLoteIds, setSeleccionLoteIds] = useState([]);
+      const [loteParaImprimir, setLoteParaImprimir] = useState([]);
+      const [dteVisualizando, setDteVisualizando] = useState(null);
+
+      const [mostrarNuevaOrden, setMostrarNuevaOrden] = useState(false);
+      const [canalNuevo, setCanalNuevo] = useState("Mercado Libre");
+      const [ordenExtNuevo, setOrdenExtNuevo] = useState("");
+      const [compradorNuevo, setCompradorNuevo] = useState("");
+      const [rutCompradorNuevo, setRutCompradorNuevo] = useState("");
+      const [skuSeleccionado, setSkuSeleccionado] = useState("");
+      const [cantidadNueva, setCantidadNueva] = useState(1);
+      const [totalNuevo, setTotalNuevo] = useState(19990);
 
       useEffect(() => {
         if (!rutActivo) {
           window.location.href = "index.html";
           return;
         }
-        if (rutActivo === RUT_PGB) {
-          window.location.href = "pgb-operacion.html";
-          return;
-        }
-        auth.signInAnonymously().catch(() => {});
-        const empRef = db.collection("saas_empresas").doc(rutActivo);
 
-        const u1 = empRef.onSnapshot((doc) => {
-          if (doc.exists) {
-            const data = { id: doc.id, ...doc.data() };
-            setEmpresa(data);
-            if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
-          }
-        });
+        let unsubs = [];
+        const conectar = () => {
+          const empRef = db.collection("saas_empresas").doc(rutActivo);
 
-        const u2 = empRef.collection("catalogo").onSnapshot((snap) => {
-          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
-          setCatalogo(lista);
-        });
-
-        const u3 = empRef.collection("ecommerce_ordenes").onSnapshot((snap) => {
-          const liderPend = snap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
-            .filter((o) => o.canal === "Lider" && !o.etiquetaImpresa && o.timbradoSii !== false);
-          liderPend.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-          setOrdenesLiderPendientes(liderPend);
-        });
-
-        return () => { u1(); u2(); u3(); };
-      }, [rutActivo]);
-
-      const cerrarSesion = () => {
-        localStorage.removeItem("nexus_empresa_rut");
-        window.location.href = "index.html";
-      };
-
-      const navegarAislado = (destinoUrl) => {
-        if (!destinoUrl || destinoUrl === "pgb-operacion.html" || destinoUrl === "pgb-backup.html") {
-          window.location.href = "logistica-rutas.html";
-          return;
-        }
-        localStorage.setItem("nexus_empresa_rut", rutActivo);
-        window.location.href = destinoUrl;
-      };
-
-      const agregarMiembro = async (e) => {
-        e.preventDefault();
-        if (!nuevoNombre.trim() || !empresa) return;
-        const actual = Array.isArray(empresa.equipo) ? empresa.equipo : [];
-        await db.collection("saas_empresas").doc(empresa.id).update({
-          equipo: [...actual, { id: Date.now().toString(), nombre: nuevoNombre.trim(), rol: nuevoRol }]
-        });
-        setNuevoNombre("");
-      };
-
-      const agregarProductoManual = async (e) => {
-        e.preventDefault();
-        if (!manualNombre.trim()) return;
-        await db.collection("saas_empresas").doc(rutActivo).collection("catalogo").add({
-          codigo: manualSku.trim().toUpperCase(),
-          nombre: manualNombre.trim().toUpperCase(),
-          proveedor: manualProveedor.trim().toUpperCase(),
-          stockOnline: 0
-        });
-        setManualSku("");
-        setManualNombre("");
-        setManualProveedor("");
-      };
-
-      const eliminarProducto = async (id) => {
-        await db.collection("saas_empresas").doc(rutActivo).collection("catalogo").doc(id).delete();
-      };
-
-      const subirExcel = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        setImportando(true);
-        try {
-          const buf = await file.arrayBuffer();
-          const wb = XLSX.read(buf, { type: "array" });
-          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-          const normKey = (k) => String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-          const normVal = (v) => String(v || "").trim().replace(/\s+/g, " ").toUpperCase();
-          const existentes = new Set(catalogo.map((p) => normVal(p.nombre)));
-          const nuevos = [];
-
-          rows.forEach((row) => {
-            const keys = Object.keys(row);
-            let cod = "", nom = "", prov = "";
-            keys.forEach((k) => {
-              const kn = normKey(k);
-              if (!cod && (kn.includes("cod") || kn.includes("sku") || kn === "id")) cod = normVal(row[k]);
-              else if (!nom && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art"))) nom = normVal(row[k]);
-              else if (!prov && (kn.includes("prov") || kn.includes("marc"))) prov = normVal(row[k]);
-            });
-            if (!nom && keys.length >= 2) {
-              cod = normVal(row[keys[0]]);
-              nom = normVal(row[keys[1]]);
-              if (keys.length >= 3) prov = normVal(row[keys[2]]);
-            } else if (!nom && keys.length === 1) {
-              nom = normVal(row[keys[0]]);
-            }
-            if (nom && !existentes.has(nom)) {
-              existentes.add(nom);
-              nuevos.push({ codigo: cod, nombre: nom, proveedor: prov, stockOnline: 0 });
+          const u1 = empRef.onSnapshot((doc) => {
+            if (doc.exists) {
+              const data = { id: doc.id, ...doc.data() };
+              setEmpresa(data);
+              if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
+              if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
+              if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
+            } else {
+              window.location.href = "index.html";
             }
           });
 
-          const col = db.collection("saas_empresas").doc(rutActivo).collection("catalogo");
-          for (let i = 0; i < nuevos.length; i += 400) {
-            const batch = db.batch();
-            nuevos.slice(i, i + 400).forEach((item) => batch.set(col.doc(), item));
-            await batch.commit();
-          }
-          alert(`Catálogo actualizado: ${nuevos.length} productos agregados con stock inicial 0.`);
-        } catch (err) {
-          alert("Error al leer Excel: " + err.message);
-        }
-        setImportando(false);
-        e.target.value = "";
-      };
+          const colCat = rutActivo === RUT_PGB
+            ? db.collection("catalogo_productos")
+            : empRef.collection("catalogo");
 
-      const guardarApis = async (e) => {
+          const u2 = colCat.onSnapshot((snap) => {
+            const lista = snap.docs.map((d) => ({
+              id: d.id,
+              stockOnline: 0,
+              ...d.data()
+            }));
+            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+            setCatalogo(lista);
+          });
+
+          const u3 = empRef.collection("ecommerce_ordenes").onSnapshot((snap) => {
+            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setOrdenes(lista);
+          });
+
+          unsubs = [u1, u2, u3];
+        };
+
+        auth.signInAnonymously().then(conectar).catch(conectar);
+        return () => unsubs.forEach((fn) => typeof fn === "function" && fn());
+      }, [rutActivo]);
+
+      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
+      const catRef = () =>
+        rutActivo === RUT_PGB
+          ? db.collection("catalogo_productos")
+          : empRef().collection("catalogo");
+
+      const estadoConexiones = useMemo(() => {
+        const a = empresa?.apis || {};
+        return {
+          meli: Boolean(a.meliClientId && a.meliSecret),
+          falabella: Boolean(a.falabellaUser && a.falabellaApiKey),
+          lider: Boolean(a.liderApiKey),
+          sii: Boolean(a.siiApiKey)
+        };
+      }, [empresa]);
+
+      const pilotoAutomaticoActivo = Boolean(apisForm.siiModoAutomatico);
+      const faltanCredencialesCriticas = !estadoConexiones.sii || (!estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
+
+      const guardarCredencialesEmpresa = async (e) => {
         e.preventDefault();
         setGuardandoApis(true);
         try {
-          await db.collection("saas_empresas").doc(rutActivo).update({ apis: apisForm });
-          alert("Conexiones API y SII guardadas. La automatización sigue en modo Manual hasta que la actives tras cargar el stock.");
+          await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
+          alert("Credenciales API y datos tributarios guardados.");
         } catch (err) {
-          alert("Error: " + err.message);
+          alert("Error al guardar: " + err.message);
         }
         setGuardandoApis(false);
       };
 
-      const espaciosOperativos = useMemo(() => {
-        if (!empresa) return [];
-        const m = empresa.modulosActivos || {};
-        const espacios = [];
+      const toggleModoAutomaticoSii = async () => {
+        const nuevoEstado = !pilotoAutomaticoActivo;
+        const actualizado = { ...apisForm, siiModoAutomatico: nuevoEstado };
+        setApisForm(actualizado);
+        await empRef().set({ apis: actualizado }, { merge: true });
+      };
 
-        if (m.m8_omnicanal || m.m9_stock_sync || m.m10_sii_dte || m.m11_colas_print) {
-          espacios.push({
-            id: "ecommerce",
-            area: "Canales Digitales y SII",
-            titulo: "Ventas Omnicanal & Facturación SII",
-            desc: "Gestión de pedidos de Mercado Libre, Falabella y Lider, stock sincronizado y emisión automática de Boletas y Facturas.",
-            url: "ecommerce-sii.html"
-          });
+      const registrarOrdenOmnicanal = async (e) => {
+        e.preventDefault();
+        const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
+          id: "manual",
+          codigo: "SKU-001",
+          nombre: skuSeleccionado || "Venta",
+          stockOnline: 0
+        };
+
+        const rutLim = limpiarRut(rutCompradorNuevo);
+        const esFactura33 = rutLim.length >= 7;
+        const tipoDte = esFactura33 ? 33 : 39;
+        const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
+        const esLider = canalNuevo === "Lider";
+        const esRealSii = Boolean(estadoConexiones.sii);
+        const ahora = Date.now();
+
+        // Piloto automático: timbra al instante en SII/OpenFactura, envía al cliente en MeLi/Falabella, y deja Lider listo para impresión física
+        const nuevaOrden = {
+          canal: canalNuevo,
+          ordenExterna: ordenExtNuevo.trim() || `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
+          comprador: compradorNuevo.trim() || "Cliente Marketplace",
+          rutComprador: esFactura33 ? formatearRut(rutLim) : "",
+          direccionCliente: "Santiago",
+          productoId: prodObj.id,
+          codigoSku: prodObj.codigo || "S/C",
+          productoNombre: prodObj.nombre,
+          cantidad: Number(cantidadNueva),
+          totalClp: Number(totalNuevo),
+          tipoDte,
+          folioSii: folioAsignado,
+          timbradoSii: true,
+          enviadoMarketplace: !esLider,
+          esSimulacion: !esRealSii,
+          colaImpresion: esLider ? "lider" : "general",
+          etiquetaImpresa: false,
+          despachado: false,
+          fechaIso: new Date(ahora).toISOString().slice(0, 10),
+          horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+          fecha: new Date(ahora).toLocaleString("es-CL"),
+          timestamp: ahora
+        };
+
+        try {
+          const batch = db.batch();
+          batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaOrden);
+
+          if (prodObj.id && prodObj.id !== "manual") {
+            const nuevoStock = Math.max(0, (Number(prodObj.stockOnline) || 0) - Number(cantidadNueva));
+            batch.update(catRef().doc(prodObj.id), { stockOnline: nuevoStock });
+          }
+
+          const nuevoCaf = {
+            ...cafConfig,
+            factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
+            boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
+          };
+          batch.set(empRef(), { cafConfig: nuevoCaf }, { merge: true });
+
+          await batch.commit();
+          setMostrarNuevaOrden(false);
+          setOrdenExtNuevo("");
+          setCompradorNuevo("");
+          setRutCompradorNuevo("");
+        } catch (err) {
+          alert("Error al procesar orden: " + err.message);
         }
+      };
 
-        if (m.m5_inv_general || m.m6_conteo_ciclico) {
-          espacios.push({
-            id: "inventario",
-            area: "Bodega y Existencias",
-            titulo: "Control de Inventario y Toma Física",
-            desc: "Revisión de stock por proveedor, conteos cíclicos y generación de planillas de verificación.",
-            url: "pgb-inventario.html"
-          });
+      const eliminarSimulacion = async (orden) => {
+        if (orden.esSimulacion === false) {
+          return alert("Este documento fue emitido en vivo por el SII y no puede eliminarse por normativa tributaria.");
         }
+        if (!confirm(`¿Eliminar la simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
+        await empRef().collection("ecommerce_ordenes").doc(orden.id).delete();
+      };
 
-        if (m.m12_ruta_inc || m.m13_retornos_merma || m.m14_analitica_err || m.m7_auditoria_inv) {
-          espacios.push({
-            id: "logistica",
-            area: "Despacho y Operaciones",
-            titulo: "Operación Logística y Trazabilidad",
-            desc: "Control de rutas, armado de pedidos, devoluciones y auditoría de movimientos.",
-            url: "logistica-rutas.html"
-          });
-        }
+      const actualizarStockProducto = async (prodId, nuevoStock) => {
+        await catRef().doc(prodId).update({ stockOnline: Math.max(0, Number(nuevoStock)) });
+      };
 
-        if (m.m15_pos_ventas || m.m16_caja_cobros) {
-          espacios.push({
-            id: "pos",
-            area: "Sala de Ventas",
-            titulo: "Punto de Venta (POS) y Caja",
-            desc: "Emisión rápida en mesón, cotizaciones, cuentas por cobrar y cierre diario.",
-            url: "ventas-pos.html"
-          });
-        }
+      const guardarNuevosFoliosCaf = async (e) => {
+        e.preventDefault();
+        await empRef().set({ cafConfig, datosEmisor }, { merge: true });
+        alert("Datos tributarios guardados.");
+      };
 
-        if (m.m17_compras_prov || m.m18_finanzas_bi) {
-          espacios.push({
-            id: "compras",
-            area: "Abastecimiento y Finanzas",
-            titulo: "Recepción de Facturas SII y Balance",
-            desc: "Importación automática de facturas de proveedores vía SII/XML, reposición de stock y flujo financiero.",
-            url: "compras-finanzas.html"
-          });
-        }
-
-        return espacios;
-      }, [empresa]);
-
-      const usaCanalesOIntegracion = useMemo(() => {
-        if (!empresa) return false;
-        const m = empresa.modulosActivos || {};
-        return Boolean(m.m4_apis || m.m8_omnicanal || m.m9_stock_sync || m.m10_sii_dte || m.m11_colas_print || m.m17_compras_prov);
-      }, [empresa]);
-
-      const alertasPendientes = useMemo(() => {
-        if (!empresa) return [];
-        const lista = [];
-        if (usaCanalesOIntegracion && !apisForm.siiApiKey) {
-          lista.push({
-            texto: "1. Conecta tu API Key de SII / OpenFactura para habilitar la emisión y lectura automática de documentos.",
-            accion: "Configurar APIs",
-            tabDestino: "apis"
-          });
-        }
-        if (usaCanalesOIntegracion && !apisForm.meliClientId && !apisForm.falabellaApiKey && !apisForm.liderApiKey) {
-          lista.push({
-            texto: "2. Ingresa las credenciales de tus canales de venta (Mercado Libre, Falabella o Lider).",
-            accion: "Conectar Canales",
-            tabDestino: "apis"
-          });
-        }
-        if (catalogo.length === 0) {
-          lista.push({
-            texto: "3. Carga tu catálogo de productos (por Excel o manual) y luego importa tu stock.",
-            accion: "Ir a Catálogo",
-            tabDestino: "catalogo"
-          });
-        }
-        return lista;
-      }, [empresa, catalogo.length, usaCanalesOIntegracion, apisForm]);
-
-      const catalogoFiltrado = useMemo(() => {
-        const q = busquedaCat.trim().toLowerCase();
-        if (!q) return catalogo;
-        return catalogo.filter((p) =>
-          (p.nombre || "").toLowerCase().includes(q) ||
-          (p.codigo || "").toLowerCase().includes(q) ||
-          (p.proveedor || "").toLowerCase().includes(q)
+      const toggleSeleccionLote = (id) => {
+        setSeleccionLoteIds((prev) =>
+          prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
         );
-      }, [catalogo, busquedaCat]);
+      };
 
-      if (!empresa) {
-        return (
-          <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <p className="text-xs font-bold text-slate-500">Iniciando espacio de trabajo...</p>
-          </div>
-        );
-      }
+      const seleccionarTodosPendientesLote = () => {
+        const pendientes = ordenes.filter((o) => !o.etiquetaImpresa).map((o) => o.id);
+        setSeleccionLoteIds(pendientes);
+      };
 
-      const tema = PALETAS[empresa.paleta || "ejecutivo"] || PALETAS.ejecutivo;
-      const equipo = Array.isArray(empresa.equipo) ? empresa.equipo : [];
+      const generarEImprimirLotePdf = () => {
+        if (seleccionLoteIds.length === 0) {
+          return alert("Selecciona al menos una factura o boleta de la lista para generar el lote.");
+        }
+        const seleccionadosOrdenados = ordenes
+          .filter((o) => seleccionLoteIds.includes(o.id))
+          .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        setLoteParaImprimir(seleccionadosOrdenados);
+        setTimeout(async () => {
+          window.print();
+          const batch = db.batch();
+          seleccionadosOrdenados.forEach((o) => {
+            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), { etiquetaImpresa: true });
+          });
+          await batch.commit();
+          setLoteParaImprimir([]);
+          setSeleccionLoteIds([]);
+        }, 300);
+      };
+
+      const marcarDespachado = async (id, actual) => {
+        await empRef().collection("ecommerce_ordenes").doc(id).update({ despachado: !actual });
+      };
+
+      const ordenesCronologicas = useMemo(() => {
+        return [...ordenes].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      }, [ordenes]);
+
+      const pendientesImpresionCount = useMemo(
+        () => ordenes.filter((o) => !o.etiquetaImpresa).length,
+        [ordenes]
+      );
+
+      const liderPendientesImpresion = useMemo(
+        () => ordenes.filter((o) => o.canal === "Lider" && !o.etiquetaImpresa),
+        [ordenes]
+      );
+
+      const ordenesFiltradas = useMemo(() => {
+        const q = busqueda.trim().toLowerCase();
+        return ordenes.filter((o) => {
+          if (filtroCanal !== "TODOS" && o.canal !== filtroCanal) return false;
+          if (!q) return true;
+          return (
+            (o.ordenExterna || "").toLowerCase().includes(q) ||
+            (o.comprador || "").toLowerCase().includes(q) ||
+            (o.productoNombre || "").toLowerCase().includes(q) ||
+            String(o.folioSii || "").includes(q)
+          );
+        });
+      }, [ordenes, filtroCanal, busqueda]);
+
+      const urlVolver = rutActivo === RUT_PGB ? "pgb-operacion.html" : "empresa-panel.html";
+      const tema = PALETAS[empresa?.paleta || "ecommerce"] || PALETAS.ecommerce;
 
       return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-5">
-          <div className={`corp-card rounded-2xl p-6 sm:p-7 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
-            <div className="flex items-center gap-4">
-              {empresa.logoBase64 && (
-                <div className="w-24 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
-                  <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
-                </div>
-              )}
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className={`text-[11px] font-bold px-3 py-0.5 rounded-full ${tema.tag}`}>
-                    RUT {empresa.rut}
-                  </span>
-                  <span className="bg-emerald-50 text-emerald-700 text-[11px] font-bold px-3 py-0.5 rounded-full">
-                    En Línea
-                  </span>
-                </div>
-                <h1 className="text-2xl font-extrabold text-slate-900">{empresa.nombre}</h1>
-                <p className="text-xs text-slate-500 mt-0.5">{empresa.rubro || "Gestión Empresarial Centralizada"}</p>
-              </div>
-            </div>
-
-            <button onClick={cerrarSesion} className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}>
-              Cerrar Sesión
-            </button>
-          </div>
-
-          {/* COLA EXCLUSIVA LIDER: DOCUMENTOS TIMBRADOS PENDIENTES POR IMPRIMIR EN FÍSICO */}
-          {ordenesLiderPendientes.length > 0 && (
-            <div className="corp-card rounded-2xl p-5 border-2 border-slate-900 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded">
-                  Despacho Físico Lider ({ordenesLiderPendientes.length})
-                </span>
-                <h2 className="text-sm font-extrabold mt-1.5">
-                  Tienes {ordenesLiderPendientes.length} documento(s) de Lider timbrado(s) pendiente(s) por imprimir
-                </h2>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Lider no admite envío digital al portal; imprime estas hojas para adjuntar al paquete físico.
-                </p>
-              </div>
-              <button
-                onClick={() => navegarAislado("ecommerce-sii.html")}
-                className="bg-white text-slate-950 hover:bg-slate-100 text-xs font-extrabold px-4 py-3 rounded-xl cursor-pointer shrink-0"
-              >
-                Imprimir Cola Lider →
-              </button>
+        <div className="min-h-screen bg-slate-50 text-slate-900">
+          {dteVisualizando && (
+            <div className="print-only bg-white p-2">
+              <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
             </div>
           )}
 
-          {alertasPendientes.length > 0 && (
-            <div className="corp-card rounded-2xl p-5 border-amber-300 bg-amber-50/30 space-y-2.5">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-900 block">
-                Pasos recomendados para completar tu sincronización
-              </span>
-              <div className="space-y-2">
-                {alertasPendientes.map((al, idx) => (
-                  <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/80 p-3 rounded-xl border border-amber-200/70">
-                    <span className="text-xs font-semibold text-slate-700">{al.texto}</span>
+          {!dteVisualizando && loteParaImprimir.length > 0 && (
+            <div className="print-only bg-white">
+              {loteParaImprimir.map((docItem) => (
+                <HojaDocumentoOficialSii
+                  key={docItem.id}
+                  orden={docItem}
+                  empresa={empresa}
+                  datosEmisor={datosEmisor}
+                />
+              ))}
+            </div>
+          )}
+
+          {dteVisualizando && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto no-print">
+              <div className="bg-slate-100 rounded-3xl max-w-3xl w-full p-5 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold uppercase text-slate-700">
+                    Vista Previa Documento Oficial SII ({dteVisualizando.tipoDte === 33 ? `Factura 33 N° ${dteVisualizando.folioSii}` : `Boleta 39 N° ${dteVisualizando.folioSii}`})
+                  </span>
+                  <button
+                    onClick={() => setDteVisualizando(null)}
+                    className="bg-white border border-slate-300 text-slate-800 text-xs font-bold px-3.5 py-1.5 rounded-xl cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div className="max-h-[72vh] overflow-y-auto py-1">
+                  <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      window.print();
+                      await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({ etiquetaImpresa: true });
+                    }}
+                    className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}
+                  >
+                    Imprimir / Guardar PDF
+                  </button>
+                  {dteVisualizando.esSimulacion !== false && (
                     <button
-                      onClick={() => setTab(al.tabDestino)}
-                      className={`text-xs font-bold px-3.5 py-1.5 rounded-lg cursor-pointer shrink-0 ${tema.btn}`}
+                      onClick={async () => {
+                        await eliminarSimulacion(dteVisualizando);
+                        setDteVisualizando(null);
+                      }}
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-3 rounded-xl text-xs cursor-pointer"
                     >
-                      {al.accion}
+                      Eliminar Simulación
                     </button>
-                  </div>
-                ))}
+                  )}
+                </div>
               </div>
             </div>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-            <button onClick={() => setTab("inicio")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "inicio" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Operación Principal
-            </button>
-            <button onClick={() => setTab("catalogo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "catalogo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Catálogo ({catalogo.length})
-            </button>
-            <button onClick={() => setTab("apis")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "apis" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Conexiones API & SII
-            </button>
-            <button onClick={() => setTab("equipo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "equipo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Equipo ({equipo.length})
-            </button>
-          </div>
-
-          {tab === "inicio" && (
-            <div className="space-y-4">
-              {espaciosOperativos.length === 0 ? (
-                <div className="corp-card rounded-2xl p-10 text-center space-y-2">
-                  <h2 className="text-base font-extrabold text-slate-900">Tu entorno está siendo preparado</h2>
-                  <p className="text-xs text-slate-500">Mientras tanto, puedes cargar tu catálogo de productos o configurar tus llaves API en las pestañas superiores.</p>
+          {ayudaAbierta && AYUDA_APIS[ayudaAbierta] && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 no-print">
+              <div className="corp-card rounded-2xl max-w-md w-full p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-extrabold text-slate-900">{AYUDA_APIS[ayudaAbierta].titulo}</h3>
+                  <button
+                    onClick={() => setAyudaAbierta(null)}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2 py-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {espaciosOperativos.map((esp) => (
-                    <div
-                      key={esp.id}
-                      onClick={() => navegarAislado(esp.url)}
-                      className="corp-card rounded-2xl p-6 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-5"
-                    >
-                      <div>
-                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md inline-block mb-2 ${tema.tag}`}>
-                          {esp.area}
-                        </span>
-                        <h2 className="text-lg font-extrabold text-slate-900">{esp.titulo}</h2>
-                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{esp.desc}</p>
-                      </div>
-                      <div className="text-xs font-bold text-slate-900 pt-3 border-t border-slate-100 flex items-center justify-between">
-                        <span>Ingresar</span>
-                        <span>→</span>
-                      </div>
-                    </div>
+                <div className="space-y-2 text-xs text-slate-600 leading-relaxed">
+                  {AYUDA_APIS[ayudaAbierta].pasos.map((p, i) => (
+                    <p key={i} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 font-medium">{p}</p>
                   ))}
                 </div>
-              )}
+                <button
+                  onClick={() => setAyudaAbierta(null)}
+                  className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}
+                >
+                  Entendido
+                </button>
+              </div>
             </div>
           )}
 
-          {tab === "catalogo" && (
-            <div className="corp-card rounded-2xl p-6 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
+            {/* CABECERA CON INTERRUPTOR VISIBLE DE PILOTO AUTOMÁTICO */}
+            <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
+              <div className="flex items-center gap-3.5">
+                {empresa?.logoBase64 && (
+                  <div className="w-20 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
+                    <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
+                  </div>
+                )}
                 <div>
-                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo de Productos</h2>
-                  <p className="text-xs text-slate-500">Carga tus productos por Excel (.xlsx) o manualmente (inician con stock 0 hasta importar tu inventario o factura SII).</p>
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <a href={urlVolver} className={`text-xs font-bold px-3 py-1 rounded-lg ${tema.btn}`}>
+                      Volver
+                    </a>
+                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tema.tag}`}>
+                      {empresa?.nombre || "Empresa"} • {empresa?.rut || formatearRut(rutActivo)}
+                    </span>
+                  </div>
+                  <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+                    E-Commerce Omnicanal & Facturación SII
+                  </h1>
                 </div>
-                <label className={`text-xs font-bold px-5 py-3 rounded-xl cursor-pointer text-center shrink-0 ${tema.btn}`}>
-                  {importando ? "Importando..." : "Importar Excel (.xlsx)"}
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={subirExcel} disabled={importando} className="hidden" />
-                </label>
               </div>
 
-              <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <input
-                  type="text"
-                  value={manualSku}
-                  onChange={(e) => setManualSku(e.target.value)}
-                  placeholder="Código / SKU"
-                  className="bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                />
-                <input
-                  type="text"
-                  value={manualNombre}
-                  onChange={(e) => setManualNombre(e.target.value)}
-                  placeholder="Nombre del producto *"
-                  className="bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                  required
-                />
-                <input
-                  type="text"
-                  value={manualProveedor}
-                  onChange={(e) => setManualProveedor(e.target.value)}
-                  placeholder="Proveedor / Marca"
-                  className="bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                />
-                <button type="submit" className={`font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                  + Agregar Manual
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <div className={`px-3.5 py-2.5 rounded-xl border flex items-center gap-2.5 ${pilotoAutomaticoActivo ? "bg-emerald-50 border-emerald-300" : "bg-slate-100 border-slate-300"}`}>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase block text-slate-700">Piloto Automático</span>
+                    <span className={`text-[11px] font-bold ${pilotoAutomaticoActivo ? "text-emerald-700" : "text-slate-500"}`}>
+                      {pilotoAutomaticoActivo ? "Encendido" : "Pausado (Manual)"}
+                    </span>
+                  </div>
+                  <SwitchToggle checked={pilotoAutomaticoActivo} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
+                </div>
+
+                <button
+                  onClick={() => setMostrarNuevaOrden(!mostrarNuevaOrden)}
+                  className={`font-bold text-xs px-4 py-3 rounded-xl cursor-pointer ${tema.btn}`}
+                >
+                  {mostrarNuevaOrden ? "Cerrar Formulario" : "+ Simular / Registrar Orden"}
+                </button>
+              </div>
+            </div>
+
+            {/* BANDEJA SEPARADA PARA LIDER (TIMBRADAS Y PENDIENTES DE IMPRESIÓN FÍSICA) */}
+            {liderPendientesImpresion.length > 0 && (
+              <div className="corp-card rounded-2xl p-4 border-2 border-slate-900 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950 px-2 py-0.5 rounded">
+                    Cola Física Exclusiva Lider ({liderPendientesImpresion.length})
+                  </span>
+                  <p className="text-xs font-bold mt-1">
+                    {liderPendientesImpresion.length} factura(s)/boleta(s) de Lider timbrada(s) en SII esperando impresión física para despacho.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSeleccionLoteIds(liderPendientesImpresion.map((o) => o.id));
+                    setTab("impresion");
+                  }}
+                  className="bg-white text-slate-950 font-extrabold text-xs px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
+                >
+                  Seleccionar Cola Lider
+                </button>
+              </div>
+            )}
+
+            {faltanCredencialesCriticas && (
+              <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-extrabold text-amber-900 block">
+                    Faltan credenciales API por vincular ({!estadoConexiones.sii ? "SII / OpenFactura" : "Canales Marketplace"})
+                  </span>
+                  <span className="text-[11px] text-slate-600">
+                    Mientras no se conecten las llaves reales, las órdenes se marcan como simulación y se pueden eliminar.
+                  </span>
+                </div>
+                <button
+                  onClick={() => setTab("credenciales")}
+                  className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
+                >
+                  Configurar APIs
+                </button>
+              </div>
+            )}
+
+            {mostrarNuevaOrden && (
+              <form onSubmit={registrarOrdenOmnicanal} className="corp-card rounded-2xl p-5 space-y-4 border-slate-400">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <h2 className="text-sm font-extrabold text-slate-900">Nueva Orden (Timbrado SII + Descuento Stock)</h2>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {limpiarRut(rutCompradorNuevo).length >= 7 ? "Emitirá Factura 33" : "Emitirá Boleta 39"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Canal</label>
+                    <select value={canalNuevo} onChange={(e) => setCanalNuevo(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold">
+                      <option value="Mercado Libre">Mercado Libre (Envío Digital + Cola Opcional)</option>
+                      <option value="Falabella">Falabella (Envío Digital + Cola Opcional)</option>
+                      <option value="Lider">Lider (Solo Cola Física Aparte)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Nombre / Razón Social *</label>
+                    <input type="text" value={compradorNuevo} onChange={(e) => setCompradorNuevo(e.target.value)} placeholder="Ej: Sanhoo" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">RUT Receptor (Opcional)</label>
+                    <input type="text" value={rutCompradorNuevo} onChange={(e) => setRutCompradorNuevo(e.target.value)} placeholder="Vacío = Boleta • Con RUT = Factura" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Producto *</label>
+                    {catalogo.length > 0 ? (
+                      <select value={skuSeleccionado} onChange={(e) => setSkuSeleccionado(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required>
+                        <option value="">-- Selecciona del catálogo --</option>
+                        {catalogo.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre} (Stock: {Number(p.stockOnline ?? 0)})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input type="text" value={skuSeleccionado} onChange={(e) => setSkuSeleccionado(e.target.value)} placeholder="Ej: Ventilador" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Cantidad *</label>
+                    <input type="number" min="1" value={cantidadNueva} onChange={(e) => setCantidadNueva(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Total CLP *</label>
+                    <input type="number" min="1" value={totalNuevo} onChange={(e) => setTotalNuevo(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
+                  </div>
+                </div>
+
+                <button type="submit" className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                  Timbrar {limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"}, Descontar Stock y {canalNuevo === "Lider" ? "Dejar en Cola Física Lider" : "Enviar al Cliente"}
                 </button>
               </form>
+            )}
 
-              <input
-                type="text"
-                value={busquedaCat}
-                onChange={(e) => setBusquedaCat(e.target.value)}
-                placeholder="Buscar producto por SKU, nombre o proveedor..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
-              />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
+              <button onClick={() => setTab("ordenes")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "ordenes" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                1. Ventas y DTE ({ordenes.length})
+              </button>
+              <button onClick={() => setTab("impresion")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "impresion" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                2. Lotes PDF ({pendientesImpresionCount})
+              </button>
+              <button onClick={() => setTab("stock")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "stock" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                3. Stock & Emisor SII
+              </button>
+              <button onClick={() => setTab("credenciales")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "credenciales" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+                4. API Keys & SII {faltanCredencialesCriticas ? "(!)" : ""}
+              </button>
+            </div>
 
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-xl">
-                {catalogoFiltrado.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">Aún no hay productos cargados.</p>
-                ) : (
-                  catalogoFiltrado.slice(0, 150).map((p) => (
-                    <div key={p.id} className="px-4 py-2.5 text-xs flex items-center justify-between gap-2">
-                      <div>
-                        <span className="font-bold text-slate-900">{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
-                        <span className="text-slate-500 text-[11px] ml-2">• Stock: {Number(p.stockOnline ?? 0)} unds</span>
-                      </div>
-                      <button onClick={() => eliminarProducto(p.id)} className="text-slate-400 hover:text-rose-600 font-bold text-[11px] cursor-pointer">
-                        Eliminar
+            {tab === "ordenes" && (
+              <div className="space-y-4">
+                <div className="corp-card rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="Buscar por orden, cliente, producto o folio..."
+                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs font-semibold outline-none"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {["TODOS", "Mercado Libre", "Falabella", "Lider"].map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setFiltroCanal(c)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                          filtroCanal === c ? `${tema.btn} border-transparent` : "bg-slate-50 text-slate-700 border-slate-300"
+                        }`}
+                      >
+                        {c}
                       </button>
-                    </div>
-                  ))
+                    ))}
+                  </div>
+                </div>
+
+                {ordenesFiltradas.length === 0 ? (
+                  <div className="corp-card rounded-2xl p-10 text-center space-y-2">
+                    <h3 className="text-sm font-extrabold text-slate-900">No hay documentos registrados</h3>
+                    <p className="text-xs text-slate-500">Usa "+ Simular / Registrar Orden" arriba para generar una Boleta 39 o Factura 33.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {ordenesFiltradas.map((o) => {
+                      const esSimulada = o.esSimulacion !== false;
+                      const esLider = o.canal === "Lider";
+                      return (
+                        <div key={o.id} className="corp-card rounded-2xl p-5 space-y-3 border border-slate-200">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${tema.tag}`}>
+                              {o.canal} • #{o.ordenExterna}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {esSimulada ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                                  Simulación
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                  SII Real
+                                </span>
+                              )}
+                              <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-900 text-white">
+                                {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              Timbrada SII
+                            </span>
+                            {esLider ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300">
+                                Solo Impresión Física (Lider)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200">
+                                Enviada a {o.canal}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                            <p className="text-sm font-extrabold text-slate-900">
+                              {o.cantidad}x {o.productoNombre}
+                            </p>
+                            <p className="text-xs text-slate-600 mt-0.5">
+                              {o.comprador} {o.rutComprador ? `• RUT: ${o.rutComprador}` : "• Boleta Consumidor Final"}
+                            </p>
+                            <p className="text-xs font-extrabold text-slate-900 mt-1">
+                              Total: ${Number(o.totalClp || 0).toLocaleString("es-CL")} CLP • <span className="font-normal text-slate-500">{o.fecha}</span>
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setDteVisualizando(o)}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${tema.btn}`}
+                              >
+                                Ver / Imprimir {o.tipoDte === 33 ? "Factura" : "Boleta"}
+                              </button>
+
+                              {esSimulada && (
+                                <button
+                                  onClick={() => eliminarSimulacion(o)}
+                                  className="px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer"
+                                >
+                                  Eliminar
+                                </button>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => marcarDespachado(o.id, o.despachado)}
+                              className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                                o.despachado ? "bg-emerald-700 text-white" : "bg-slate-200 text-slate-800"
+                              }`}
+                            >
+                              {o.despachado ? "Despachado" : "Despachar"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            </div>
-          )}
+            )}
 
-          {tab === "apis" && (
-            <form onSubmit={guardarApis} className="corp-card rounded-2xl p-6 space-y-5">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Sincronización de Canales y Facturación SII</h2>
-                <p className="text-xs text-slate-500">Ingresa las llaves API de las plataformas que utilizas. Toca <strong>?</strong> si necesitas ver dónde obtener cada clave.</p>
+            {tab === "impresion" && (
+              <div className="corp-card rounded-2xl p-6 space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900">Generador de Lote PDF (Una Hoja por Documento)</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Todas las boletas y facturas ya están timbradas en el SII. Marca las que desees imprimir en físico y se unirán en <strong>un solo PDF</strong> ordenado cronológicamente (primero la que llegó primero).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={seleccionarTodosPendientesLote}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Marcar No Impresas ({pendientesImpresionCount})
+                    </button>
+                    {seleccionLoteIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSeleccionLoteIds([])}
+                        className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2.5 py-2.5 cursor-pointer"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {ordenesCronologicas.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-8 bg-slate-50 rounded-xl">
+                    No hay facturas ni boletas disponibles para formar lote todavía.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl overflow-hidden">
+                    {ordenesCronologicas.map((o, index) => {
+                      const marcado = seleccionLoteIds.includes(o.id);
+                      const horaTexto = o.horaCorta || (o.timestamp ? new Date(o.timestamp).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) : "");
+                      return (
+                        <div
+                          key={o.id}
+                          onClick={() => toggleSeleccionLote(o.id)}
+                          className={`p-4 flex items-center justify-between gap-3 cursor-pointer transition ${
+                            marcado ? "bg-slate-100/90" : "bg-white hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={marcado}
+                              onChange={() => {}}
+                              className="w-4 h-4 rounded border-slate-400 cursor-pointer shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-extrabold text-slate-900">
+                                  {o.tipoDte === 33 ? `Factura Electrónica N° ${o.folioSii}` : `Boleta Electrónica N° ${o.folioSii}`}
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-500">
+                                  • Hora: {horaTexto}
+                                </span>
+                                {o.canal === "Lider" && (
+                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-900 text-white">Físico Lider</span>
+                                )}
+                                {o.etiquetaImpresa ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Impresa</span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Sin Imprimir</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-600 truncate mt-0.5">
+                                {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""} — {o.cantidad}x {o.productoNombre}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-xs font-extrabold text-slate-900 block">
+                              ${Number(o.totalClp || 0).toLocaleString("es-CL")}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">
+                              Orden #{index + 1}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={generarEImprimirLotePdf}
+                  disabled={seleccionLoteIds.length === 0}
+                  className={`w-full font-extrabold py-4 rounded-2xl text-xs transition cursor-pointer ${
+                    seleccionLoteIds.length > 0 ? tema.btn : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  Imprimir / Generar Lote PDF ({seleccionLoteIds.length} {seleccionLoteIds.length === 1 ? "hoja seleccionada" : "hojas en orden cronológico"})
+                </button>
               </div>
+            )}
 
-              {ayudaTip && (
-                <div className="bg-slate-900 text-white p-3.5 rounded-xl text-xs flex items-center justify-between gap-3">
-                  <span>{AYUDA_APIS[ayudaTip]}</span>
-                  <button type="button" onClick={() => setAyudaTip(null)} className="font-bold underline shrink-0 cursor-pointer">Cerrar</button>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-800">SII / OpenFactura</h3>
-                    <button type="button" onClick={() => setAyudaTip("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+            {tab === "stock" && (
+              <div className="space-y-5">
+                <form onSubmit={guardarNuevosFoliosCaf} className="corp-card rounded-2xl p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div>
+                      <h2 className="text-sm font-extrabold text-slate-900">Datos Tributarios del Emisor & Automatización SII</h2>
+                      <p className="text-xs text-slate-500">
+                        Al conectar tu API Key de OpenFactura/SII, los folios CAF (33 y 39) se asignan automáticamente desde tu proveedor DTE.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                      <span className="text-xs font-bold">Piloto Automático</span>
+                      <SwitchToggle checked={pilotoAutomaticoActivo} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
+                    </div>
                   </div>
-                  <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold">
-                    <option>OpenFactura (Haulmer)</option>
-                    <option>SimpleFactura</option>
-                    <option>SII Directo (Certificado .PFX + CAF)</option>
-                  </select>
-                  <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-800">Mercado Libre Chile</h3>
-                    <button type="button" onClick={() => setAyudaTip("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Giro Comercial SII</label>
+                      <input type="text" value={datosEmisor.giro} onChange={(e) => setDatosEmisor({ ...datosEmisor, giro: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Dirección Casa Matriz</label>
+                      <input type="text" value={datosEmisor.direccion} onChange={(e) => setDatosEmisor({ ...datosEmisor, direccion: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
                   </div>
-                  <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                  <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-800">Falabella Seller Center</h3>
-                    <button type="button" onClick={() => setAyudaTip("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
-                  </div>
-                  <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                  <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
+                  <button type="submit" className={`font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                    Guardar Datos del Emisor
+                  </button>
+                </form>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-800">Lider / Walmart Marketplace</h3>
-                    <button type="button" onClick={() => setAyudaTip("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
-                  </div>
-                  <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                <div className="corp-card rounded-2xl p-6 space-y-3">
+                  <h2 className="text-sm font-extrabold text-slate-900">Stock Compartido Multi-Canal ({catalogo.length} productos)</h2>
+                  {catalogo.length === 0 ? (
+                    <p className="text-xs text-slate-500 bg-slate-50 p-6 rounded-xl text-center">
+                      Carga tus productos desde tu panel principal en la pestaña Catálogo y luego suma stock desde tus facturas XML/SII o aquí mismo.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl">
+                      {catalogo.slice(0, 80).map((p) => {
+                        const st = Number(p.stockOnline ?? 0);
+                        return (
+                          <div key={p.id} className="p-3 flex items-center justify-between gap-2 text-xs">
+                            <span className="font-bold text-slate-900">{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold px-2.5 py-1 rounded-full bg-slate-100">{st} unds</span>
+                              <button onClick={() => actualizarStockProducto(p.id, st - 1)} className="bg-slate-200 px-2.5 py-1 rounded-lg font-bold cursor-pointer">-1</button>
+                              <button onClick={() => actualizarStockProducto(p.id, st + 5)} className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${tema.btn}`}>+5</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
+            )}
 
-              <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                {guardandoApis ? "Sincronizando..." : "Guardar y Sincronizar Conexiones"}
-              </button>
-            </form>
-          )}
+            {tab === "credenciales" && (
+              <form onSubmit={guardarCredencialesEmpresa} className="corp-card rounded-2xl p-6 space-y-5">
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">Credenciales API y Facturación SII</h2>
+                  <p className="text-xs text-slate-500">Presiona el botón <strong>?</strong> en cada bloque si necesitas saber dónde obtener cada llave.</p>
+                </div>
 
-          {tab === "equipo" && (
-            <div className="corp-card rounded-2xl p-6 space-y-5">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Equipo y Responsables</h2>
-                <p className="text-xs text-slate-500">Colaboradores registrados en tu organización.</p>
-              </div>
-              <form onSubmit={agregarMiembro} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre del colaborador..." className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none" required />
-                <select value={nuevoRol} onChange={(e) => setNuevoRol(e.target.value)} className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none">
-                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <button type="submit" className={`font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                  Agregar Colaborador
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">1. SII / OpenFactura</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold">
+                      <option>OpenFactura (Haulmer)</option>
+                      <option>SimpleFactura</option>
+                      <option>SII Directo (Certificado .PFX + CAF)</option>
+                    </select>
+                    <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">2. Mercado Libre Chile</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="App ID / Client ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">3. Falabella Seller Center</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase text-slate-800">4. Lider / Walmart Marketplace</h3>
+                      <button type="button" onClick={() => setAyudaAbierta("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                    </div>
+                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                  {guardandoApis ? "Guardando..." : "Guardar Credenciales y Activar Conexión"}
                 </button>
               </form>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {equipo.map((m) => (
-                  <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-4">
-                    <p className="text-sm font-bold text-slate-900">{m.nombre}</p>
-                    <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded mt-1 inline-block">{m.rol}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<EmpresaPanelApp />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<AppEcommerceSII />);
   </script>
 </body>
 </html>
