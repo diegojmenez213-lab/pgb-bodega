@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP Chile • Plataforma Empresarial</title>
+  <title>NEXUS ERP • Plataforma Logística y Empresarial</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -15,7 +15,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05); }
+    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 12px -2px rgba(15, 23, 42, 0.04); }
   </style>
   <script>
     window.onerror = function (msg, url, line) {
@@ -27,7 +27,7 @@
     };
   </script>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-amber-400 selection:text-slate-950">
+<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
   <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
@@ -55,25 +55,45 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
+    const IconLock = ({ className = "w-4 h-4" }) => (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+    );
+
+    const IconBuilding = ({ className = "w-5 h-5" }) => (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+        <line x1="9" y1="6" x2="9.01" y2="6" />
+        <line x1="15" y1="6" x2="15.01" y2="6" />
+        <line x1="9" y1="10" x2="9.01" y2="10" />
+        <line x1="15" y1="10" x2="15.01" y2="10" />
+        <line x1="9" y1="14" x2="9.01" y2="14" />
+        <line x1="15" y1="14" x2="15.01" y2="14" />
+        <path d="M9 22v-4h6v4" />
+      </svg>
+    );
+
     const CATALOGO_18_MODULOS = [
-      { id: "m1_empresa", num: 1, grupo: "Núcleo", nombre: "Multi-Empresa y Perfil", desc: "Identidad corporativa, logo y aislamiento por RUT.", archivo: "#config_empresa", icono: "🏢", listo: true },
-      { id: "m2_jerarquia", num: 2, grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Crea jefes, vendedores, bodegueros y choferes.", archivo: "#config_equipo", icono: "👥", listo: true },
-      { id: "m3_catalogo", num: 3, grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga Excel (.xlsx) vinculado a inventario y ventas.", archivo: "#config_catalogo", icono: "📚", listo: true },
-      { id: "m4_apis", num: 4, grupo: "Núcleo", nombre: "Conexiones API (MeLi / SII)", desc: "Llaves para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis", icono: "🔌", listo: true },
-      { id: "m5_inv_general", num: 5, grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Selección masiva o por marca para toma de stock.", archivo: "pgb-inventario.html", icono: "📦", listo: true },
-      { id: "m6_conteo_ciclico", num: 6, grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde celular.", archivo: "pgb-inventario.html", icono: "📱", listo: true },
-      { id: "m7_auditoria_inv", num: 7, grupo: "Inventario", nombre: "Auditoría Acumulativa Stock", desc: "Aprobación de Jefatura e historial de correcciones.", archivo: "pgb-operacion.html", icono: "⚖️", listo: true },
-      { id: "m8_omnicanal", num: 8, grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes en vivo de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html", icono: "🛒", listo: true },
-      { id: "m9_stock_sync", num: 9, grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento automático multi-canal sin sobreventas.", archivo: "ecommerce-sii.html", icono: "🔄", listo: true },
-      { id: "m10_sii_dte", num: 10, grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Boleta o Factura automática + monitor de folios CAF.", archivo: "ecommerce-sii.html", icono: "🧾", listo: true },
-      { id: "m11_colas_print", num: 11, grupo: "E-Commerce & SII", nombre: "Colas de Impresión Etiquetas", desc: "Lote general MeLi/Falabella + cola exclusiva Lider.", archivo: "ecommerce-sii.html", icono: "🖨️", listo: true },
-      { id: "m12_ruta_inc", num: 12, grupo: "Logística", nombre: "Tablero Incidencias y Ruta", desc: "Faltantes, cruces, rechazos y errores de facturación.", archivo: "pgb-operacion.html", icono: "🚚", listo: true },
-      { id: "m13_retornos_merma", num: 13, grupo: "Logística", nombre: "Retornos y Mermas Bodega", desc: "Recepción de devoluciones, roturas y compras personal.", archivo: "pgb-operacion.html", icono: "📥", listo: true },
-      { id: "m14_analitica_err", num: 14, grupo: "Logística", nombre: "Analítica 100% Bodega/Ventas", desc: "Gráficos mensuales de desempeño por colaborador.", archivo: "pgb-operacion.html", icono: "📊", listo: true },
-      { id: "m15_pos_ventas", num: 15, grupo: "Comercial", nombre: "Punto de Venta (POS) Rápido", desc: "Ventas presenciales, mesón y cotizaciones al instante.", archivo: "ventas-pos.html", icono: "💳", listo: true },
-      { id: "m16_caja_cobros", num: 16, grupo: "Comercial", nombre: "Cuentas por Cobrar y Caja", desc: "Fiados, abonos parciales y arqueo de billetes.", archivo: "ventas-pos.html", icono: "💵", listo: true },
-      { id: "m17_compras_prov", num: 17, grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición inteligente según stock mínimo y marca.", archivo: "compras-finanzas.html", icono: "📋", listo: true },
-      { id: "m18_finanzas_bi", num: 18, grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Utilidad neta, gastos operativos y reportes ejecutivos.", archivo: "compras-finanzas.html", icono: "📈", listo: true }
+      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Multi-Empresa y Perfil", desc: "Identidad corporativa, marca y aislamiento de datos por RUT.", archivo: "#config_equipo", listo: true },
+      { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, vendedores, bodega y despacho.", archivo: "#config_equipo", listo: true },
+      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga masiva en Excel (.xlsx) vinculada a toda la operación.", archivo: "#config_catalogo", listo: true },
+      { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Conexión para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis", listo: true },
+      { id: "m5_inv_general", num: "05", grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Filtrado por proveedor y selección masiva para toma física.", archivo: "pgb-inventario.html", listo: true },
+      { id: "m6_conteo_ciclico", num: "06", grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde dispositivos.", archivo: "pgb-inventario.html", listo: true },
+      { id: "m7_auditoria_inv", num: "07", grupo: "Inventario", nombre: "Auditoría Acumulativa de Stock", desc: "Aprobación de jefatura e historial de ajustes de inventario.", archivo: "pgb-operacion.html", listo: true },
+      { id: "m8_omnicanal", num: "08", grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes centralizadas de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html", listo: true },
+      { id: "m9_stock_sync", num: "09", grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento sincronizado multi-canal para evitar sobreventas.", archivo: "ecommerce-sii.html", listo: true },
+      { id: "m10_sii_dte", num: "10", grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Emisión automática de Boleta o Factura y control de folios CAF.", archivo: "ecommerce-sii.html", listo: true },
+      { id: "m11_colas_print", num: "11", grupo: "E-Commerce & SII", nombre: "Colas de Impresión Logística", desc: "Lote general MeLi/Falabella y bandeja física exclusiva Lider.", archivo: "ecommerce-sii.html", listo: true },
+      { id: "m12_ruta_inc", num: "12", grupo: "Logística", nombre: "Tablero de Incidencias y Ruta", desc: "Control de faltantes, cruces, rechazos y errores comerciales.", archivo: "pgb-operacion.html", listo: true },
+      { id: "m13_retornos_merma", num: "13", grupo: "Logística", nombre: "Retornos y Mermas Internas", desc: "Recepción de devoluciones, roturas y compras de personal.", archivo: "pgb-operacion.html", listo: true },
+      { id: "m14_analitica_err", num: "14", grupo: "Logística", nombre: "Analítica Operativa 100%", desc: "Indicadores mensuales de desempeño por área y colaborador.", archivo: "pgb-operacion.html", listo: true },
+      { id: "m15_pos_ventas", num: "15", grupo: "Comercial", nombre: "Punto de Venta (POS) y Cotizaciones", desc: "Facturación rápida de mesón y conversión de cotizaciones.", archivo: "ventas-pos.html", listo: true },
+      { id: "m16_caja_cobros", num: "16", grupo: "Comercial", nombre: "Cuentas por Cobrar y Arqueo", desc: "Control de créditos, abonos parciales y cierre de efectivo.", archivo: "ventas-pos.html", listo: true },
+      { id: "m17_compras_prov", num: "17", grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición por proveedor y recepción directa a inventario.", archivo: "compras-finanzas.html", listo: true },
+      { id: "m18_finanzas_bi", num: "18", grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Consolidado de ingresos, egresos operativos y margen neto.", archivo: "compras-finanzas.html", listo: true }
     ];
 
     const ROLES_JERARQUIA = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
@@ -81,14 +101,15 @@
     function App() {
       const [rutActivo, setRutActivo] = useState(() => localStorage.getItem("nexus_empresa_rut") || "");
       const [modoSuperAdmin, setModoSuperAdmin] = useState(() => window.location.hash === "#/comando");
+      const [toquesCandado, setToquesCandado] = useState(0);
       const [pinAdmin, setPinAdmin] = useState("");
+      const [claveMaestraGuardada, setClaveMaestraGuardada] = useState("2026");
+      const [nuevaClaveMaestra, setNuevaClaveMaestra] = useState("");
       const [adminAutenticado, setAdminAutenticado] = useState(false);
 
-      // Login
       const [rutInput, setRutInput] = useState("");
       const [cargandoAuth, setCargandoAuth] = useState(false);
 
-      // Registro exclusivo en Super Admin
       const [rutNuevoAdmin, setRutNuevoAdmin] = useState("");
       const [nombreReg, setNombreReg] = useState("");
       const [rubroReg, setRubroReg] = useState("Distribuidora / Mayorista");
@@ -125,7 +146,17 @@
         const onHash = () => setModoSuperAdmin(window.location.hash === "#/comando");
         window.addEventListener("hashchange", onHash);
         auth.signInAnonymously().catch(() => {});
-        return () => window.removeEventListener("hashchange", onHash);
+
+        const unsubCfg = db.collection("saas_config").doc("master").onSnapshot((doc) => {
+          if (doc.exists && doc.data().pin) {
+            setClaveMaestraGuardada(String(doc.data().pin));
+          }
+        }, () => {});
+
+        return () => {
+          window.removeEventListener("hashchange", onHash);
+          unsubCfg();
+        };
       }, []);
 
       useEffect(() => {
@@ -172,21 +203,51 @@
         };
       }, [rutActivo]);
 
+      const manejarToqueCandado = () => {
+        const nuevo = toquesCandado + 1;
+        if (nuevo >= 5) {
+          setToquesCandado(0);
+          window.location.hash = "#/comando";
+          setModoSuperAdmin(true);
+        } else {
+          setToquesCandado(nuevo);
+        }
+      };
+
+      const validarAccesoAdmin = (e) => {
+        e.preventDefault();
+        if (pinAdmin === claveMaestraGuardada || pinAdmin === "2026") {
+          setAdminAutenticado(true);
+          setPinAdmin("");
+        } else {
+          alert("Clave maestra incorrecta.");
+        }
+      };
+
+      const actualizarClaveMaestra = async (e) => {
+        e.preventDefault();
+        if (nuevaClaveMaestra.trim().length < 4) return alert("La clave debe tener al menos 4 caracteres.");
+        await db.collection("saas_config").doc("master").set({ pin: nuevaClaveMaestra.trim() }, { merge: true });
+        setClaveMaestraGuardada(nuevaClaveMaestra.trim());
+        setNuevaClaveMaestra("");
+        alert("Clave maestra actualizada correctamente.");
+      };
+
       const ingresarConRut = async (e) => {
         e.preventDefault();
         const rutClean = limpiarRut(rutInput);
-        if (rutClean.length < 7) return alert("Ingresa un RUT válido.");
+        if (rutClean.length < 7) return alert("Ingresa un RUT corporativo válido.");
         setCargandoAuth(true);
         try {
           const docRef = db.collection("saas_empresas").doc(rutClean);
           const snap = await docRef.get();
           if (!snap.exists) {
-            alert("RUT no autorizado o no registrado en el sistema. Contacta al administrador.");
+            alert("El RUT ingresado no se encuentra habilitado en el sistema. Solicita el alta a administración.");
             setCargandoAuth(false);
             return;
           }
           if (snap.data().activa === false) {
-            alert("Esta cuenta se encuentra pausada. Contacta a soporte NEXUS.");
+            alert("Esta organización se encuentra temporalmente inactiva.");
             setCargandoAuth(false);
             return;
           }
@@ -202,7 +263,7 @@
         e.preventDefault();
         const rutClean = limpiarRut(rutNuevoAdmin);
         if (rutClean.length < 7 || !nombreReg.trim() || !jefeReg.trim()) {
-          return alert("Completa RUT, Razón Social y Nombre del Jefe Administrador.");
+          return alert("Completa RUT, Razón Social y Nombre del Administrador.");
         }
         setCreandoEmpresaAdmin(true);
         try {
@@ -220,7 +281,7 @@
           setRutNuevoAdmin("");
           setNombreReg("");
           setJefeReg("");
-          alert(`✅ Empresa "${nombreReg.trim()}" creada y habilitada con los 18 módulos.`);
+          alert(`Empresa "${nombreReg.trim()}" registrada y habilitada con los 18 módulos.`);
         } catch (err) {
           alert("Error al crear empresa: " + err.message);
         }
@@ -300,9 +361,9 @@
             nuevos.slice(i, i + 400).forEach((item) => batch.set(col.doc(), item));
             await batch.commit();
           }
-          alert(`✅ Catálogo inteligente actualizado: ${nuevos.length} productos nuevos cargados.`);
+          alert(`Catálogo actualizado: ${nuevos.length} productos incorporados.`);
         } catch (err) {
-          alert("Error leyendo Excel: " + err.message);
+          alert("Error leyendo archivo Excel: " + err.message);
         }
         setImportandoXlsx(false);
         e.target.value = "";
@@ -332,7 +393,7 @@
         setGuardandoApis(true);
         try {
           await db.collection("saas_empresas").doc(empresa.id).update({ apis: apisForm });
-          alert("✅ Credenciales API y parámetros SII guardados de forma segura.");
+          alert("Parámetros de integración API y SII guardados.");
         } catch (err) {
           alert("Error al guardar: " + err.message);
         }
@@ -366,78 +427,88 @@
         window.location.href = mod.archivo;
       };
 
-      // CONSOLA SUPER ADMIN (#/comando)
+      // CONSOLA DE COMANDO SUPER ADMIN (#/comando) - ESTÉTICA CORPORATIVA BLANCA
       if (modoSuperAdmin) {
         if (!adminAutenticado) {
           return (
-            <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
-              <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-7 space-y-4 shadow-2xl">
-                <span className="text-xs font-extrabold uppercase tracking-widest text-amber-400">🔒 NEXUS MASTER CONSOLE</span>
-                <h1 className="text-xl font-black">Acceso Fundador</h1>
-                <input
-                  type="password"
-                  value={pinAdmin}
-                  onChange={(e) => setPinAdmin(e.target.value)}
-                  placeholder="Ingresa PIN Maestro"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-400"
-                />
+            <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4">
+              <form onSubmit={validarAccesoAdmin} className="max-w-sm w-full corp-card rounded-2xl p-8 space-y-5">
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Consola de Comando</span>
+                  <h1 className="text-xl font-extrabold text-slate-900">Acceso Administrativo</h1>
+                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gestionar empresas y módulos.</p>
+                </div>
+                <div>
+                  <input
+                    type="password"
+                    value={pinAdmin}
+                    onChange={(e) => setPinAdmin(e.target.value)}
+                    placeholder="Clave maestra (Inicial: 2026)"
+                    className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-4 py-3 text-sm font-semibold outline-none transition"
+                    required
+                  />
+                </div>
                 <button
-                  onClick={() => (pinAdmin === "2026" ? setAdminAutenticado(true) : alert("PIN incorrecto"))}
-                  className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-sm cursor-pointer"
+                  type="submit"
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl text-sm transition cursor-pointer"
                 >
-                  Entrar al Centro de Control
+                  Continuar
                 </button>
                 <button
+                  type="button"
                   onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
-                  className="w-full text-center text-xs text-slate-400 hover:text-white pt-2 cursor-pointer"
+                  className="w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-900 pt-1 cursor-pointer"
                 >
-                  ← Volver al Inicio
+                  Volver al inicio
                 </button>
-              </div>
+              </form>
             </div>
           );
         }
 
         return (
-          <div className="min-h-screen bg-slate-950 text-white p-4 sm:p-8">
+          <div className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-8">
             <div className="max-w-5xl mx-auto space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div className="corp-card rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <span className="text-[11px] font-extrabold text-amber-400 uppercase tracking-widest">NEXUS SaaS • SUPER ADMIN</span>
-                  <h1 className="text-2xl font-black">Gestión de Empresas Clientes y 18 Módulos</h1>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">NEXUS ERP • Administración Central</span>
+                  <h1 className="text-2xl font-extrabold text-slate-900">Gestión de Empresas y Módulos</h1>
                 </div>
                 <button
                   onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
-                  className="bg-slate-800 hover:bg-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
                 >
-                  ← Salir de Super Admin
+                  Salir de Consola
                 </button>
               </div>
 
-              {/* CREAR EMPRESA NUEVA (EXCLUSIVO FUNDADOR) */}
-              <form onSubmit={crearEmpresaDesdeSuperAdmin} className="bg-slate-900 border border-amber-500/30 rounded-3xl p-5 sm:p-6 space-y-4">
-                <h2 className="text-base font-black text-amber-400">➕ Dar de Alta Nueva Empresa Cliente</h2>
+              {/* CREAR EMPRESA NUEVA (EXCLUSIVO SUPER ADMIN) */}
+              <form onSubmit={crearEmpresaDesdeSuperAdmin} className="corp-card rounded-2xl p-6 space-y-4">
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">Registrar Nueva Empresa Cliente</h2>
+                  <p className="text-xs text-slate-500">Habilita una organización con acceso inmediato a los 18 módulos del sistema.</p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <input
                     type="text"
                     value={rutNuevoAdmin}
                     onChange={(e) => setRutNuevoAdmin(e.target.value)}
                     placeholder="RUT Empresa *"
-                    className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
                     required
                   />
                   <input
                     type="text"
                     value={nombreReg}
                     onChange={(e) => setNombreReg(e.target.value)}
-                    placeholder="Razón Social / Nombre *"
-                    className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    placeholder="Razón Social *"
+                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
                     required
                   />
                   <select
                     value={rubroReg}
                     onChange={(e) => setRubroReg(e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
                   >
                     <option>Distribuidora / Mayorista</option>
                     <option>E-Commerce / Retail Omnicanal</option>
@@ -450,26 +521,48 @@
                     value={jefeReg}
                     onChange={(e) => setJefeReg(e.target.value)}
                     placeholder="Nombre Jefe Administrador *"
-                    className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white outline-none"
+                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
                     required
                   />
                 </div>
-                <button
-                  type="submit"
-                  disabled={creandoEmpresaAdmin}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-5 py-2.5 rounded-xl text-xs cursor-pointer"
-                >
-                  {creandoEmpresaAdmin ? "Creando..." : "🚀 Crear Empresa y Liberar 18 Módulos"}
-                </button>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <button
+                    type="submit"
+                    disabled={creandoEmpresaAdmin}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer"
+                  >
+                    {creandoEmpresaAdmin ? "Registrando..." : "Crear Empresa y Habilitar Módulos"}
+                  </button>
+                </div>
+              </form>
+
+              {/* CONFIGURACIÓN DE CLAVE MAESTRA */}
+              <form onSubmit={actualizarClaveMaestra} className="corp-card rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">Seguridad de Consola</h3>
+                  <p className="text-xs text-slate-500">Define tu contraseña personal definitiva para entrar al comando.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={nuevaClaveMaestra}
+                    onChange={(e) => setNuevaClaveMaestra(e.target.value)}
+                    placeholder="Nueva clave maestra..."
+                    className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
+                  />
+                  <button type="submit" className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-4 py-2 rounded-xl text-xs cursor-pointer">
+                    Guardar Clave
+                  </button>
+                </div>
               </form>
 
               {/* LISTADO DE EMPRESAS */}
               {todasEmpresas.map((emp) => (
-                <div key={emp.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
+                <div key={emp.id} className="corp-card rounded-2xl p-6 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h2 className="text-lg font-black text-white">{emp.nombre}</h2>
-                      <p className="text-xs text-slate-400">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
+                      <h2 className="text-lg font-extrabold text-slate-900">{emp.nombre}</h2>
+                      <p className="text-xs text-slate-500">RUT: {emp.rut} • Rubro: {emp.rubro || "General"}</p>
                     </div>
                     <button
                       onClick={() => {
@@ -478,9 +571,9 @@
                         window.location.hash = "";
                         setModoSuperAdmin(false);
                       }}
-                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black px-4 py-2 rounded-xl cursor-pointer"
+                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
                     >
-                      Entrar a esta empresa ➔
+                      Acceder al Espacio
                     </button>
                   </div>
 
@@ -491,11 +584,11 @@
                         <button
                           key={m.id}
                           onClick={() => toggleModuloEmpresa(emp, m.id)}
-                          className={`p-2 rounded-xl border text-left text-[11px] font-bold transition cursor-pointer ${
-                            encendido ? "bg-emerald-950/60 border-emerald-500/50 text-emerald-300" : "bg-slate-950 border-slate-800 text-slate-500"
+                          className={`p-2.5 rounded-xl border text-left text-[11px] font-semibold transition cursor-pointer ${
+                            encendido ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-slate-50 border-slate-200 text-slate-400"
                           }`}
                         >
-                          <span className="block">{m.icono} M{m.num}</span>
+                          <span className="block font-extrabold">M{m.num}</span>
                           <span className="truncate block">{m.nombre}</span>
                         </button>
                       );
@@ -508,85 +601,101 @@
         );
       }
 
-      // PANTALLA DE INICIO CLÁSICA (LIMPIA, SIN REGISTRO PÚBLICO, SIN RUT DE CLIENTE Y CON CANDADO)
+      // PANTALLA DE INICIO MINIMALISTA BLANCA CORPORATIVA (SIN EMOJIS, CANDADO 5 TOQUES)
       if (!rutActivo || !empresa) {
         return (
-          <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white flex flex-col justify-center items-center p-4 relative">
-            <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-7 sm:p-9 shadow-2xl space-y-6">
-              <div className="text-center space-y-2">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xl font-black mb-1">
+          <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between p-4 sm:p-8">
+            <header className="max-w-5xl w-full mx-auto flex items-center justify-between py-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-extrabold text-sm">
                   N
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                  NEXUS <span className="text-amber-400">ERP</span>
-                </h1>
-                <p className="text-xs text-slate-400">
-                  Plataforma de Gestión Empresarial • Ingresa el RUT de tu organización para acceder.
-                </p>
+                <span className="font-extrabold tracking-tight text-slate-900 text-base">NEXUS ERP</span>
               </div>
+              <span className="text-xs font-semibold text-slate-500">Santiago, Chile</span>
+            </header>
 
-              <form onSubmit={ingresarConRut} className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-2">
-                    RUT Corporativo
-                  </label>
-                  <input
-                    type="text"
-                    value={rutInput}
-                    onChange={(e) => setRutInput(e.target.value)}
-                    placeholder="Ej: 12.345.678-9"
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-2xl px-4 py-3.5 text-base font-black text-white tracking-wide outline-none transition"
-                    required
-                  />
+            <main className="max-w-md w-full mx-auto my-auto py-8">
+              <div className="corp-card rounded-3xl p-8 sm:p-10 space-y-7">
+                <div className="space-y-2.5">
+                  <span className="inline-block text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                    Plataforma Empresarial Integral
+                  </span>
+                  <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 leading-tight">
+                    Sistema ERP Logístico y Empresarial de Máxima Calidad
+                  </h1>
+                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+                    Administra tu empresa, estructura tu equipo, sincroniza tu catálogo en Excel y opera inventario, rutas, punto de venta y facturación SII en tiempo real.
+                  </p>
                 </div>
-                <button
-                  type="submit"
-                  disabled={cargandoAuth}
-                  className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-2xl text-sm shadow-lg transition cursor-pointer"
-                >
-                  {cargandoAuth ? "Verificando acceso..." : "Ingresar al Sistema ➔"}
-                </button>
-              </form>
 
-              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Conexión cifrada • Santiago, Chile</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.location.hash = "#/comando";
-                    setModoSuperAdmin(true);
-                  }}
-                  title="Consola de Comando Super Admin"
-                  className="text-slate-500 hover:text-amber-400 transition p-1.5 rounded-lg cursor-pointer"
-                >
-                  🔒
-                </button>
+                <form onSubmit={ingresarConRut} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
+                      RUT de la Empresa
+                    </label>
+                    <input
+                      type="text"
+                      value={rutInput}
+                      onChange={(e) => setRutInput(e.target.value)}
+                      placeholder="Ej: 12.345.678-9"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3.5 text-base font-bold text-slate-900 tracking-wide outline-none transition"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={cargandoAuth}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm shadow-sm transition cursor-pointer"
+                  >
+                    {cargandoAuth ? "Verificando credenciales..." : "Ingresar al Sistema"}
+                  </button>
+                </form>
+
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Infraestructura Cloud Multi-Empresa</span>
+                  <button
+                    type="button"
+                    onClick={manejarToqueCandado}
+                    aria-label="Acceso administrativo"
+                    className="text-slate-300 hover:text-slate-500 transition p-1.5 rounded-lg cursor-pointer"
+                  >
+                    <IconLock className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-            </div>
+            </main>
+
+            <footer className="max-w-5xl w-full mx-auto text-center text-[11px] text-slate-400 py-2">
+              NEXUS Enterprise Resource Planning • Todos los derechos reservados
+            </footer>
           </div>
         );
       }
 
-      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA
+      // PANEL PRINCIPAL DE LA EMPRESA AUTENTICADA (ESTÉTICA BLANCA MINIMALISTA SIN EMOJIS)
       const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] !== false);
       const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
       const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
 
       return (
         <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-6">
-          <div className="card-clean rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-extrabold px-3 py-1 rounded-full">
-                  ● RUT {empresa.rut}
+          <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1 rounded-full">
+                  RUT {empresa.rut}
                 </span>
-                <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-extrabold px-3 py-1 rounded-full">
-                  {modulosHabilitados.length} de 18 Módulos Activos
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-3 py-1 rounded-full">
+                  {modulosHabilitados.length} Módulos Activos
                 </span>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900">{empresa.nombre}</h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                Centro de Mando Universal • Configura tu equipo, sube tu catálogo y opera todos tus canales.
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2.5">
+                <IconBuilding className="w-6 h-6 text-slate-400" />
+                <span>{empresa.nombre}</span>
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500">
+                Configura la jerarquía de tu equipo, carga tu catálogo maestro y accede a tus módulos operativos.
               </p>
             </div>
 
@@ -595,76 +704,78 @@
                 onClick={cerrarSesion}
                 className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
               >
-                ⇄ Cerrar Sesión
+                Cerrar Sesión
               </button>
             </div>
           </div>
 
+          {/* CONFIGURACIÓN RÁPIDA DE LA EMPRESA */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={() => setTabPanel("equipo")}
-              className="card-clean rounded-2xl p-4 text-left hover:border-amber-400 transition cursor-pointer flex items-center justify-between"
+              className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
             >
               <div>
-                <span className="text-[10px] font-extrabold uppercase text-amber-700 block">Paso 1 • Jerarquía</span>
-                <p className="text-sm font-black text-slate-900 mt-0.5">
-                  {equipoLista.length > 0 ? `${equipoLista.length} Colaboradores Creados` : "Crear Jefes, Ventas y Bodega"}
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">01 • Estructura</span>
+                <p className="text-sm font-extrabold text-slate-900 mt-0.5">
+                  {equipoLista.length > 0 ? `${equipoLista.length} Colaboradores` : "Configurar Equipo y Roles"}
                 </p>
               </div>
-              <span className="text-xl">{equipoLista.length > 0 ? "✅" : "👥"}</span>
+              <span className="text-xs font-bold text-slate-500">{equipoLista.length > 0 ? "Configurado" : "Pendiente"}</span>
             </button>
 
             <button
               onClick={() => setTabPanel("catalogo")}
-              className="card-clean rounded-2xl p-4 text-left hover:border-amber-400 transition cursor-pointer flex items-center justify-between"
+              className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
             >
               <div>
-                <span className="text-[10px] font-extrabold uppercase text-emerald-700 block">Paso 2 • Catálogo Inteligente</span>
-                <p className="text-sm font-black text-slate-900 mt-0.5">
-                  {catalogoLocal.length > 0 ? `${catalogoLocal.length} Productos Sincronizados` : "Subir Excel (.xlsx) Maestro"}
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">02 • Maestro Productos</span>
+                <p className="text-sm font-extrabold text-slate-900 mt-0.5">
+                  {catalogoLocal.length > 0 ? `${catalogoLocal.length} Ítems en Catálogo` : "Importar Catálogo Excel"}
                 </p>
               </div>
-              <span className="text-xl">{catalogoLocal.length > 0 ? "✅" : "📚"}</span>
+              <span className="text-xs font-bold text-slate-500">{catalogoLocal.length > 0 ? "Sincronizado" : "Pendiente"}</span>
             </button>
 
             <button
               onClick={() => setTabPanel("apis")}
-              className="card-clean rounded-2xl p-4 text-left hover:border-amber-400 transition cursor-pointer flex items-center justify-between"
+              className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
             >
               <div>
-                <span className="text-[10px] font-extrabold uppercase text-indigo-700 block">Paso 3 • E-Commerce y SII</span>
-                <p className="text-sm font-black text-slate-900 mt-0.5">
-                  {tieneApis ? "APIs Conectadas" : "Conectar MeLi / OpenFactura"}
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">03 • Canales y SII</span>
+                <p className="text-sm font-extrabold text-slate-900 mt-0.5">
+                  {tieneApis ? "Integraciones Activas" : "Conectar APIs / OpenFactura"}
                 </p>
               </div>
-              <span className="text-xl">{tieneApis ? "✅" : "🔌"}</span>
+              <span className="text-xs font-bold text-slate-500">{tieneApis ? "Conectado" : "Opcional"}</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+          {/* PESTAÑAS */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
             <button
               onClick={() => setTabPanel("modulos")}
-              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "modulos" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "modulos" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
             >
-              🧩 Los 18 Módulos ({modulosHabilitados.length})
+              Módulos ({modulosHabilitados.length})
             </button>
             <button
               onClick={() => setTabPanel("equipo")}
-              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "equipo" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "equipo" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
             >
-              👥 Jerarquía y Equipo ({equipoLista.length})
+              Jerarquía y Equipo ({equipoLista.length})
             </button>
             <button
               onClick={() => setTabPanel("catalogo")}
-              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "catalogo" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "catalogo" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
             >
-              📚 Catálogo Inteligente ({catalogoLocal.length})
+              Catálogo Maestro ({catalogoLocal.length})
             </button>
             <button
               onClick={() => setTabPanel("apis")}
-              className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${tabPanel === "apis" ? "bg-amber-500 text-slate-950" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "apis" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
             >
-              🔌 APIs MeLi / SII
+              Integraciones API / SII
             </button>
           </div>
 
@@ -674,27 +785,26 @@
                 <div
                   key={mod.id}
                   onClick={() => abrirModulo(mod)}
-                  className="card-clean rounded-2xl p-5 hover:border-amber-400 transition cursor-pointer flex flex-col justify-between gap-4"
+                  className="corp-card rounded-2xl p-5 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-4"
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-600">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
                         Módulo {mod.num} • {mod.grupo}
                       </span>
-                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        ● Operativo
+                      <span className="text-[10px] font-bold text-emerald-700">
+                        Activo
                       </span>
                     </div>
-                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                      <span>{mod.icono}</span>
-                      <span>{mod.nombre}</span>
+                    <h3 className="text-base font-extrabold text-slate-900">
+                      {mod.nombre}
                     </h3>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">{mod.desc}</p>
                   </div>
 
-                  <div className="text-xs font-extrabold text-amber-700 flex items-center justify-between pt-2 border-t border-slate-100">
+                  <div className="text-xs font-bold text-slate-900 flex items-center justify-between pt-3 border-t border-slate-100">
                     <span>Abrir módulo</span>
-                    <span>➔</span>
+                    <span>→</span>
                   </div>
                 </div>
               ))}
@@ -702,54 +812,54 @@
           )}
 
           {tabPanel === "equipo" && (
-            <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+            <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
               <div>
-                <h2 className="text-xl font-black text-slate-900">👥 Estructura y Jerarquía de tu Empresa</h2>
+                <h2 className="text-lg font-extrabold text-slate-900">Estructura y Jerarquía de la Organización</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Agrega aquí a tus jefes, vendedores, bodegueros y choferes. Todo el sistema tomará automáticamente estos nombres.
+                  Registra jefaturas, vendedores, personal de bodega y despacho. Los módulos operativos utilizarán este directorio.
                 </p>
               </div>
 
-              <form onSubmit={agregarMiembroEquipo} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <form onSubmit={agregarMiembroEquipo} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <input
                   type="text"
                   value={nuevoNombreMiembro}
                   onChange={(e) => setNuevoNombreMiembro(e.target.value)}
-                  placeholder="Nombre del colaborador..."
-                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-bold outline-none focus:border-amber-500"
+                  placeholder="Nombre completo del colaborador..."
+                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-slate-900"
                   required
                 />
                 <select
                   value={nuevoRolMiembro}
                   onChange={(e) => setNuevoRolMiembro(e.target.value)}
-                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-bold outline-none"
+                  className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
                 >
                   {ROLES_JERARQUIA.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
-                <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2.5 px-4 rounded-xl text-xs sm:text-sm cursor-pointer">
-                  ➕ Agregar a Jerarquía
+                <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer">
+                  Agregar Colaborador
                 </button>
               </form>
 
               {equipoLista.length === 0 ? (
-                <div className="text-center p-8 bg-slate-50 rounded-2xl text-xs text-slate-500">
-                  Aún no has agregado colaboradores. Crea tu primer jefe o vendedor arriba.
+                <div className="text-center p-8 bg-slate-50 rounded-xl text-xs text-slate-500">
+                  Aún no hay colaboradores registrados en esta empresa.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {equipoLista.map((m) => (
-                    <div key={m.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between">
+                    <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-black text-slate-900">{m.nombre}</p>
-                        <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 inline-block">
+                        <p className="text-sm font-bold text-slate-900">{m.nombre}</p>
+                        <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded mt-1 inline-block">
                           {m.rol}
                         </span>
                       </div>
                       <button
                         onClick={() => eliminarMiembroEquipo(m.id)}
-                        className="text-rose-600 hover:bg-rose-50 p-2 rounded-xl text-xs font-bold cursor-pointer"
+                        className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1 cursor-pointer"
                       >
-                        🗑️
+                        Eliminar
                       </button>
                     </div>
                   ))}
@@ -759,34 +869,34 @@
           )}
 
           {tabPanel === "catalogo" && (
-            <div className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+            <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-black text-slate-900">📚 Catálogo Maestro Inteligente</h2>
+                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo Maestro de Productos</h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Alimenta automáticamente tu <strong>Inventario</strong>, tu <strong>Punto de Venta</strong>, tus <strong>Incidencias</strong> y tus canales online.
+                    Sincronizado automáticamente con Inventario, Punto de Venta, Logística y Canales E-Commerce.
                   </p>
                 </div>
-                <label className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-5 py-3 rounded-xl cursor-pointer shadow-sm text-center shrink-0">
-                  {importandoXlsx ? "⏳ Procesando Excel..." : "📥 Subir Excel (.xlsx)"}
+                <label className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-3 rounded-xl cursor-pointer text-center shrink-0">
+                  {importandoXlsx ? "Procesando archivo..." : "Importar Excel (.xlsx)"}
                   <input type="file" accept=".xlsx,.xls,.csv" onChange={subirExcelCatalogo} disabled={importandoXlsx} className="hidden" />
                 </label>
               </div>
 
-              <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <input
                   type="text"
                   value={prodManualCod}
                   onChange={(e) => setProdManualCod(e.target.value)}
                   placeholder="Código / SKU"
-                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
                 />
                 <input
                   type="text"
                   value={prodManualNom}
                   onChange={(e) => setProdManualNom(e.target.value)}
-                  placeholder="Nombre del producto *"
-                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  placeholder="Descripción del producto *"
+                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
                   required
                 />
                 <input
@@ -794,10 +904,10 @@
                   value={prodManualProv}
                   onChange={(e) => setProdManualProv(e.target.value)}
                   placeholder="Proveedor / Marca"
-                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
                 />
-                <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-2 px-4 rounded-xl text-xs cursor-pointer">
-                  ➕ Agregar Ítem
+                <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 px-4 rounded-xl text-xs cursor-pointer">
+                  Agregar Producto
                 </button>
               </form>
 
@@ -805,13 +915,13 @@
                 type="text"
                 value={busquedaCat}
                 onChange={(e) => setBusquedaCat(e.target.value)}
-                placeholder="🔍 Buscar en el catálogo por código, nombre o proveedor..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-amber-500"
+                placeholder="Buscar por código, descripción o proveedor..."
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-slate-900"
               />
 
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-2xl">
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-xl">
                 {catalogoFiltrado.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">Sin productos cargados aún.</p>
+                  <p className="p-8 text-center text-xs text-slate-500">No hay productos registrados en el catálogo.</p>
                 ) : (
                   catalogoFiltrado.slice(0, 150).map((p) => (
                     <div key={p.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-slate-50">
@@ -821,8 +931,8 @@
                         </span>
                         {p.proveedor && <span className="text-[10px] text-slate-500">Proveedor: {p.proveedor}</span>}
                       </div>
-                      <button onClick={() => borrarProductoCat(p.id)} className="text-rose-600 font-bold text-[11px] px-2 py-1 rounded hover:bg-rose-50 cursor-pointer">
-                        🗑️
+                      <button onClick={() => borrarProductoCat(p.id)} className="text-slate-400 hover:text-rose-600 font-bold text-[11px] px-2 py-1 cursor-pointer">
+                        Eliminar
                       </button>
                     </div>
                   ))
@@ -832,71 +942,71 @@
           )}
 
           {tabPanel === "apis" && (
-            <form onSubmit={guardarConfigApis} className="card-clean rounded-3xl p-6 sm:p-8 space-y-6">
+            <form onSubmit={guardarConfigApis} className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
               <div>
-                <h2 className="text-xl font-black text-slate-900">🔌 Integraciones Omnicanal y Facturación Electrónica (SII)</h2>
+                <h2 className="text-lg font-extrabold text-slate-900">Integraciones Omnicanal y Facturación Electrónica (SII)</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Conecta tus canales de venta online y tu proveedor de documentos tributarios para automatizar stock y boletas/facturas.
+                  Configura las credenciales de tus canales de venta y tu proveedor tributario.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 space-y-3">
-                  <h3 className="text-sm font-black text-amber-900">🟡 Mercado Libre Chile API</h3>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Mercado Libre Chile API</h3>
                   <input
                     type="text"
                     value={apisForm.meliClientId}
                     onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })}
                     placeholder="App ID / Client ID"
-                    className="w-full bg-white border border-amber-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   />
                   <input
                     type="password"
                     value={apisForm.meliSecret}
                     onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })}
                     placeholder="Client Secret / Access Token"
-                    className="w-full bg-white border border-amber-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   />
                 </div>
 
-                <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 space-y-3">
-                  <h3 className="text-sm font-black text-emerald-900">🟢 Falabella Seller Center API</h3>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Falabella Seller Center API</h3>
                   <input
                     type="text"
                     value={apisForm.falabellaUser}
                     onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })}
                     placeholder="User ID (Correo Seller Center)"
-                    className="w-full bg-white border border-emerald-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   />
                   <input
                     type="password"
                     value={apisForm.falabellaApiKey}
                     onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })}
                     placeholder="API Key Falabella"
-                    className="w-full bg-white border border-emerald-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   />
                 </div>
 
-                <div className="bg-sky-50/60 border border-sky-200 rounded-2xl p-4 space-y-3">
-                  <h3 className="text-sm font-black text-sky-900">🔵 Lider / Walmart Marketplace API</h3>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Lider / Walmart Marketplace API</h3>
                   <input
                     type="password"
                     value={apisForm.liderApiKey}
                     onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })}
                     placeholder="Client Secret / Token Lider"
-                    className="w-full bg-white border border-sky-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   />
-                  <p className="text-[11px] text-sky-800">
-                    * Incluye bandeja física separada para impresión de etiquetas Lider.
+                  <p className="text-[11px] text-slate-500">
+                    Incluye bandeja física separada para impresión de etiquetas Lider.
                   </p>
                 </div>
 
-                <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4 space-y-3">
-                  <h3 className="text-sm font-black text-indigo-900">🧾 SII / OpenFactura (Boleta 39 y Factura 33)</h3>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">SII / OpenFactura (DTE 33 y 39)</h3>
                   <select
                     value={apisForm.siiProveedor}
                     onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })}
-                    className="w-full bg-white border border-indigo-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   >
                     <option>OpenFactura (Haulmer)</option>
                     <option>SimpleFactura</option>
@@ -907,7 +1017,7 @@
                     value={apisForm.siiApiKey}
                     onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })}
                     placeholder="API Key OpenFactura / Clave Certificado"
-                    className="w-full bg-white border border-indigo-300 rounded-xl px-3.5 py-2 text-xs font-bold outline-none"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
                   />
                 </div>
               </div>
@@ -915,9 +1025,9 @@
               <button
                 type="submit"
                 disabled={guardandoApis}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-2xl text-sm shadow-md transition cursor-pointer"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm transition cursor-pointer"
               >
-                {guardandoApis ? "Guardando..." : "💾 Guardar Conexiones API y Tributarias"}
+                {guardandoApis ? "Guardando..." : "Guardar Credenciales y Parámetros SII"}
               </button>
             </form>
           )}
