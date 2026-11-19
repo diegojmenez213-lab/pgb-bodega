@@ -98,7 +98,7 @@
           }
           const data = { id: doc.id, ...doc.data() };
           const m = data.modulosActivos || {};
-          if (!m.m12_ruta_inc && !m.m13_retornos_merma && !m.m14_analitica_err && !m.m7_auditoria_inv) {
+          if (!m.m12_ruta_inc && !m.m13_retornos_merma && !m.m14_analitica_err) {
             window.location.replace("empresa-panel.html");
             return;
           }
