@@ -3,7 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>NEXUS ERP • Operación Logística y Trazabilidad</title>
+  <script>
+    (function () {
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) window.location.replace("index.html");
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) window.location.replace("index.html");
+        else if (ev.persisted && rutActual !== rutInicial) window.location.reload();
+      });
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -14,14 +35,13 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
+<body class="min-h-screen">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -38,327 +58,166 @@
 
     const RUT_PGB = "769497226";
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
-    const formatearRut = (r) => {
-      const c = limpiarRut(r);
-      if (c.length < 2) return c;
-      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-      return `${cuerpo}-${c.slice(-1)}`;
+
+    const TEMAS = {
+      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
+      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
     };
 
-    const PALETAS = {
-      ejecutivo: { btn: "bg-slate-900 hover:bg-slate-800 text-white", tag: "bg-slate-100 text-slate-800", border: "border-slate-900" },
-      ecommerce: { btn: "bg-blue-700 hover:bg-blue-800 text-white", tag: "bg-blue-50 text-blue-800", border: "border-blue-700" },
-      logistica: { btn: "bg-emerald-700 hover:bg-emerald-800 text-white", tag: "bg-emerald-50 text-emerald-800", border: "border-emerald-700" },
-      industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700" }
-    };
-
-    function AppLogisticaAislada() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
+    function LogisticaRutasApp() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
       const [empresa, setEmpresa] = useState(null);
-      const [catalogo, setCatalogo] = useState([]);
-      const [incidencias, setIncidencias] = useState([]);
-      const [retornos, setRetornos] = useState([]);
-      const [historialInv, setHistorialInv] = useState([]);
-      const [tab, setTab] = useState("rutas");
+      const [registros, setRegistros] = useState([]);
+      const [tab, setTab] = useState("armado");
 
-      // Formulario Incidencias y Ruta
-      const [documentoRef, setDocumentoRef] = useState("");
-      const [clienteDestino, setClienteDestino] = useState("");
-      const [tipoNovedad, setTipoNovedad] = useState("Faltante en Despacho");
-      const [productoSel, setProductoSel] = useState("");
-      const [cantidadNovedad, setCantidadNovedad] = useState(1);
-      const [responsableSel, setResponsableSel] = useState("");
-
-      // Formulario Retornos y Mermas
-      const [motivoRetorno, setMotivoRetorno] = useState("Devolución de Cliente");
-      const [productoRetorno, setProductoRetorno] = useState("");
-      const [cantidadRetorno, setCantidadRetorno] = useState(1);
-      const [detalleRetorno, setDetalleRetorno] = useState("");
+      const [ordenDoc, setOrdenDoc] = useState("");
+      const [cliente, setCliente] = useState("");
+      const [motivo, setMotivo] = useState("Faltante en Despacho");
+      const [producto, setProducto] = useState("");
+      const [cantidad, setCantidad] = useState(1);
+      const [responsable, setResponsable] = useState("");
 
       useEffect(() => {
         if (!rutActivo) {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
-        // Si es PGB, redirige a su entorno dedicado sin cruzarse jamás con clientes externos
         if (rutActivo === RUT_PGB) {
-          window.location.href = "pgb-operacion.html";
+          window.location.replace("pgb-operacion.html");
           return;
         }
+        auth.signInAnonymously().catch(() => {});
+        const empRef = db.collection("saas_empresas").doc(rutActivo);
 
-        let unsubs = [];
-        const conectar = () => {
-          const empRef = db.collection("saas_empresas").doc(rutActivo);
+        const u1 = empRef.onSnapshot((doc) => {
+          if (!doc.exists) {
+            window.location.replace("index.html");
+            return;
+          }
+          const data = { id: doc.id, ...doc.data() };
+          const m = data.modulosActivos || {};
+          if (!m.m12_ruta_inc && !m.m13_retornos_merma && !m.m14_analitica_err && !m.m7_auditoria_inv) {
+            window.location.replace("empresa-panel.html");
+            return;
+          }
+          setEmpresa(data);
+        });
 
-          const u1 = empRef.onSnapshot((doc) => {
-            if (doc.exists) setEmpresa({ id: doc.id, ...doc.data() });
-          });
+        const u2 = empRef.collection("logistica_registros").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setRegistros(lista);
+        });
 
-          const u2 = empRef.collection("catalogo").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
-            setCatalogo(lista);
-          });
-
-          const u3 = empRef.collection("logistica_incidencias").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setIncidencias(lista);
-          });
-
-          const u4 = empRef.collection("logistica_retornos").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setRetornos(lista);
-          });
-
-          const u5 = empRef.collection("historial_inventario").onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setHistorialInv(lista);
-          });
-
-          unsubs = [u1, u2, u3, u4, u5];
-        };
-
-        auth.signInAnonymously().then(conectar).catch(conectar);
-        return () => unsubs.forEach((f) => typeof f === "function" && f());
+        return () => { u1(); u2(); };
       }, [rutActivo]);
 
-      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
-
-      const registrarIncidencia = async (e) => {
+      const guardarRegistro = async (e) => {
         e.preventDefault();
-        const prodObj = catalogo.find((p) => p.id === productoSel);
-        const prodNombre = prodObj ? `${prodObj.codigo ? `[${prodObj.codigo}] ` : ""}${prodObj.nombre}` : productoSel;
-
-        await empRef().collection("logistica_incidencias").add({
-          documento: documentoRef.trim() || "S/N",
-          cliente: clienteDestino.trim(),
-          tipo: tipoNovedad,
-          producto: prodNombre,
-          cantidad: Number(cantidadNovedad),
-          responsable: responsableSel.trim() || "Operación",
+        if (!cliente.trim() || !producto.trim()) return;
+        await db.collection("saas_empresas").doc(rutActivo).collection("logistica_registros").add({
+          tipo: tab,
+          ordenDoc: ordenDoc.trim(),
+          cliente: cliente.trim(),
+          motivo,
+          producto: producto.trim().toUpperCase(),
+          cantidad: Number(cantidad),
+          responsable: responsable.trim(),
           resuelto: false,
           fecha: new Date().toLocaleString("es-CL"),
           timestamp: Date.now()
         });
-
-        setDocumentoRef("");
-        setClienteDestino("");
-        setProductoSel("");
-        setCantidadNovedad(1);
+        setOrdenDoc("");
+        setCliente("");
+        setProducto("");
+        setCantidad(1);
       };
 
-      const toggleResuelto = async (item) => {
-        await empRef().collection("logistica_incidencias").doc(item.id).update({ resuelto: !item.resuelto });
-      };
+      if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Verificando permisos de módulo...</div>;
 
-      const registrarRetorno = async (e) => {
-        e.preventDefault();
-        const prodObj = catalogo.find((p) => p.id === productoRetorno);
-        const prodNombre = prodObj ? `${prodObj.codigo ? `[${prodObj.codigo}] ` : ""}${prodObj.nombre}` : productoRetorno;
-
-        await empRef().collection("logistica_retornos").add({
-          motivo: motivoRetorno,
-          producto: prodNombre,
-          cantidad: Number(cantidadRetorno),
-          detalle: detalleRetorno.trim(),
-          fecha: new Date().toLocaleString("es-CL"),
-          timestamp: Date.now()
-        });
-
-        setProductoRetorno("");
-        setCantidadRetorno(1);
-        setDetalleRetorno("");
-      };
-
-      const tema = PALETAS[empresa?.paleta || "ejecutivo"] || PALETAS.ejecutivo;
-      const equipo = Array.isArray(empresa?.equipo) ? empresa.equipo : [];
-      const pendientesCount = incidencias.filter((i) => !i.resuelto).length;
+      const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
+      const mods = empresa.modulosActivos || {};
+      const habilitaMermas = Boolean(mods.m13_retornos_merma);
+      const filtrados = registros.filter((r) => r.tipo === tab);
 
       return (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5">
-          {/* CABECERA EXCLUSIVA DE LA EMPRESA ACTIVA */}
-          <div className={`corp-card rounded-2xl p-6 sm:p-7 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
-            <div className="flex items-center gap-4">
-              {empresa?.logoBase64 && (
-                <div className="w-20 h-14 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
-                  <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
-                </div>
-              )}
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <a href="empresa-panel.html" className={`text-xs font-bold px-3.5 py-1 rounded-lg ${tema.btn}`}>
-                    Volver
-                  </a>
-                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tema.tag}`}>
-                    {empresa?.nombre || "Empresa"} • {empresa?.rut || formatearRut(rutActivo)}
-                  </span>
-                </div>
-                <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">Operación Logística, Rutas y Trazabilidad</h1>
-                <p className="text-xs text-slate-500 mt-0.5">Control de armado, incidencias de despacho, devoluciones y auditoría de movimientos.</p>
+        <div className={`min-h-screen pb-20 ${T.page}`}>
+          <div className="max-w-4xl mx-auto px-4 pt-5 space-y-4">
+            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <button onClick={() => window.location.replace("empresa-panel.html")} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
+                  Volver
+                </button>
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${T.tag}`}>{empresa.nombre} • {empresa.rut}</span>
               </div>
+              <h1 className={`text-xl font-extrabold ${T.main}`}>Operación Logística, Rutas y Trazabilidad</h1>
             </div>
-          </div>
 
-          {/* KPI COMPACTOS */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Incidencias Abiertas</span>
-              <p className="text-xl font-extrabold text-amber-600 mt-1">{pendientesCount}</p>
+            <div className={`${T.card} rounded-2xl p-1.5 grid ${habilitaMermas ? "grid-cols-3" : "grid-cols-2"} gap-1.5`}>
+              <button onClick={() => setTab("armado")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "armado" ? T.btn : T.sec}`}>
+                1. Armado y Ruta
+              </button>
+              {habilitaMermas && (
+                <button onClick={() => setTab("retornos")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "retornos" ? T.btn : T.sec}`}>
+                  2. Retornos y Mermas
+                </button>
+              )}
+              <button onClick={() => setTab("auditoria")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "auditoria" ? T.btn : T.sec}`}>
+                Auditoría ({registros.length})
+              </button>
             </div>
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Retornos / Mermas</span>
-              <p className="text-xl font-extrabold text-slate-900 mt-1">{retornos.length}</p>
-            </div>
-            <div className="corp-card rounded-2xl p-4">
-              <span className="text-[10px] font-bold uppercase text-slate-400">Ajustes Auditados</span>
-              <p className="text-xl font-extrabold text-emerald-700 mt-1">{historialInv.length}</p>
-            </div>
-          </div>
 
-          {/* NAVEGACIÓN */}
-          <div className="grid grid-cols-3 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-            <button onClick={() => setTab("rutas")} className={`py-2.5 px-2 rounded-xl text-xs font-bold cursor-pointer ${tab === "rutas" ? tema.btn : "text-slate-600"}`}>
-              1. Armado y Ruta ({incidencias.length})
-            </button>
-            <button onClick={() => setTab("retornos")} className={`py-2.5 px-2 rounded-xl text-xs font-bold cursor-pointer ${tab === "retornos" ? tema.btn : "text-slate-600"}`}>
-              2. Retornos y Mermas ({retornos.length})
-            </button>
-            <button onClick={() => setTab("auditoria")} className={`py-2.5 px-2 rounded-xl text-xs font-bold cursor-pointer ${tab === "auditoria" ? tema.btn : "text-slate-600"}`}>
-              3. Auditoría ({historialInv.length})
-            </button>
-          </div>
-
-          {/* PESTAÑA 1: INCIDENCIAS DE ARMADO Y DESPACHO */}
-          {tab === "rutas" && (
-            <div className="space-y-4">
-              <form onSubmit={registrarIncidencia} className="corp-card rounded-2xl p-5 space-y-3">
-                <h2 className="text-sm font-extrabold text-slate-900">Registrar Novedad en Preparación o Despacho</h2>
+            {tab !== "auditoria" && (
+              <form onSubmit={guardarRegistro} className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                <h2 className={`text-sm font-extrabold ${T.main}`}>
+                  {tab === "armado" ? "Registrar Novedad en Preparación o Despacho" : "Registrar Retorno o Merma"}
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input type="text" value={ordenDoc} onChange={(e) => setOrdenDoc(e.target.value)} placeholder="N° Orden / Factura / Guía" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} />
+                  <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Cliente / Destino *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                </div>
+                <select value={motivo} onChange={(e) => setMotivo(e.target.value)} className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}>
+                  <option>Faltante en Despacho</option>
+                  <option>Sobrante / Cruce de Producto</option>
+                  <option>Rechazo en Entrega</option>
+                  <option>Error de Etiquetado</option>
+                </select>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <input type="text" value={documentoRef} onChange={(e) => setDocumentoRef(e.target.value)} placeholder="N° Orden / Factura / Guía" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                  <input type="text" value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)} placeholder="Cliente / Destino *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                  <select value={tipoNovedad} onChange={(e) => setTipoNovedad(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold">
-                    <option>Faltante en Despacho</option>
-                    <option>Sobrante / Cruce de Producto</option>
-                    <option>Rechazo en Entrega</option>
-                    <option>Error de Etiquetado</option>
-                  </select>
+                  <input type="text" value={producto} onChange={(e) => setProducto(e.target.value)} placeholder="Producto afectado *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                  <input type="number" min="1" value={cantidad} onChange={(e) => setCantidad(e.target.value)} className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                  <input type="text" value={responsable} onChange={(e) => setResponsable(e.target.value)} placeholder="Responsable" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div className="sm:col-span-2">
-                    {catalogo.length > 0 ? (
-                      <select value={productoSel} onChange={(e) => setProductoSel(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required>
-                        <option value="">-- Selecciona producto del catálogo --</option>
-                        {catalogo.map((p) => (
-                          <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input type="text" value={productoSel} onChange={(e) => setProductoSel(e.target.value)} placeholder="Producto afectado *" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                    )}
-                  </div>
-                  <input type="number" min="1" value={cantidadNovedad} onChange={(e) => setCantidadNovedad(e.target.value)} placeholder="Cant." className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                  {equipo.length > 0 ? (
-                    <select value={responsableSel} onChange={(e) => setResponsableSel(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold">
-                      <option value="">Responsable...</option>
-                      {equipo.map((m) => <option key={m.id} value={m.nombre}>{m.nombre}</option>)}
-                    </select>
-                  ) : (
-                    <input type="text" value={responsableSel} onChange={(e) => setResponsableSel(e.target.value)} placeholder="Responsable" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                  )}
-                </div>
-                <button type="submit" className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
                   Guardar Registro Logístico
                 </button>
               </form>
+            )}
 
-              <div className="corp-card rounded-2xl p-5 space-y-2.5">
-                {incidencias.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">Sin incidencias registradas en esta organización.</p>
-                ) : (
-                  incidencias.map((inc) => (
-                    <div key={inc.id} className="p-4 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div>
-                        <span className={`font-bold px-2 py-0.5 rounded mr-2 ${tema.tag}`}>{inc.tipo}</span>
-                        <strong className="text-slate-900">{inc.cantidad}x {inc.producto}</strong>
-                        <span className="block text-[11px] text-slate-500 mt-0.5">
-                          Doc: #{inc.documento} • Cliente: {inc.cliente} • Resp: {inc.responsable} • {inc.fecha}
-                        </span>
-                      </div>
-                      <button onClick={() => toggleResuelto(inc)} className={`font-bold px-3.5 py-1.5 rounded-xl cursor-pointer ${inc.resuelto ? "bg-emerald-700 text-white" : tema.btn}`}>
-                        {inc.resuelto ? "Resuelto" : "Marcar Resuelto"}
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* PESTAÑA 2: RETORNOS Y MERMAS */}
-          {tab === "retornos" && (
-            <div className="space-y-4">
-              <form onSubmit={registrarRetorno} className="corp-card rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <select value={motivoRetorno} onChange={(e) => setMotivoRetorno(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold">
-                  <option>Devolución de Cliente</option>
-                  <option>Merma / Producto Dañado</option>
-                  <option>Reingreso a Bodega</option>
-                </select>
-                {catalogo.length > 0 ? (
-                  <select value={productoRetorno} onChange={(e) => setProductoRetorno(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required>
-                    <option value="">-- Producto --</option>
-                    {catalogo.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                  </select>
-                ) : (
-                  <input type="text" value={productoRetorno} onChange={(e) => setProductoRetorno(e.target.value)} placeholder="Producto *" className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
-                )}
-                <input type="number" min="1" value={cantidadRetorno} onChange={(e) => setCantidadRetorno(e.target.value)} placeholder="Cant." className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required />
-                <button type="submit" className={`font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>Registrar</button>
-              </form>
-
-              <div className="corp-card rounded-2xl p-5 space-y-2">
-                {retornos.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">Sin retornos ni mermas registradas.</p>
-                ) : (
-                  retornos.map((r) => (
-                    <div key={r.id} className="p-3.5 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
-                      <div>
-                        <span className={`font-bold px-2 py-0.5 rounded mr-2 ${tema.tag}`}>{r.motivo}</span>
-                        <strong className="text-slate-900">{r.cantidad}x {r.producto}</strong>
-                      </div>
-                      <span className="text-slate-400">{r.fecha}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* PESTAÑA 3: AUDITORÍA DE MOVIMIENTOS */}
-          {tab === "auditoria" && (
-            <div className="corp-card rounded-2xl p-5 space-y-2.5">
-              {historialInv.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-6">Aún no hay ajustes de auditoría registrados.</p>
-              ) : (
-                historialInv.map((h) => (
-                  <div key={h.id} className="p-3.5 border border-slate-200 rounded-xl text-xs space-y-1">
-                    <div className="flex justify-between font-bold text-slate-900">
-                      <span>{h.producto}</span>
-                      <span className="text-slate-500">{h.fechaHora}</span>
-                    </div>
-                    <p className="text-slate-600">{h.detalle}</p>
+            <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
+              <h3 className={`text-sm font-extrabold ${T.main}`}>Registros ({tab === "auditoria" ? registros.length : filtrados.length})</h3>
+              {(tab === "auditoria" ? registros : filtrados).map((r) => (
+                <div key={r.id} className="py-2.5 border-b border-slate-200/30 flex items-center justify-between text-xs">
+                  <div>
+                    <span className={`font-extrabold ${T.main}`}>{r.motivo} • {r.cliente}</span>
+                    <span className={`block text-[11px] ${T.sub}`}>{r.cantidad}x {r.producto} • {r.fecha}</span>
                   </div>
-                ))
-              )}
+                  <button
+                    onClick={() => db.collection("saas_empresas").doc(rutActivo).collection("logistica_registros").doc(r.id).update({ resuelto: !r.resuelto })}
+                    className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${r.resuelto ? "bg-emerald-600 text-white" : T.sec}`}
+                  >
+                    {r.resuelto ? "Resuelto" : "Pendiente"}
+                  </button>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<AppLogisticaAislada />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<LogisticaRutasApp />);
   </script>
 </body>
 </html>
