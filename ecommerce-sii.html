@@ -312,7 +312,6 @@
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
 
-      // Arranca por defecto en modo Manual (siiModoAutomatico: false) para pruebas seguras antes de activar piloto automático
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
         meliSecret: "",
@@ -343,6 +342,8 @@
       const [tab, setTab] = useState("ordenes");
       const [filtroCanal, setFiltroCanal] = useState("TODOS");
       const [busqueda, setBusqueda] = useState("");
+      const [busquedaImpresas, setBusquedaImpresas] = useState("");
+      const [mostrarHistorialImpresas, setMostrarHistorialImpresas] = useState(false);
       const [seleccionLoteIds, setSeleccionLoteIds] = useState([]);
       const [loteParaImprimir, setLoteParaImprimir] = useState([]);
       const [dteVisualizando, setDteVisualizando] = useState(null);
@@ -460,7 +461,6 @@
         const esRealSii = Boolean(estadoConexiones.sii);
         const ahora = Date.now();
 
-        // Piloto automático: timbra al instante en SII/OpenFactura, envía al cliente en MeLi/Falabella, y deja Lider listo para impresión física
         const nuevaOrden = {
           canal: canalNuevo,
           ordenExterna: ordenExtNuevo.trim() || `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
@@ -530,6 +530,30 @@
         alert("Datos tributarios guardados.");
       };
 
+      // Solo documentos SIN IMPRIMIR ordenados cronológicamente (primero el que llegó primero)
+      const ordenesSinImprimirCronologicas = useMemo(() => {
+        return ordenes
+          .filter((o) => !o.etiquetaImpresa)
+          .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      }, [ordenes]);
+
+      // Documentos YA IMPRESOS separados en su propio historial
+      const ordenesYaImpresas = useMemo(() => {
+        const q = busquedaImpresas.trim().toLowerCase();
+        return ordenes
+          .filter((o) => Boolean(o.etiquetaImpresa))
+          .filter((o) => {
+            if (!q) return true;
+            return (
+              String(o.folioSii || "").includes(q) ||
+              (o.comprador || "").toLowerCase().includes(q) ||
+              (o.ordenExterna || "").toLowerCase().includes(q) ||
+              (o.productoNombre || "").toLowerCase().includes(q)
+            );
+          })
+          .sort((a, b) => (b.fechaImpresionTs || b.timestamp || 0) - (a.fechaImpresionTs || a.timestamp || 0));
+      }, [ordenes, busquedaImpresas]);
+
       const toggleSeleccionLote = (id) => {
         setSeleccionLoteIds((prev) =>
           prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
@@ -537,24 +561,28 @@
       };
 
       const seleccionarTodosPendientesLote = () => {
-        const pendientes = ordenes.filter((o) => !o.etiquetaImpresa).map((o) => o.id);
-        setSeleccionLoteIds(pendientes);
+        setSeleccionLoteIds(ordenesSinImprimirCronologicas.map((o) => o.id));
       };
 
       const generarEImprimirLotePdf = () => {
         if (seleccionLoteIds.length === 0) {
           return alert("Selecciona al menos una factura o boleta de la lista para generar el lote.");
         }
-        const seleccionadosOrdenados = ordenes
-          .filter((o) => seleccionLoteIds.includes(o.id))
-          .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        const seleccionadosOrdenados = ordenesSinImprimirCronologicas.filter((o) => seleccionLoteIds.includes(o.id));
+        if (seleccionadosOrdenados.length === 0) return;
 
         setLoteParaImprimir(seleccionadosOrdenados);
         setTimeout(async () => {
           window.print();
           const batch = db.batch();
+          const ahoraStr = new Date().toLocaleString("es-CL");
+          const ahoraTs = Date.now();
           seleccionadosOrdenados.forEach((o) => {
-            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), { etiquetaImpresa: true });
+            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
+              etiquetaImpresa: true,
+              fechaImpresion: ahoraStr,
+              fechaImpresionTs: ahoraTs
+            });
           });
           await batch.commit();
           setLoteParaImprimir([]);
@@ -566,18 +594,9 @@
         await empRef().collection("ecommerce_ordenes").doc(id).update({ despachado: !actual });
       };
 
-      const ordenesCronologicas = useMemo(() => {
-        return [...ordenes].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-      }, [ordenes]);
-
-      const pendientesImpresionCount = useMemo(
-        () => ordenes.filter((o) => !o.etiquetaImpresa).length,
-        [ordenes]
-      );
-
       const liderPendientesImpresion = useMemo(
-        () => ordenes.filter((o) => o.canal === "Lider" && !o.etiquetaImpresa),
-        [ordenes]
+        () => ordenesSinImprimirCronologicas.filter((o) => o.canal === "Lider"),
+        [ordenesSinImprimirCronologicas]
       );
 
       const ordenesFiltradas = useMemo(() => {
@@ -641,11 +660,16 @@
                   <button
                     onClick={async () => {
                       window.print();
-                      await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({ etiquetaImpresa: true });
+                      await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({
+                        etiquetaImpresa: true,
+                        fechaImpresion: new Date().toLocaleString("es-CL"),
+                        fechaImpresionTs: Date.now()
+                      });
+                      setSeleccionLoteIds((prev) => prev.filter((id) => id !== dteVisualizando.id));
                     }}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}
                   >
-                    Imprimir / Guardar PDF
+                    {dteVisualizando.etiquetaImpresa ? "Volver a Imprimir / Guardar PDF" : "Imprimir y Mover a Historial de Impresas"}
                   </button>
                   {dteVisualizando.esSimulacion !== false && (
                     <button
@@ -691,7 +715,6 @@
           )}
 
           <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
-            {/* CABECERA CON INTERRUPTOR VISIBLE DE PILOTO AUTOMÁTICO */}
             <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
                 {empresa?.logoBase64 && (
@@ -734,7 +757,6 @@
               </div>
             </div>
 
-            {/* BANDEJA SEPARADA PARA LIDER (TIMBRADAS Y PENDIENTES DE IMPRESIÓN FÍSICA) */}
             {liderPendientesImpresion.length > 0 && (
               <div className="corp-card rounded-2xl p-4 border-2 border-slate-900 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -841,7 +863,7 @@
                 1. Ventas y DTE ({ordenes.length})
               </button>
               <button onClick={() => setTab("impresion")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "impresion" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-                2. Lotes PDF ({pendientesImpresionCount})
+                2. Lotes PDF ({ordenesSinImprimirCronologicas.length})
               </button>
               <button onClick={() => setTab("stock")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "stock" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
                 3. Stock & Emisor SII
@@ -921,6 +943,11 @@
                                 Enviada a {o.canal}
                               </span>
                             )}
+                            {o.etiquetaImpresa && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                                Ya Impresa
+                              </span>
+                            )}
                           </div>
 
                           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
@@ -941,7 +968,7 @@
                                 onClick={() => setDteVisualizando(o)}
                                 className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${tema.btn}`}
                               >
-                                Ver / Imprimir {o.tipoDte === 33 ? "Factura" : "Boleta"}
+                                {o.etiquetaImpresa ? "Reimprimir" : `Imprimir ${o.tipoDte === 33 ? "Factura" : "Boleta"}`}
                               </button>
 
                               {esSimulada && (
@@ -971,106 +998,171 @@
               </div>
             )}
 
+            {/* PESTAÑA 2: LOTES PDF (SOLO NUEVAS SIN IMPRIMIR + HISTORIAL SEPARADO DE YA IMPRESAS) */}
             {tab === "impresion" && (
-              <div className="corp-card rounded-2xl p-6 space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                  <div>
-                    <h2 className="text-base font-extrabold text-slate-900">Generador de Lote PDF (Una Hoja por Documento)</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Todas las boletas y facturas ya están timbradas en el SII. Marca las que desees imprimir en físico y se unirán en <strong>un solo PDF</strong> ordenado cronológicamente (primero la que llegó primero).
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={seleccionarTodosPendientesLote}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer"
-                    >
-                      Marcar No Impresas ({pendientesImpresionCount})
-                    </button>
-                    {seleccionLoteIds.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setSeleccionLoteIds([])}
-                        className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2.5 py-2.5 cursor-pointer"
-                      >
-                        Limpiar
-                      </button>
+              <div className="space-y-5">
+                <div className="corp-card rounded-2xl p-6 space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <h2 className="text-base font-extrabold text-slate-900">
+                        Cola de Lote PDF — Documentos Nuevos ({ordenesSinImprimirCronologicas.length})
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Aquí solo aparecen las facturas y boletas timbradas que <strong>aún no se han impreso</strong>, ordenadas por hora de llegada (primero la más antigua). Al imprimirlas pasan automáticamente al historial de abajo para nunca repetir.
+                      </p>
+                    </div>
+                    {ordenesSinImprimirCronologicas.length > 0 && (
+                      <div className="flex flex-wrap gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={seleccionarTodosPendientesLote}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer"
+                        >
+                          Seleccionar Todas ({ordenesSinImprimirCronologicas.length})
+                        </button>
+                        {seleccionLoteIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSeleccionLoteIds([])}
+                            className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2.5 py-2.5 cursor-pointer"
+                          >
+                            Limpiar
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
-                </div>
 
-                {ordenesCronologicas.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-8 bg-slate-50 rounded-xl">
-                    No hay facturas ni boletas disponibles para formar lote todavía.
-                  </p>
-                ) : (
-                  <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl overflow-hidden">
-                    {ordenesCronologicas.map((o, index) => {
-                      const marcado = seleccionLoteIds.includes(o.id);
-                      const horaTexto = o.horaCorta || (o.timestamp ? new Date(o.timestamp).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) : "");
-                      return (
-                        <div
-                          key={o.id}
-                          onClick={() => toggleSeleccionLote(o.id)}
-                          className={`p-4 flex items-center justify-between gap-3 cursor-pointer transition ${
-                            marcado ? "bg-slate-100/90" : "bg-white hover:bg-slate-50"
-                          }`}
-                        >
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={marcado}
-                              onChange={() => {}}
-                              className="w-4 h-4 rounded border-slate-400 cursor-pointer shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-xs font-extrabold text-slate-900">
-                                  {o.tipoDte === 33 ? `Factura Electrónica N° ${o.folioSii}` : `Boleta Electrónica N° ${o.folioSii}`}
-                                </span>
-                                <span className="text-[11px] font-bold text-slate-500">
-                                  • Hora: {horaTexto}
-                                </span>
-                                {o.canal === "Lider" && (
-                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-900 text-white">Físico Lider</span>
-                                )}
-                                {o.etiquetaImpresa ? (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Impresa</span>
-                                ) : (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Sin Imprimir</span>
-                                )}
+                  {ordenesSinImprimirCronologicas.length === 0 ? (
+                    <div className="text-center py-8 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                      <p className="text-xs font-extrabold text-slate-800">No hay facturas nuevas pendientes por imprimir</p>
+                      <p className="text-[11px] text-slate-500">Todas las boletas y facturas emitidas ya fueron impresas y archivadas en el historial inferior.</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl overflow-hidden">
+                      {ordenesSinImprimirCronologicas.map((o, index) => {
+                        const marcado = seleccionLoteIds.includes(o.id);
+                        const horaTexto = o.horaCorta || (o.timestamp ? new Date(o.timestamp).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) : "");
+                        return (
+                          <div
+                            key={o.id}
+                            onClick={() => toggleSeleccionLote(o.id)}
+                            className={`p-4 flex items-center justify-between gap-3 cursor-pointer transition ${
+                              marcado ? "bg-slate-100/90" : "bg-white hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3.5 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={marcado}
+                                onChange={() => {}}
+                                className="w-4 h-4 rounded border-slate-400 cursor-pointer shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-extrabold text-slate-900">
+                                    {o.tipoDte === 33 ? `Factura Electrónica N° ${o.folioSii}` : `Boleta Electrónica N° ${o.folioSii}`}
+                                  </span>
+                                  <span className="text-[11px] font-bold text-slate-500">
+                                    • Hora: {horaTexto}
+                                  </span>
+                                  {o.canal === "Lider" && (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-900 text-white">Físico Lider</span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-600 truncate mt-0.5">
+                                  {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""} — {o.cantidad}x {o.productoNombre}
+                                </p>
                               </div>
-                              <p className="text-xs text-slate-600 truncate mt-0.5">
-                                {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""} — {o.cantidad}x {o.productoNombre}
-                              </p>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-extrabold text-slate-900 block">
+                                ${Number(o.totalClp || 0).toLocaleString("es-CL")}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-400">
+                                Orden #{index + 1}
+                              </span>
                             </div>
                           </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
-                          <div className="text-right shrink-0">
-                            <span className="text-xs font-extrabold text-slate-900 block">
-                              ${Number(o.totalClp || 0).toLocaleString("es-CL")}
-                            </span>
-                            <span className="text-[10px] font-bold text-slate-400">
-                              Orden #{index + 1}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  {ordenesSinImprimirCronologicas.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={generarEImprimirLotePdf}
+                      disabled={seleccionLoteIds.length === 0}
+                      className={`w-full font-extrabold py-4 rounded-2xl text-xs transition cursor-pointer ${
+                        seleccionLoteIds.length > 0 ? tema.btn : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      }`}
+                    >
+                      Imprimir Lote PDF y Archivar como Impresas ({seleccionLoteIds.length} {seleccionLoteIds.length === 1 ? "hoja" : "hojas"})
+                    </button>
+                  )}
+                </div>
+
+                {/* HISTORIAL SEPARADO DE FACTURAS Y BOLETAS YA IMPRESAS (PARA REIMPRESIÓN MANUAL SI LO DESEA) */}
+                <div className="corp-card rounded-2xl p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-900">
+                        Historial de Documentos Ya Impresos ({ordenesYaImpresas.length})
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Ya salieron de la cola de lotes para evitar duplicados. Si necesitas reimprimir alguna, búscala aquí.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMostrarHistorialImpresas(!mostrarHistorialImpresas)}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-4 py-2 rounded-xl cursor-pointer shrink-0"
+                    >
+                      {mostrarHistorialImpresas ? "Ocultar Historial" : `Ver Historial (${ordenesYaImpresas.length})`}
+                    </button>
                   </div>
-                )}
 
-                <button
-                  type="button"
-                  onClick={generarEImprimirLotePdf}
-                  disabled={seleccionLoteIds.length === 0}
-                  className={`w-full font-extrabold py-4 rounded-2xl text-xs transition cursor-pointer ${
-                    seleccionLoteIds.length > 0 ? tema.btn : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                  }`}
-                >
-                  Imprimir / Generar Lote PDF ({seleccionLoteIds.length} {seleccionLoteIds.length === 1 ? "hoja seleccionada" : "hojas en orden cronológico"})
-                </button>
+                  {mostrarHistorialImpresas && (
+                    <div className="space-y-3 pt-2 border-t border-slate-100">
+                      <input
+                        type="text"
+                        value={busquedaImpresas}
+                        onChange={(e) => setBusquedaImpresas(e.target.value)}
+                        placeholder="Buscar en ya impresas por N° folio, cliente, orden o producto..."
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
+                      />
+
+                      {ordenesYaImpresas.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-6">No hay documentos impresos que coincidan con la búsqueda.</p>
+                      ) : (
+                        <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl max-h-80 overflow-y-auto">
+                          {ordenesYaImpresas.map((o) => (
+                            <div key={o.id} className="p-3.5 flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50/60">
+                              <div>
+                                <span className="font-extrabold text-slate-900">
+                                  {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
+                                </span>
+                                <span className="text-slate-500 ml-2">• {o.canal} • {o.comprador}</span>
+                                <span className="block text-[11px] text-slate-500 mt-0.5">
+                                  {o.cantidad}x {o.productoNombre} • Impresa: {o.fechaImpresion || o.fecha}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setDteVisualizando(o)}
+                                className="bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold px-3.5 py-2 rounded-xl text-xs cursor-pointer"
+                              >
+                                Reimprimir PDF
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
