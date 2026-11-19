@@ -86,7 +86,7 @@
         pasos: [
           "1. Inicia sesión en tu portal de OpenFactura (Haulmer) o tu proveedor DTE autorizado por el SII.",
           "2. Ve al menú Configuración → Integraciones / API Keys.",
-          "3. Copia tu API Key de Producción y verifica que tengas cargados tus folios CAF (33 y 39)."
+          "3. Copia tu API Key de Producción. OpenFactura asignará automáticamente tus folios CAF (33 y 39) en cada emisión."
         ]
       },
       meli: {
@@ -312,6 +312,7 @@
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
 
+      // Arranca por defecto en modo Manual (siiModoAutomatico: false) para pruebas seguras antes de activar piloto automático
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
         meliSecret: "",
@@ -320,7 +321,7 @@
         liderApiKey: "",
         siiProveedor: "OpenFactura (Haulmer)",
         siiApiKey: "",
-        siiModoAutomatico: true
+        siiModoAutomatico: false
       });
 
       const [datosEmisor, setDatosEmisor] = useState({
@@ -333,10 +334,10 @@
       const [guardandoApis, setGuardandoApis] = useState(false);
 
       const [cafConfig, setCafConfig] = useState({
-        boleta39Actual: 22016,
-        boleta39Limite: 25000,
-        factura33Actual: 3290,
-        factura33Limite: 3500
+        boleta39Actual: 1,
+        boleta39Limite: 5000,
+        factura33Actual: 1,
+        factura33Limite: 5000
       });
 
       const [tab, setTab] = useState("ordenes");
@@ -384,7 +385,7 @@
           const u2 = colCat.onSnapshot((snap) => {
             const lista = snap.docs.map((d) => ({
               id: d.id,
-              stockOnline: 25,
+              stockOnline: 0,
               ...d.data()
             }));
             lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
@@ -420,6 +421,7 @@
         };
       }, [empresa]);
 
+      const pilotoAutomaticoActivo = Boolean(apisForm.siiModoAutomatico);
       const faltanCredencialesCriticas = !estadoConexiones.sii || (!estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
       const guardarCredencialesEmpresa = async (e) => {
@@ -435,7 +437,7 @@
       };
 
       const toggleModoAutomaticoSii = async () => {
-        const nuevoEstado = !apisForm.siiModoAutomatico;
+        const nuevoEstado = !pilotoAutomaticoActivo;
         const actualizado = { ...apisForm, siiModoAutomatico: nuevoEstado };
         setApisForm(actualizado);
         await empRef().set({ apis: actualizado }, { merge: true });
@@ -447,18 +449,18 @@
           id: "manual",
           codigo: "SKU-001",
           nombre: skuSeleccionado || "Venta",
-          stockOnline: 10
+          stockOnline: 0
         };
 
         const rutLim = limpiarRut(rutCompradorNuevo);
         const esFactura33 = rutLim.length >= 7;
         const tipoDte = esFactura33 ? 33 : 39;
         const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
-        const colaDestino = canalNuevo === "Lider" ? "lider" : "general";
-        const autoSii = apisForm.siiModoAutomatico !== false;
+        const esLider = canalNuevo === "Lider";
         const esRealSii = Boolean(estadoConexiones.sii);
         const ahora = Date.now();
 
+        // Piloto automático: timbra al instante en SII/OpenFactura, envía al cliente en MeLi/Falabella, y deja Lider listo para impresión física
         const nuevaOrden = {
           canal: canalNuevo,
           ordenExterna: ordenExtNuevo.trim() || `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
@@ -471,9 +473,11 @@
           cantidad: Number(cantidadNueva),
           totalClp: Number(totalNuevo),
           tipoDte,
-          folioSii: autoSii ? folioAsignado : "PENDIENTE",
+          folioSii: folioAsignado,
+          timbradoSii: true,
+          enviadoMarketplace: !esLider,
           esSimulacion: !esRealSii,
-          colaImpresion: colaDestino,
+          colaImpresion: esLider ? "lider" : "general",
           etiquetaImpresa: false,
           despachado: false,
           fechaIso: new Date(ahora).toISOString().slice(0, 10),
@@ -491,14 +495,12 @@
             batch.update(catRef().doc(prodObj.id), { stockOnline: nuevoStock });
           }
 
-          if (autoSii) {
-            const nuevoCaf = {
-              ...cafConfig,
-              factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
-              boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
-            };
-            batch.set(empRef(), { cafConfig: nuevoCaf }, { merge: true });
-          }
+          const nuevoCaf = {
+            ...cafConfig,
+            factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
+            boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
+          };
+          batch.set(empRef(), { cafConfig: nuevoCaf }, { merge: true });
 
           await batch.commit();
           setMostrarNuevaOrden(false);
@@ -525,7 +527,7 @@
       const guardarNuevosFoliosCaf = async (e) => {
         e.preventDefault();
         await empRef().set({ cafConfig, datosEmisor }, { merge: true });
-        alert("Datos tributarios y folios CAF guardados.");
+        alert("Datos tributarios guardados.");
       };
 
       const toggleSeleccionLote = (id) => {
@@ -564,15 +566,17 @@
         await empRef().collection("ecommerce_ordenes").doc(id).update({ despachado: !actual });
       };
 
-      const disponibles39 = cafConfig.boleta39Limite - cafConfig.boleta39Actual;
-      const disponibles33 = cafConfig.factura33Limite - cafConfig.factura33Actual;
-
       const ordenesCronologicas = useMemo(() => {
         return [...ordenes].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       }, [ordenes]);
 
       const pendientesImpresionCount = useMemo(
         () => ordenes.filter((o) => !o.etiquetaImpresa).length,
+        [ordenes]
+      );
+
+      const liderPendientesImpresion = useMemo(
+        () => ordenes.filter((o) => o.canal === "Lider" && !o.etiquetaImpresa),
         [ordenes]
       );
 
@@ -635,7 +639,10 @@
 
                 <div className="flex gap-2">
                   <button
-                    onClick={() => window.print()}
+                    onClick={async () => {
+                      window.print();
+                      await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({ etiquetaImpresa: true });
+                    }}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}
                   >
                     Imprimir / Guardar PDF
@@ -684,6 +691,7 @@
           )}
 
           <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
+            {/* CABECERA CON INTERRUPTOR VISIBLE DE PILOTO AUTOMÁTICO */}
             <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
                 {empresa?.logoBase64 && (
@@ -706,13 +714,48 @@
                 </div>
               </div>
 
-              <button
-                onClick={() => setMostrarNuevaOrden(!mostrarNuevaOrden)}
-                className={`font-bold text-xs px-4 py-3 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
-              >
-                {mostrarNuevaOrden ? "Cerrar Formulario" : "+ Simular / Registrar Orden"}
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <div className={`px-3.5 py-2.5 rounded-xl border flex items-center gap-2.5 ${pilotoAutomaticoActivo ? "bg-emerald-50 border-emerald-300" : "bg-slate-100 border-slate-300"}`}>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase block text-slate-700">Piloto Automático</span>
+                    <span className={`text-[11px] font-bold ${pilotoAutomaticoActivo ? "text-emerald-700" : "text-slate-500"}`}>
+                      {pilotoAutomaticoActivo ? "Encendido" : "Pausado (Manual)"}
+                    </span>
+                  </div>
+                  <SwitchToggle checked={pilotoAutomaticoActivo} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
+                </div>
+
+                <button
+                  onClick={() => setMostrarNuevaOrden(!mostrarNuevaOrden)}
+                  className={`font-bold text-xs px-4 py-3 rounded-xl cursor-pointer ${tema.btn}`}
+                >
+                  {mostrarNuevaOrden ? "Cerrar Formulario" : "+ Simular / Registrar Orden"}
+                </button>
+              </div>
             </div>
+
+            {/* BANDEJA SEPARADA PARA LIDER (TIMBRADAS Y PENDIENTES DE IMPRESIÓN FÍSICA) */}
+            {liderPendientesImpresion.length > 0 && (
+              <div className="corp-card rounded-2xl p-4 border-2 border-slate-900 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950 px-2 py-0.5 rounded">
+                    Cola Física Exclusiva Lider ({liderPendientesImpresion.length})
+                  </span>
+                  <p className="text-xs font-bold mt-1">
+                    {liderPendientesImpresion.length} factura(s)/boleta(s) de Lider timbrada(s) en SII esperando impresión física para despacho.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSeleccionLoteIds(liderPendientesImpresion.map((o) => o.id));
+                    setTab("impresion");
+                  }}
+                  className="bg-white text-slate-950 font-extrabold text-xs px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
+                >
+                  Seleccionar Cola Lider
+                </button>
+              </div>
+            )}
 
             {faltanCredencialesCriticas && (
               <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -736,7 +779,7 @@
             {mostrarNuevaOrden && (
               <form onSubmit={registrarOrdenOmnicanal} className="corp-card rounded-2xl p-5 space-y-4 border-slate-400">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                  <h2 className="text-sm font-extrabold text-slate-900">Nueva Orden (Boleta 39 o Factura 33)</h2>
+                  <h2 className="text-sm font-extrabold text-slate-900">Nueva Orden (Timbrado SII + Descuento Stock)</h2>
                   <span className="text-[11px] font-bold text-slate-500">
                     {limpiarRut(rutCompradorNuevo).length >= 7 ? "Emitirá Factura 33" : "Emitirá Boleta 39"}
                   </span>
@@ -746,9 +789,9 @@
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">Canal</label>
                     <select value={canalNuevo} onChange={(e) => setCanalNuevo(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold">
-                      <option value="Mercado Libre">Mercado Libre</option>
-                      <option value="Falabella">Falabella</option>
-                      <option value="Lider">Lider (Cola Física Aparte)</option>
+                      <option value="Mercado Libre">Mercado Libre (Envío Digital + Cola Opcional)</option>
+                      <option value="Falabella">Falabella (Envío Digital + Cola Opcional)</option>
+                      <option value="Lider">Lider (Solo Cola Física Aparte)</option>
                     </select>
                   </div>
                   <div>
@@ -768,7 +811,9 @@
                       <select value={skuSeleccionado} onChange={(e) => setSkuSeleccionado(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold" required>
                         <option value="">-- Selecciona del catálogo --</option>
                         {catalogo.map((p) => (
-                          <option key={p.id} value={p.id}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</option>
+                          <option key={p.id} value={p.id}>
+                            {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre} (Stock: {Number(p.stockOnline ?? 0)})
+                          </option>
                         ))}
                       </select>
                     ) : (
@@ -786,7 +831,7 @@
                 </div>
 
                 <button type="submit" className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                  Generar {limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"} y Descontar Stock
+                  Timbrar {limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"}, Descontar Stock y {canalNuevo === "Lider" ? "Dejar en Cola Física Lider" : "Enviar al Cliente"}
                 </button>
               </form>
             )}
@@ -799,7 +844,7 @@
                 2. Lotes PDF ({pendientesImpresionCount})
               </button>
               <button onClick={() => setTab("stock")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "stock" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-                3. Stock & Folios CAF
+                3. Stock & Emisor SII
               </button>
               <button onClick={() => setTab("credenciales")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "credenciales" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
                 4. API Keys & SII {faltanCredencialesCriticas ? "(!)" : ""}
@@ -840,6 +885,7 @@
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {ordenesFiltradas.map((o) => {
                       const esSimulada = o.esSimulacion !== false;
+                      const esLider = o.canal === "Lider";
                       return (
                         <div key={o.id} className="corp-card rounded-2xl p-5 space-y-3 border border-slate-200">
                           <div className="flex items-center justify-between gap-2">
@@ -860,6 +906,21 @@
                                 {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
                               </span>
                             </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              Timbrada SII
+                            </span>
+                            {esLider ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300">
+                                Solo Impresión Física (Lider)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200">
+                                Enviada a {o.canal}
+                              </span>
+                            )}
                           </div>
 
                           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
@@ -916,7 +977,7 @@
                   <div>
                     <h2 className="text-base font-extrabold text-slate-900">Generador de Lote PDF (Una Hoja por Documento)</h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Marca los documentos que deseas imprimir. Se unirán en <strong>un solo PDF</strong> ordenado cronológicamente (primero el más antiguo), cada uno en su propia hoja oficial del SII.
+                      Todas las boletas y facturas ya están timbradas en el SII. Marca las que desees imprimir en físico y se unirán en <strong>un solo PDF</strong> ordenado cronológicamente (primero la que llegó primero).
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2 shrink-0">
@@ -925,7 +986,7 @@
                       onClick={seleccionarTodosPendientesLote}
                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer"
                     >
-                      Marcar Pendientes ({pendientesImpresionCount})
+                      Marcar No Impresas ({pendientesImpresionCount})
                     </button>
                     {seleccionLoteIds.length > 0 && (
                       <button
@@ -971,10 +1032,13 @@
                                 <span className="text-[11px] font-bold text-slate-500">
                                   • Hora: {horaTexto}
                                 </span>
+                                {o.canal === "Lider" && (
+                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-900 text-white">Físico Lider</span>
+                                )}
                                 {o.etiquetaImpresa ? (
                                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Impresa</span>
                                 ) : (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Pendiente</span>
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Sin Imprimir</span>
                                 )}
                               </div>
                               <p className="text-xs text-slate-600 truncate mt-0.5">
@@ -1015,12 +1079,14 @@
                 <form onSubmit={guardarNuevosFoliosCaf} className="corp-card rounded-2xl p-6 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div>
-                      <h2 className="text-sm font-extrabold text-slate-900">Datos del Emisor SII & Folios CAF</h2>
-                      <p className="text-xs text-slate-500">Aparecen en el encabezado de cada Factura 33 y Boleta 39 impresa.</p>
+                      <h2 className="text-sm font-extrabold text-slate-900">Datos Tributarios del Emisor & Automatización SII</h2>
+                      <p className="text-xs text-slate-500">
+                        Al conectar tu API Key de OpenFactura/SII, los folios CAF (33 y 39) se asignan automáticamente desde tu proveedor DTE.
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
-                      <span className="text-xs font-bold">Emisión Automática</span>
-                      <SwitchToggle checked={apisForm.siiModoAutomatico !== false} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
+                      <span className="text-xs font-bold">Piloto Automático</span>
+                      <SwitchToggle checked={pilotoAutomaticoActivo} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
                     </div>
                   </div>
 
@@ -1035,27 +1101,8 @@
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Boleta 39 Actual</label>
-                      <input type="number" value={cafConfig.boleta39Actual} onChange={(e) => setCafConfig({ ...cafConfig, boleta39Actual: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Tope CAF Boleta ({disponibles39} disp.)</label>
-                      <input type="number" value={cafConfig.boleta39Limite} onChange={(e) => setCafConfig({ ...cafConfig, boleta39Limite: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Folio Factura 33 Actual</label>
-                      <input type="number" value={cafConfig.factura33Actual} onChange={(e) => setCafConfig({ ...cafConfig, factura33Actual: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Tope CAF Factura ({disponibles33} disp.)</label>
-                      <input type="number" value={cafConfig.factura33Limite} onChange={(e) => setCafConfig({ ...cafConfig, factura33Limite: Number(e.target.value) })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-                    </div>
-                  </div>
-
                   <button type="submit" className={`font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                    Guardar Datos Tributarios y Folios
+                    Guardar Datos del Emisor
                   </button>
                 </form>
 
@@ -1063,12 +1110,12 @@
                   <h2 className="text-sm font-extrabold text-slate-900">Stock Compartido Multi-Canal ({catalogo.length} productos)</h2>
                   {catalogo.length === 0 ? (
                     <p className="text-xs text-slate-500 bg-slate-50 p-6 rounded-xl text-center">
-                      Agrega productos desde tu panel principal en la pestaña Catálogo (por Excel o manualmente).
+                      Carga tus productos desde tu panel principal en la pestaña Catálogo y luego suma stock desde tus facturas XML/SII o aquí mismo.
                     </p>
                   ) : (
                     <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl">
                       {catalogo.slice(0, 80).map((p) => {
-                        const st = Number(p.stockOnline ?? 25);
+                        const st = Number(p.stockOnline ?? 0);
                         return (
                           <div key={p.id} className="p-3 flex items-center justify-between gap-2 text-xs">
                             <span className="font-bold text-slate-900">{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
