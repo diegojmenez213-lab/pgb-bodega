@@ -3,7 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>PGB Distribution Chile SpA • ERP Logística Bodega</title>
+  <script>
+    // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE HACIA PGB)
+    (function () {
+      var RUT_PGB = "769497226";
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) {
+        window.location.replace("index.html");
+      } else if (rutInicial !== RUT_PGB) {
+        window.location.replace("empresa-panel.html");
+      }
+
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) {
+          window.location.replace("index.html");
+        } else if (rutActual !== RUT_PGB) {
+          window.location.replace("empresa-panel.html");
+        } else if (ev.persisted) {
+          window.location.reload();
+        }
+      });
+
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== RUT_PGB) window.location.replace("empresa-panel.html");
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -2937,7 +2971,6 @@
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* RUTA / CHOFER CON NOMBRES VISIBLES */}
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-2">🚚 Ruta / Chofer</label>
                       <div className="grid grid-cols-3 gap-2">
@@ -2984,7 +3017,6 @@
                       )}
                     </div>
 
-                    {/* SELECTOR DOBLE: ARMADOR DE BODEGA vs VENTAS */}
                     <div>
                       <div className="grid grid-cols-2 gap-2 mb-2.5">
                         <button
@@ -3045,7 +3077,6 @@
                     </div>
                   </div>
 
-                  {/* TIPO DE INCIDENCIA SEGÚN ÁREA */}
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-2">
                       ⚠️ Tipo de Incidencia ({areaResponsable === "ventas" ? "Área Comercial / Ventas" : "Operación Bodega"})
@@ -3071,7 +3102,6 @@
                     </div>
                   </div>
 
-                  {/* BLOQUES CONDICIONALES SEGÚN MOTIVO */}
                   {MOTIVOS_RETORNO_UNICO_VENTAS.includes(motivo) ? (
                     <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 space-y-3">
                       <div className="flex justify-between items-center">
@@ -4038,7 +4068,7 @@
   </script>
 
   <button
-    onclick="localStorage.removeItem('nexus_empresa_rut'); window.location.href='index.html';"
+    onclick="localStorage.removeItem('nexus_empresa_rut'); localStorage.removeItem('nexus_session_ts'); sessionStorage.clear(); window.location.replace('index.html');"
     style="position:fixed; bottom:14px; left:14px; z-index:9999; background:#0f172a; color:#94a3b8; border:1px solid #334155; padding:6px 12px; border-radius:999px; font-size:11px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.3);"
   >
     ⇄ Salir
