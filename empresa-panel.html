@@ -226,6 +226,13 @@
       { id: "config", label: "Configuración" }
     ];
 
+    const ordenarPorFolioAsc = (a, b) => {
+      const fa = Number(a.folioSii || 0);
+      const fb = Number(b.folioSii || 0);
+      if (fa !== fb) return fa - fb;
+      return (a.timestamp || 0) - (b.timestamp || 0);
+    };
+
     const SwitchToggle = ({ checked, onChange, colorClass = "bg-blue-700" }) => (
       <button
         type="button"
@@ -404,6 +411,7 @@
 
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
+      const [cierresDiarios, setCierresDiarios] = useState([]);
       const [compras, setCompras] = useState([]);
 
       const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
@@ -417,10 +425,19 @@
 
       const [filtroCanalVenta, setFiltroCanalVenta] = useState("TODOS");
       const [busquedaVenta, setBusquedaVenta] = useState("");
+
+      // Pestañas de Facturas: por_imprimir | ya_impresas_hoy | lider | archivo_historico
       const [subTabFacturas, setSubTabFacturas] = useState("por_imprimir");
       const [seleccionLoteIds, setSeleccionLoteIds] = useState([]);
       const [loteParaImprimir, setLoteParaImprimir] = useState([]);
       const [dteVisualizando, setDteVisualizando] = useState(null);
+
+      // Filtros del Archivo Histórico Infinito
+      const [busquedaArchivo, setBusquedaArchivo] = useState("");
+      const [fechaDesdeArchivo, setFechaDesdeArchivo] = useState("");
+      const [fechaHastaArchivo, setFechaHastaArchivo] = useState("");
+      const [seleccionArchivoIds, setSeleccionArchivoIds] = useState([]);
+      const [cerrandoDia, setCerrandoDia] = useState(false);
 
       const [busquedaCat, setBusquedaCat] = useState("");
       const [importandoExcel, setImportandoExcel] = useState(false);
@@ -506,7 +523,13 @@
           setCompras(lista);
         });
 
-        return () => { u1(); u2(); u3(); u4(); };
+        const u5 = empRef.collection("cierres_diarios").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setCierresDiarios(lista);
+        });
+
+        return () => { u1(); u2(); u3(); u4(); u5(); };
       }, [rutActivo]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
@@ -532,10 +555,8 @@
       const usaColaLider = Boolean(mods.m11_colas_print);
       const usaLectorComprasXml = Boolean(mods.m17_compras_prov);
 
-      // Evaluación estricta: M7 pertenece a Inventario; Logística solo responde a M12, M13 o M14
       const areasHabilitadasPorSwitch = useMemo(() => {
         const lista = [];
-
         if (mods.m17_compras_prov || mods.m18_finanzas_bi) {
           lista.push({
             id: "compras",
@@ -544,7 +565,6 @@
             url: "compras-finanzas.html"
           });
         }
-
         if (mods.m5_inv_general || mods.m6_conteo_ciclico || mods.m7_auditoria_inv) {
           lista.push({
             id: "inventario",
@@ -553,7 +573,6 @@
             url: "pgb-inventario.html"
           });
         }
-
         if (mods.m12_ruta_inc || mods.m13_retornos_merma || mods.m14_analitica_err) {
           lista.push({
             id: "logistica",
@@ -562,7 +581,6 @@
             url: "logistica-rutas.html"
           });
         }
-
         if (mods.m15_pos_ventas || mods.m16_caja_cobros) {
           lista.push({
             id: "pos",
@@ -571,7 +589,6 @@
             url: "ventas-pos.html"
           });
         }
-
         return lista;
       }, [mods]);
 
@@ -636,6 +653,7 @@
         const esRealSii = Boolean(estadoConexiones.sii);
         const ahora = Date.now();
 
+        // Todas las órdenes nuevas nacen con diaCerrado: false (pertenecen a la jornada abierta)
         const nuevaOrden = {
           canal: canalNuevo,
           ordenExterna: `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
@@ -655,6 +673,7 @@
           esSimulacion: !esRealSii,
           colaImpresion: esLider ? "lider" : "general",
           etiquetaImpresa: false,
+          diaCerrado: false,
           despachado: false,
           fechaIso: new Date(ahora).toISOString().slice(0, 10),
           horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
@@ -710,6 +729,141 @@
         await batch.commit();
       };
 
+      // ================= JORNADA ACTIVA VS ARCHIVO HISTÓRICO INFINITO =================
+      const ordenesJornadaActiva = useMemo(() => {
+        return ordenes.filter((o) => !o.diaCerrado).sort(ordenarPorFolioAsc);
+      }, [ordenes]);
+
+      const facturasPorImprimirHoy = useMemo(() => {
+        return ordenesJornadaActiva.filter((o) => !o.etiquetaImpresa).sort(ordenarPorFolioAsc);
+      }, [ordenesJornadaActiva]);
+
+      const facturasYaImpresasHoy = useMemo(() => {
+        return ordenesJornadaActiva.filter((o) => Boolean(o.etiquetaImpresa)).sort(ordenarPorFolioAsc);
+      }, [ordenesJornadaActiva]);
+
+      const colaFisicaLiderHoy = useMemo(() => {
+        return facturasPorImprimirHoy.filter((o) => o.canal === "Lider").sort(ordenarPorFolioAsc);
+      }, [facturasPorImprimirHoy]);
+
+      // Archivo Histórico Infinito (todas las facturas de días cerrados, ordenadas por folio numérico 700, 701, 702...)
+      const archivoHistoricoFiltrado = useMemo(() => {
+        const q = busquedaArchivo.trim().toLowerCase();
+        return ordenes
+          .filter((o) => Boolean(o.diaCerrado))
+          .filter((o) => {
+            const fechaDoc = o.fechaCierreDia || o.fechaIso || "";
+            if (fechaDesdeArchivo && fechaDoc && fechaDoc < fechaDesdeArchivo) return false;
+            if (fechaHastaArchivo && fechaDoc && fechaDoc > fechaHastaArchivo) return false;
+            if (!q) return true;
+            return (
+              String(o.folioSii || "").includes(q) ||
+              (o.comprador || "").toLowerCase().includes(q) ||
+              (o.rutComprador || "").toLowerCase().includes(q) ||
+              (o.productoNombre || "").toLowerCase().includes(q) ||
+              (o.canal || "").toLowerCase().includes(q) ||
+              (o.ordenExterna || "").toLowerCase().includes(q)
+            );
+          })
+          .sort(ordenarPorFolioAsc);
+      }, [ordenes, busquedaArchivo, fechaDesdeArchivo, fechaHastaArchivo]);
+
+      // CERRAR DÍA / CERRAR CAJA: Archiva las facturas del día en el historial infinito y deja todo listo para mañana
+      const ejecutarCierreDeDia = async () => {
+        if (ordenesJornadaActiva.length === 0) {
+          return alert("No hay facturas o ventas pendientes de cierre en la jornada actual.");
+        }
+        const totalCierre = ordenesJornadaActiva.reduce((acc, o) => acc + Number(o.totalClp || 0), 0);
+        const foliosOrdenados = [...ordenesJornadaActiva].sort(ordenarPorFolioAsc);
+        const folioInicio = foliosOrdenados[0]?.folioSii || "-";
+        const folioFin = foliosOrdenados[foliosOrdenados.length - 1]?.folioSii || "-";
+
+        const ok = confirm(
+          `¿Cerrar el día laboral actual?\n\n` +
+          `• Documentos de la jornada: ${ordenesJornadaActiva.length} (Folios #${folioInicio} al #${folioFin})\n` +
+          `• Total facturado hoy: $${totalCierre.toLocaleString("es-CL")} CLP\n\n` +
+          `Todas estas facturas pasarán al Archivo Histórico Infinito y el contador quedará en 0 para mañana. Si entra una venta nueva esta noche, quedará automáticamente para la jornada de mañana.`
+        );
+        if (!ok) return;
+
+        setCerrandoDia(true);
+        try {
+          const ahora = Date.now();
+          const fechaIsoHoy = new Date(ahora).toISOString().slice(0, 10);
+          const fechaLegible = new Date(ahora).toLocaleString("es-CL");
+          const cierreDocRef = empRef().collection("cierres_diarios").doc();
+
+          const batch = db.batch();
+          batch.set(cierreDocRef, {
+            fechaCierreDia: fechaIsoHoy,
+            fechaLegible,
+            cantidadDocumentos: ordenesJornadaActiva.length,
+            folioDesde: folioInicio,
+            folioHasta: folioFin,
+            totalClp: totalCierre,
+            timestamp: ahora
+          });
+
+          ordenesJornadaActiva.forEach((o) => {
+            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
+              diaCerrado: true,
+              fechaCierreDia: fechaIsoHoy,
+              cierreId: cierreDocRef.id,
+              etiquetaImpresa: true
+            });
+          });
+
+          await batch.commit();
+          setSeleccionLoteIds([]);
+          alert(`Día cerrado correctamente (${ordenesJornadaActiva.length} documentos archivados). Tu panel está limpio para la próxima jornada.`);
+        } catch (err) {
+          alert("Error al cerrar día: " + err.message);
+        }
+        setCerrandoDia(false);
+      };
+
+      // Imprimir lote del día actual ordenado por número de folio (700, 701, 702...)
+      const generarEImprimirLoteHoy = () => {
+        if (seleccionLoteIds.length === 0) return;
+        const seleccionados = facturasPorImprimirHoy
+          .filter((o) => seleccionLoteIds.includes(o.id))
+          .sort(ordenarPorFolioAsc);
+        if (seleccionados.length === 0) return;
+
+        setLoteParaImprimir(seleccionados);
+        setTimeout(async () => {
+          window.print();
+          const batch = db.batch();
+          const ahoraStr = new Date().toLocaleString("es-CL");
+          const ahoraTs = Date.now();
+          seleccionados.forEach((o) => {
+            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
+              etiquetaImpresa: true,
+              fechaImpresion: ahoraStr,
+              fechaImpresionTs: ahoraTs
+            });
+          });
+          await batch.commit();
+          setLoteParaImprimir([]);
+          setSeleccionLoteIds([]);
+        }, 300);
+      };
+
+      // Imprimir lote seleccionado desde el Archivo Histórico Infinito (ordenado por número de folio)
+      const generarEImprimirLoteHistorico = () => {
+        if (seleccionArchivoIds.length === 0) return;
+        const seleccionados = archivoHistoricoFiltrado
+          .filter((o) => seleccionArchivoIds.includes(o.id))
+          .sort(ordenarPorFolioAsc);
+        if (seleccionados.length === 0) return;
+
+        setLoteParaImprimir(seleccionados);
+        setTimeout(() => {
+          window.print();
+          setLoteParaImprimir([]);
+        }, 300);
+      };
+
       const sugeridosCatalogo = useMemo(() => {
         const nombresEnCatalogo = new Set(catalogo.map((p) => String(p.nombre || "").trim().toUpperCase()));
         const skusEnCatalogo = new Set(catalogo.filter((p) => p.codigo).map((p) => String(p.codigo || "").trim().toUpperCase()));
@@ -757,45 +911,6 @@
         });
         return Object.values(mapa).sort((a, b) => b.unidades - a.unidades);
       }, [ordenes]);
-
-      const facturasPorImprimir = useMemo(() => {
-        return ordenes
-          .filter((o) => !o.etiquetaImpresa)
-          .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-      }, [ordenes]);
-
-      const facturasYaImpresas = useMemo(() => {
-        return ordenes
-          .filter((o) => Boolean(o.etiquetaImpresa))
-          .sort((a, b) => (b.fechaImpresionTs || b.timestamp || 0) - (a.fechaImpresionTs || a.timestamp || 0));
-      }, [ordenes]);
-
-      const colaFisicaLider = useMemo(() => {
-        return facturasPorImprimir.filter((o) => o.canal === "Lider");
-      }, [facturasPorImprimir]);
-
-      const generarEImprimirLotePdf = () => {
-        if (seleccionLoteIds.length === 0) return;
-        const seleccionados = facturasPorImprimir.filter((o) => seleccionLoteIds.includes(o.id));
-        if (seleccionados.length === 0) return;
-        setLoteParaImprimir(seleccionados);
-        setTimeout(async () => {
-          window.print();
-          const batch = db.batch();
-          const ahoraStr = new Date().toLocaleString("es-CL");
-          const ahoraTs = Date.now();
-          seleccionados.forEach((o) => {
-            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
-              etiquetaImpresa: true,
-              fechaImpresion: ahoraStr,
-              fechaImpresionTs: ahoraTs
-            });
-          });
-          await batch.commit();
-          setLoteParaImprimir([]);
-          setSeleccionLoteIds([]);
-        }, 300);
-      };
 
       const agregarProductoManual = async (e) => {
         e.preventDefault();
@@ -896,10 +1011,10 @@
       }
 
       const equipo = Array.isArray(empresa.equipo) ? empresa.equipo : [];
-      const totalVendidoClp = ordenes.reduce((acc, o) => acc + Number(o.totalClp || 0), 0);
+      const totalVendidoHoyClp = ordenesJornadaActiva.reduce((acc, o) => acc + Number(o.totalClp || 0), 0);
       const productoEstrella = rankingProductosVendidos[0]?.nombre || "Sin ventas aún";
 
-      const ordenesFiltradas = ordenes.filter((o) => {
+      const ordenesVentasFiltradas = ordenes.filter((o) => {
         if (filtroCanalVenta !== "TODOS" && o.canal !== filtroCanalVenta) return false;
         const q = busquedaVenta.trim().toLowerCase();
         if (!q) return true;
@@ -955,17 +1070,19 @@
                   <button
                     onClick={async () => {
                       window.print();
-                      await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({
-                        etiquetaImpresa: true,
-                        fechaImpresion: new Date().toLocaleString("es-CL"),
-                        fechaImpresionTs: Date.now()
-                      });
+                      if (!dteVisualizando.diaCerrado) {
+                        await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({
+                          etiquetaImpresa: true,
+                          fechaImpresion: new Date().toLocaleString("es-CL"),
+                          fechaImpresionTs: Date.now()
+                        });
+                      }
                     }}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}
                   >
                     Imprimir / Guardar PDF
                   </button>
-                  {dteVisualizando.esSimulacion !== false && (
+                  {dteVisualizando.esSimulacion !== false && !dteVisualizando.diaCerrado && (
                     <button
                       onClick={async () => {
                         await eliminarSimulacion(dteVisualizando);
@@ -1069,7 +1186,7 @@
             </div>
           )}
 
-          {/* CABECERA EJECUTIVA */}
+          {/* CABECERA EJECUTIVA CON BOTÓN "CERRAR DÍA" */}
           <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 space-y-4 no-print">
             <div className={`${T.card} rounded-2xl p-4 sm:p-5 border-t-4 ${T.borderTop} flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
@@ -1081,7 +1198,7 @@
                 <div>
                   <div className="flex items-center gap-2">
                     <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${T.tag}`}>RUT {empresa.rut}</span>
-                    <span className="text-[10px] font-bold text-emerald-600">En Línea</span>
+                    <span className="text-[10px] font-bold text-emerald-600">Jornada Abierta</span>
                   </div>
                   <h1 className={`text-lg sm:text-xl font-extrabold mt-0.5 ${T.textMain}`}>{empresa.nombre}</h1>
                 </div>
@@ -1097,9 +1214,9 @@
                     }`}
                   >
                     {item.label}
-                    {item.id === "facturas" && facturasPorImprimir.length > 0 && (
+                    {item.id === "facturas" && facturasPorImprimirHoy.length > 0 && (
                       <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-amber-400 text-slate-950">
-                        {facturasPorImprimir.length}
+                        {facturasPorImprimirHoy.length}
                       </span>
                     )}
                   </button>
@@ -1118,6 +1235,15 @@
                   + Nueva Venta
                 </button>
 
+                <button
+                  onClick={ejecutarCierreDeDia}
+                  disabled={cerrandoDia}
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer"
+                  title="Archiva las facturas del día en el historial infinito y reinicia el día para mañana"
+                >
+                  {cerrandoDia ? "Cerrando..." : `Cerrar Día (${ordenesJornadaActiva.length})`}
+                </button>
+
                 <button onClick={cerrarSesion} className={`text-xs font-bold px-3 py-2.5 rounded-xl cursor-pointer ${T.btnSec}`}>
                   Salir
                 </button>
@@ -1129,26 +1255,26 @@
               <div className="space-y-4">
                 <div className={`grid grid-cols-2 ${usaColaLider ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-3`}>
                   <div className={`${T.card} rounded-2xl p-4`}>
-                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Ventas Totales</span>
-                    <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>${totalVendidoClp.toLocaleString("es-CL")}</p>
-                    <span className={`text-[11px] ${T.textSub}`}>{ordenes.length} órdenes emitidas</span>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Facturado Jornada Hoy</span>
+                    <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>${totalVendidoHoyClp.toLocaleString("es-CL")}</p>
+                    <span className={`text-[11px] ${T.textSub}`}>{ordenesJornadaActiva.length} documentos en jornada abierta</span>
                   </div>
                   <div onClick={() => { setVista("facturas"); setSubTabFacturas("por_imprimir"); }} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
-                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Facturas Por Imprimir</span>
-                    <p className="text-xl font-extrabold text-amber-500 mt-1">{facturasPorImprimir.length}</p>
-                    <span className={`text-[11px] ${T.textSub}`}>Listas para lote PDF →</span>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Por Imprimir Hoy</span>
+                    <p className="text-xl font-extrabold text-amber-500 mt-1">{facturasPorImprimirHoy.length}</p>
+                    <span className={`text-[11px] ${T.textSub}`}>Ordenadas por folio →</span>
                   </div>
                   {usaColaLider && (
                     <div onClick={() => { setVista("facturas"); setSubTabFacturas("lider"); }} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
                       <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Cola Física Lider</span>
-                      <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>{colaFisicaLider.length}</p>
+                      <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>{colaFisicaLiderHoy.length}</p>
                       <span className={`text-[11px] ${T.textSub}`}>Entrega física obligatoria →</span>
                     </div>
                   )}
-                  <div onClick={() => setVista("catalogo")} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
-                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Producto Más Vendido</span>
-                    <p className={`text-sm font-extrabold mt-1.5 truncate ${T.textMain}`}>{productoEstrella}</p>
-                    <span className={`text-[11px] ${T.textSub}`}>{catalogo.length} SKUs en catálogo →</span>
+                  <div onClick={() => { setVista("facturas"); setSubTabFacturas("archivo_historico"); }} className={`${T.card} rounded-2xl p-4 cursor-pointer`}>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.textSub}`}>Archivo Histórico</span>
+                    <p className={`text-xl font-extrabold mt-1 ${T.textMain}`}>{ordenes.filter((o) => o.diaCerrado).length}</p>
+                    <span className={`text-[11px] ${T.textSub}`}>{cierresDiarios.length} días cerrados →</span>
                   </div>
                 </div>
 
@@ -1207,20 +1333,20 @@
                   <div className="lg:col-span-7">
                     <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                       <div className="flex items-center justify-between">
-                        <h2 className={`text-sm font-extrabold ${T.textMain}`}>Últimos Movimientos de Venta</h2>
-                        <button onClick={() => setVista("ventas")} className="text-xs font-bold underline cursor-pointer">
-                          Ver todas ({ordenes.length})
+                        <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas Emitidas en la Jornada Actual (Orden de Folio)</h2>
+                        <button onClick={() => setVista("facturas")} className="text-xs font-bold underline cursor-pointer">
+                          Gestionar lotes ({ordenesJornadaActiva.length})
                         </button>
                       </div>
 
-                      {ordenes.length === 0 ? (
+                      {ordenesJornadaActiva.length === 0 ? (
                         <div className={`${T.cardMuted} rounded-xl p-8 text-center space-y-1`}>
-                          <p className={`text-xs font-bold ${T.textMain}`}>Aún no hay ventas registradas</p>
-                          <p className={`text-[11px] ${T.textSub}`}>Presiona "+ Nueva Venta" arriba para probar la emisión de Boleta 39 o Factura 33.</p>
+                          <p className={`text-xs font-bold ${T.textMain}`}>Jornada limpia (0 facturas emitidas aún)</p>
+                          <p className={`text-[11px] ${T.textSub}`}>Presiona "+ Nueva Venta" o espera órdenes automáticas para emitir Boleta 39 o Factura 33.</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-200/40">
-                          {ordenes.slice(0, 6).map((o) => (
+                          {ordenesJornadaActiva.slice(0, 8).map((o) => (
                             <div key={o.id} className="py-3 flex items-center justify-between gap-3 text-xs">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -1273,12 +1399,12 @@
                   </div>
 
                   <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
-                    <h2 className={`text-sm font-extrabold ${T.textMain}`}>Todas las Ventas ({ordenesFiltradas.length})</h2>
-                    {ordenesFiltradas.length === 0 ? (
+                    <h2 className={`text-sm font-extrabold ${T.textMain}`}>Registro General de Ventas ({ordenesVentasFiltradas.length})</h2>
+                    {ordenesVentasFiltradas.length === 0 ? (
                       <p className={`text-xs text-center py-8 ${T.textSub}`}>No hay ventas que coincidan con el filtro.</p>
                     ) : (
                       <div className="divide-y divide-slate-200/40">
-                        {ordenesFiltradas.map((o) => (
+                        {ordenesVentasFiltradas.map((o) => (
                           <div key={o.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
@@ -1287,8 +1413,10 @@
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
                                   {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
                                 </span>
-                                {o.etiquetaImpresa ? (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Ya Impresa</span>
+                                {o.diaCerrado ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Día Cerrado ({o.fechaCierreDia})</span>
+                                ) : o.etiquetaImpresa ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Impresa Hoy</span>
                                 ) : (
                                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Por Imprimir</span>
                                 )}
@@ -1301,7 +1429,7 @@
                               <button onClick={() => setDteVisualizando(o)} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.btn}`}>
                                 Ver PDF
                               </button>
-                              {o.esSimulacion !== false && (
+                              {o.esSimulacion !== false && !o.diaCerrado && (
                                 <button onClick={() => eliminarSimulacion(o)} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 text-white cursor-pointer">
                                   Eliminar
                                 </button>
@@ -1356,38 +1484,44 @@
               </div>
             )}
 
-            {/* ================= VISTA 3: FACTURAS ================= */}
+            {/* ================= VISTA 3: FACTURAS (JORNADA HOY + ARCHIVO HISTÓRICO INFINITO) ================= */}
             {vista === "facturas" && (
               <div className="space-y-4">
                 <div className={`${T.card} rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3`}>
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       onClick={() => { setSubTabFacturas("por_imprimir"); setSeleccionLoteIds([]); }}
-                      className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "por_imprimir" ? T.btn : T.btnSec}`}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "por_imprimir" ? T.btn : T.btnSec}`}
                     >
-                      Por Imprimir ({facturasPorImprimir.length})
+                      Por Imprimir Hoy ({facturasPorImprimirHoy.length})
                     </button>
                     <button
-                      onClick={() => { setSubTabFacturas("ya_impresas"); setSeleccionLoteIds([]); }}
-                      className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "ya_impresas" ? T.btn : T.btnSec}`}
+                      onClick={() => { setSubTabFacturas("ya_impresas_hoy"); setSeleccionLoteIds([]); }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "ya_impresas_hoy" ? T.btn : T.btnSec}`}
                     >
-                      Ya Impresas ({facturasYaImpresas.length})
+                      Impresas Hoy ({facturasYaImpresasHoy.length})
                     </button>
                     {usaColaLider && (
                       <button
                         onClick={() => { setSubTabFacturas("lider"); setSeleccionLoteIds([]); }}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "lider" ? T.btn : T.btnSec}`}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "lider" ? T.btn : T.btnSec}`}
                       >
-                        Cola Física Lider ({colaFisicaLider.length})
+                        Cola Física Lider ({colaFisicaLiderHoy.length})
                       </button>
                     )}
+                    <button
+                      onClick={() => { setSubTabFacturas("archivo_historico"); setSeleccionArchivoIds([]); }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabFacturas === "archivo_historico" ? T.btn : T.btnSec}`}
+                    >
+                      Archivo Histórico ({ordenes.filter((o) => o.diaCerrado).length})
+                    </button>
                   </div>
 
-                  {subTabFacturas !== "ya_impresas" && (
+                  {(subTabFacturas === "por_imprimir" || subTabFacturas === "lider") && (
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => {
-                          const fuente = subTabFacturas === "lider" ? colaFisicaLider : facturasPorImprimir;
+                          const fuente = subTabFacturas === "lider" ? colaFisicaLiderHoy : facturasPorImprimirHoy;
                           setSeleccionLoteIds(fuente.map((o) => o.id));
                         }}
                         className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}
@@ -1395,27 +1529,56 @@
                         Seleccionar Todas
                       </button>
                       <button
-                        onClick={generarEImprimirLotePdf}
+                        onClick={generarEImprimirLoteHoy}
                         disabled={seleccionLoteIds.length === 0}
                         className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${seleccionLoteIds.length > 0 ? T.btn : "bg-slate-200 text-slate-400 cursor-not-allowed"}`}
                       >
-                        Imprimir Lote PDF ({seleccionLoteIds.length})
+                        Imprimir Lote PDF por Folio ({seleccionLoteIds.length})
+                      </button>
+                    </div>
+                  )}
+
+                  {subTabFacturas === "archivo_historico" && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setSeleccionArchivoIds(archivoHistoricoFiltrado.map((o) => o.id))}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}
+                      >
+                        Marcar Filtradas ({archivoHistoricoFiltrado.length})
+                      </button>
+                      <button
+                        onClick={generarEImprimirLoteHistorico}
+                        disabled={seleccionArchivoIds.length === 0}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${seleccionArchivoIds.length > 0 ? T.btn : "bg-slate-200 text-slate-400 cursor-not-allowed"}`}
+                      >
+                        Imprimir Selección PDF ({seleccionArchivoIds.length})
                       </button>
                     </div>
                   )}
                 </div>
 
+                {/* SUB-TAB A: POR IMPRIMIR HOY (ORDEN NUMÉRICO DE FOLIO) */}
                 {subTabFacturas === "por_imprimir" && (
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                    <div>
-                      <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas y Boletas Timbradas Por Imprimir (Orden de Llegada)</h2>
-                      <p className={`text-xs ${T.textSub}`}>Ordenadas desde la primera que llegó hasta la última. Al imprimirlas pasan automáticamente a "Ya Impresas" para no repetir jamás.</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas y Boletas Por Imprimir — Jornada Actual (Orden de Folio)</h2>
+                        <p className={`text-xs ${T.textSub}`}>Ordenadas estrictamente por número de folio (ej. 700, 701, 702...). Al imprimirlas pasan a "Impresas Hoy".</p>
+                      </div>
+                      <button
+                        onClick={ejecutarCierreDeDia}
+                        disabled={cerrandoDia || ordenesJornadaActiva.length === 0}
+                        className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
+                      >
+                        Cerrar Día y Archivar ({ordenesJornadaActiva.length})
+                      </button>
                     </div>
-                    {facturasPorImprimir.length === 0 ? (
-                      <p className={`text-xs text-center py-8 ${T.textSub}`}>No hay documentos nuevos pendientes por imprimir.</p>
+
+                    {facturasPorImprimirHoy.length === 0 ? (
+                      <p className={`text-xs text-center py-8 ${T.textSub}`}>No hay documentos nuevos pendientes por imprimir en la jornada actual.</p>
                     ) : (
                       <div className="divide-y divide-slate-200/40">
-                        {facturasPorImprimir.map((o, idx) => {
+                        {facturasPorImprimirHoy.map((o) => {
                           const marcado = seleccionLoteIds.includes(o.id);
                           return (
                             <div
@@ -1428,7 +1591,7 @@
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className={`text-xs font-extrabold ${T.textMain}`}>
-                                      #{idx + 1} • {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
+                                      {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
                                     </span>
                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${T.tag}`}>{o.canal}</span>
                                     <span className={`text-[11px] ${T.textSub}`}>{o.horaCorta || o.fecha}</span>
@@ -1445,17 +1608,57 @@
                   </div>
                 )}
 
+                {/* SUB-TAB B: YA IMPRESAS HOY */}
+                {subTabFacturas === "ya_impresas_hoy" && (
+                  <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas Impresas en la Jornada Actual ({facturasYaImpresasHoy.length})</h2>
+                        <p className={`text-xs ${T.textSub}`}>Ya fueron impresas hoy y salieron de la cola de lotes. Al terminar tu jornada presiona "Cerrar Día" para archivarlas.</p>
+                      </div>
+                      <button
+                        onClick={ejecutarCierreDeDia}
+                        disabled={cerrandoDia || ordenesJornadaActiva.length === 0}
+                        className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
+                      >
+                        Cerrar Día y Archivar ({ordenesJornadaActiva.length})
+                      </button>
+                    </div>
+                    {facturasYaImpresasHoy.length === 0 ? (
+                      <p className={`text-xs text-center py-8 ${T.textSub}`}>Aún no has impreso facturas en la jornada de hoy.</p>
+                    ) : (
+                      <div className="divide-y divide-slate-200/40">
+                        {facturasYaImpresasHoy.map((o) => (
+                          <div key={o.id} className="py-3.5 flex items-center justify-between gap-3 text-xs">
+                            <div>
+                              <span className={`font-extrabold ${T.textMain}`}>
+                                {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
+                              </span>
+                              <span className={`ml-2 ${T.textSub}`}>• {o.canal} • {o.comprador}</span>
+                              <span className={`block text-[11px] mt-0.5 ${T.textSub}`}>Impresa: {o.fechaImpresion || o.fecha}</span>
+                            </div>
+                            <button onClick={() => setDteVisualizando(o)} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}>
+                              Reimprimir
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SUB-TAB C: COLA FÍSICA LIDER */}
                 {subTabFacturas === "lider" && usaColaLider && (
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                     <div>
-                      <h2 className={`text-sm font-extrabold ${T.textMain}`}>Cola Física Exclusiva Lider ({colaFisicaLider.length})</h2>
+                      <h2 className={`text-sm font-extrabold ${T.textMain}`}>Cola Física Exclusiva Lider ({colaFisicaLiderHoy.length})</h2>
                       <p className={`text-xs ${T.textSub}`}>Lider exige adjuntar el documento impreso al paquete físico (no se envía por portal).</p>
                     </div>
-                    {colaFisicaLider.length === 0 ? (
-                      <p className={`text-xs text-center py-8 ${T.textSub}`}>No hay documentos de Lider pendientes de impresión física.</p>
+                    {colaFisicaLiderHoy.length === 0 ? (
+                      <p className={`text-xs text-center py-8 ${T.textSub}`}>No hay documentos de Lider pendientes de impresión física hoy.</p>
                     ) : (
                       <div className="divide-y divide-slate-200/40">
-                        {colaFisicaLider.map((o, idx) => {
+                        {colaFisicaLiderHoy.map((o) => {
                           const marcado = seleccionLoteIds.includes(o.id);
                           return (
                             <div
@@ -1467,7 +1670,7 @@
                                 <input type="checkbox" checked={marcado} onChange={() => {}} className="w-4 h-4" />
                                 <div>
                                   <span className={`text-xs font-extrabold block ${T.textMain}`}>
-                                    #{idx + 1} • {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`} ({o.comprador})
+                                    {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`} ({o.comprador})
                                   </span>
                                   <span className={`text-xs ${T.textSub}`}>{o.cantidad}x {o.productoNombre} • {o.horaCorta || o.fecha}</span>
                                 </div>
@@ -1483,30 +1686,122 @@
                   </div>
                 )}
 
-                {subTabFacturas === "ya_impresas" && (
-                  <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                    <div>
-                      <h2 className={`text-sm font-extrabold ${T.textMain}`}>Historial de Facturas Ya Impresas ({facturasYaImpresas.length})</h2>
-                      <p className={`text-xs ${T.textSub}`}>Salieron de la cola principal para evitar duplicados. Puedes reimprimir cualquiera cuando lo necesites.</p>
+                {/* SUB-TAB D: ARCHIVO HISTÓRICO INFINITO (DESDE / HASTA + BUSCADOR + LOTE PDF POR FOLIO) */}
+                {subTabFacturas === "archivo_historico" && (
+                  <div className="space-y-4">
+                    <div className={`${T.card} rounded-2xl p-5 space-y-4`}>
+                      <div>
+                        <h2 className={`text-base font-extrabold ${T.textMain}`}>Archivo Histórico Infinito de Facturas y Boletas</h2>
+                        <p className={`text-xs ${T.textSub}`}>
+                          Almacena para siempre todos los días cerrados, ordenados por <strong>número de folio (700, 701, 702...)</strong>. Filtra por folio o rango de fechas (Desde / Hasta) para revisar o imprimir en PDF.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                        <div className="sm:col-span-2">
+                          <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Buscar por N° Folio, Cliente, RUT o Producto</label>
+                          <input
+                            type="text"
+                            value={busquedaArchivo}
+                            onChange={(e) => setBusquedaArchivo(e.target.value)}
+                            placeholder="Ej: 702, Sanhoo, 76.123.456-7..."
+                            className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none ${T.input}`}
+                          />
+                        </div>
+                        <div>
+                          <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Fecha Desde</label>
+                          <input
+                            type="date"
+                            value={fechaDesdeArchivo}
+                            onChange={(e) => setFechaDesdeArchivo(e.target.value)}
+                            className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
+                          />
+                        </div>
+                        <div>
+                          <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Fecha Hasta</label>
+                          <input
+                            type="date"
+                            value={fechaHastaArchivo}
+                            onChange={(e) => setFechaHastaArchivo(e.target.value)}
+                            className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
+                          />
+                        </div>
+                      </div>
+
+                      {(busquedaArchivo || fechaDesdeArchivo || fechaHastaArchivo) && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={T.textSub}>Mostrando {archivoHistoricoFiltrado.length} documento(s) en orden numérico de folio</span>
+                          <button
+                            onClick={() => { setBusquedaArchivo(""); setFechaDesdeArchivo(""); setFechaHastaArchivo(""); setSeleccionArchivoIds([]); }}
+                            className="font-bold underline cursor-pointer"
+                          >
+                            Limpiar Filtros
+                          </button>
+                        </div>
+                      )}
+
+                      {archivoHistoricoFiltrado.length === 0 ? (
+                        <div className={`${T.cardMuted} rounded-xl p-8 text-center space-y-1`}>
+                          <p className={`text-xs font-bold ${T.textMain}`}>No hay facturas archivadas en ese rango o búsqueda</p>
+                          <p className={`text-[11px] ${T.textSub}`}>Cuando presiones "Cerrar Día" al finalizar una jornada, todas las facturas del día se guardarán aquí para siempre.</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-200/40 max-h-[480px] overflow-y-auto">
+                          {archivoHistoricoFiltrado.map((o) => {
+                            const marcado = seleccionArchivoIds.includes(o.id);
+                            return (
+                              <div
+                                key={o.id}
+                                onClick={() => setSeleccionArchivoIds((prev) => prev.includes(o.id) ? prev.filter((x) => x !== o.id) : [...prev, o.id])}
+                                className="py-3.5 flex items-center justify-between gap-3 cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <input type="checkbox" checked={marcado} onChange={() => {}} className="w-4 h-4 shrink-0" />
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className={`text-xs font-extrabold ${T.textMain}`}>
+                                        {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
+                                      </span>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${T.tag}`}>{o.canal}</span>
+                                      <span className={`text-[11px] font-semibold ${T.textSub}`}>Fecha: {o.fechaIso || o.fechaCierreDia}</span>
+                                    </div>
+                                    <p className={`text-xs truncate mt-0.5 ${T.textSub}`}>
+                                      {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""} — {o.cantidad}x {o.productoNombre} • <strong>${Number(o.totalClp || 0).toLocaleString("es-CL")}</strong>
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setDteVisualizando(o); }}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 cursor-pointer ${T.btnSec}`}
+                                >
+                                  Ver / PDF
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    {facturasYaImpresas.length === 0 ? (
-                      <p className={`text-xs text-center py-8 ${T.textSub}`}>Aún no hay documentos archivados como impresos.</p>
-                    ) : (
-                      <div className="divide-y divide-slate-200/40">
-                        {facturasYaImpresas.map((o) => (
-                          <div key={o.id} className="py-3.5 flex items-center justify-between gap-3 text-xs">
-                            <div>
-                              <span className={`font-extrabold ${T.textMain}`}>
-                                {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
-                              </span>
-                              <span className={`ml-2 ${T.textSub}`}>• {o.canal} • {o.comprador}</span>
-                              <span className={`block text-[11px] mt-0.5 ${T.textSub}`}>Impresa: {o.fechaImpresion || o.fecha}</span>
+
+                    {/* BITÁCORA DE CIERRES DIARIOS REALIZADOS */}
+                    {cierresDiarios.length > 0 && (
+                      <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                        <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Bitácora de Cierres Diarios ({cierresDiarios.length})</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          {cierresDiarios.slice(0, 12).map((c) => (
+                            <div
+                              key={c.id}
+                              onClick={() => { setFechaDesdeArchivo(c.fechaCierreDia); setFechaHastaArchivo(c.fechaCierreDia); }}
+                              className={`${T.cardMuted} p-3 rounded-xl text-xs cursor-pointer`}
+                            >
+                              <p className={`font-extrabold ${T.textMain}`}>Cierre {c.fechaCierreDia}</p>
+                              <p className={`text-[11px] ${T.textSub}`}>{c.cantidadDocumentos} docs • Folios #{c.folioDesde} al #{c.folioHasta}</p>
+                              <p className={`text-xs font-extrabold mt-1 ${T.textMain}`}>${Number(c.totalClp || 0).toLocaleString("es-CL")}</p>
                             </div>
-                            <button onClick={() => setDteVisualizando(o)} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}>
-                              Reimprimir
-                            </button>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1832,9 +2127,9 @@
                   }`}
                 >
                   <span>{item.label}</span>
-                  {item.id === "facturas" && facturasPorImprimir.length > 0 && (
+                  {item.id === "facturas" && facturasPorImprimirHoy.length > 0 && (
                     <span className="absolute -top-1 right-1.5 px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-amber-400 text-slate-950">
-                      {facturasPorImprimir.length}
+                      {facturasPorImprimirHoy.length}
                     </span>
                   )}
                 </button>
