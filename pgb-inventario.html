@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PGB Distribution Chile SpA • Inventario General</title>
+  <title>NEXUS ERP • Inventario General</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -55,9 +55,12 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
+    const RUT_PGB = "769497226";
+    const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+
     const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
-    const EQUIPO_CONTEO = ["Nico", "Edwin", "Diego"];
-    const JEFATURA = ["Pedro", "Bedanli"];
+    const EQUIPO_CONTEO_PGB = ["Nico", "Edwin", "Diego"];
+    const JEFATURA_PGB = ["Pedro", "Bedanli"];
 
     const normalizarTexto = (str) => {
       if (str === null || str === undefined) return "";
@@ -92,25 +95,29 @@
       return p.codigo ? `[${p.codigo}] ${p.nombre}` : p.nombre;
     };
 
-    const LogoPGB = ({ className = "h-16 w-auto" }) => {
+    const LogoEmpresa = ({ rutActivo, nombreEmpresa, className = "h-16 w-auto" }) => {
       const [logoUrl, setLogoUrl] = useState("");
 
       useEffect(() => {
-        const unsub = db.collection("saas_empresas").doc("769497226").onSnapshot((doc) => {
+        const unsub = db.collection("saas_empresas").doc(rutActivo).onSnapshot((doc) => {
           if (doc.exists && doc.data().logoBase64) {
             setLogoUrl(doc.data().logoBase64);
           }
         });
         return () => unsub();
-      }, []);
+      }, [rutActivo]);
 
       if (logoUrl) {
-        return <img src={logoUrl} alt="PGB Distribution Chile SpA" className={`${className} object-contain mx-auto`} />;
+        return <img src={logoUrl} alt={nombreEmpresa} className={`${className} object-contain mx-auto`} />;
       }
-      return <span className="font-extrabold text-slate-800 text-lg">PGB Distribution Chile SpA</span>;
+      return <span className="font-extrabold text-slate-800 text-lg">{nombreEmpresa}</span>;
     };
 
     function AppInventario() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || RUT_PGB);
+      const esPgb = rutActivo === RUT_PGB;
+
+      const [empresaData, setEmpresaData] = useState(null);
       const [conectado, setConectado] = useState(false);
       const [catalogoProductos, setCatalogoProductos] = useState([]);
       const [esperandoAjuste, setEsperandoAjuste] = useState([]);
@@ -125,29 +132,39 @@
       const [guardandoConteo, setGuardandoConteo] = useState(false);
       const [imprimiendoHoja, setImprimiendoHoja] = useState(false);
 
+      // Rutas de colección dinámicas: PGB conserva sus colecciones raíz 100% intactas; otras empresas usan su carpeta aislada por RUT
+      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
+      const colCatalogoRef = () => (esPgb ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
+      const colEsperandoRef = () => (esPgb ? db.collection("inventario_general_esperando") : empRef().collection("inventario_general_esperando"));
+      const colHistorialRef = () => (esPgb ? db.collection("historial_inventario") : empRef().collection("historial_inventario"));
+
       useEffect(() => {
         let unsubs = [];
 
         const conectar = () => {
-          const u1 = db.collection("catalogo_productos").onSnapshot((snap) => {
+          const u0 = empRef().onSnapshot((doc) => {
+            if (doc.exists) setEmpresaData({ id: doc.id, ...doc.data() });
+          });
+
+          const u1 = colCatalogoRef().onSnapshot((snap) => {
             setConectado(true);
             const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es", { sensitivity: "base" }));
             setCatalogoProductos(lista);
           });
 
-          const u2 = db.collection("inventario_general_esperando").onSnapshot((snap) => {
+          const u2 = colEsperandoRef().onSnapshot((snap) => {
             const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
             setEsperandoAjuste(lista);
           });
 
-          unsubs = [u1, u2];
+          unsubs = [u0, u1, u2];
         };
 
         auth.signInAnonymously().then(conectar).catch(conectar);
         return () => unsubs.forEach((fn) => typeof fn === "function" && fn());
-      }, []);
+      }, [rutActivo]);
 
       const importarCatalogoExcel = async (e) => {
         const file = e.target.files[0];
@@ -234,16 +251,17 @@
             nuevos.push({ codigo: codigoVal, nombre: nombreVal, proveedor: proveedorVal });
           });
 
+          const col = colCatalogoRef();
           const CHUNK = 400;
           for (let i = 0; i < nuevos.length; i += CHUNK) {
             const batch = db.batch();
-            nuevos.slice(i, i + CHUNK).forEach((item) => batch.set(db.collection("catalogo_productos").doc(), item));
+            nuevos.slice(i, i + CHUNK).forEach((item) => batch.set(col.doc(), item));
             await batch.commit();
           }
           for (let i = 0; i < actualizables.length; i += CHUNK) {
             const batch = db.batch();
             actualizables.slice(i, i + CHUNK).forEach((item) =>
-              batch.update(db.collection("catalogo_productos").doc(item.id), {
+              batch.update(col.doc(item.id), {
                 codigo: item.codigo,
                 nombre: item.nombre,
                 proveedor: item.proveedor
@@ -252,7 +270,7 @@
             await batch.commit();
           }
 
-          alert(`✅ Catálogo actualizado: ${nuevos.length} nuevos y ${actualizables.length} fusionados.`);
+          alert(`Catálogo actualizado: ${nuevos.length} nuevos y ${actualizables.length} fusionados.`);
         } catch (err) {
           alert("Error al leer Excel: " + err.message);
         }
@@ -339,13 +357,26 @@
           return alert("Ingresa la cantidad contada en todos los productos seleccionados (puede ser 0 si no hay stock).");
         }
 
-        const resp = prompt(
-          `¿Quién realizó este conteo físico en bodega?\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`,
-          "Diego"
-        );
-        if (!resp || !EQUIPO_CONTEO.includes(resp.trim())) {
-          if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
-          return;
+        let responsableNombre = "";
+        if (esPgb) {
+          const resp = prompt(
+            `¿Quién realizó este conteo físico en bodega?\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`,
+            "Diego"
+          );
+          if (!resp || !EQUIPO_CONTEO_PGB.includes(resp.trim())) {
+            if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
+            return;
+          }
+          responsableNombre = resp.trim();
+        } else {
+          const equipoEmp = Array.isArray(empresaData?.equipo) ? empresaData.equipo.map((m) => m.nombre) : [];
+          const sugerido = equipoEmp[0] || "Operador Bodega";
+          const resp = prompt(
+            `¿Quién realizó este conteo físico en bodega?${equipoEmp.length ? `\nEquipo registrado: ${equipoEmp.join(", ")}` : ""}`,
+            sugerido
+          );
+          if (!resp || !resp.trim()) return;
+          responsableNombre = resp.trim();
         }
 
         setGuardandoConteo(true);
@@ -353,9 +384,10 @@
 
         try {
           const batch = db.batch();
+          const colEsp = colEsperandoRef();
           productosSeleccionadosLista.forEach((p) => {
             const info = datosConteo[p.id];
-            const ref = db.collection("inventario_general_esperando").doc();
+            const ref = colEsp.doc();
             batch.set(ref, {
               productoId: p.id,
               codigoProducto: p.codigo || "",
@@ -365,7 +397,7 @@
               cantidadContada: Number(info.cantidad),
               unidad: info.unidad || "Unidad",
               observacion: (info.observacion || "").trim(),
-              contadoPor: resp.trim(),
+              contadoPor: responsableNombre,
               fechaHoraConteo: ahoraStr,
               timestamp: Date.now()
             });
@@ -375,7 +407,7 @@
           setModoConteoDigital(false);
           setSeleccionados({});
           setDatosConteo({});
-          alert("✅ Conteo enviado a la bandeja de espera de ajuste para Jefatura (Pedro / Bedanli).");
+          alert("Conteo enviado a la bandeja de espera de ajuste para Jefatura.");
         } catch (err) {
           alert("Error al guardar conteo: " + err.message);
         }
@@ -383,13 +415,21 @@
       };
 
       const aprobarYAjustarInventario = async (item) => {
-        const jefe = prompt(
-          `Confirma tu nombre como Jefatura (Pedro o Bedanli) para aprobar el ajuste, limpiar desfases en Cuadratura y enviarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`,
-          "Pedro"
-        );
-        if (!jefe || !JEFATURA.includes(jefe.trim())) {
-          if (jefe) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
-          return;
+        let jefeNombre = "";
+        if (esPgb) {
+          const jefe = prompt(
+            `Confirma tu nombre como Jefatura (Pedro o Bedanli) para aprobar el ajuste, limpiar desfases en Cuadratura y enviarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`,
+            "Pedro"
+          );
+          if (!jefe || !JEFATURA_PGB.includes(jefe.trim())) {
+            if (jefe) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
+            return;
+          }
+          jefeNombre = jefe.trim();
+        } else {
+          const jefe = prompt("Confirma tu nombre como Jefatura / Supervisor para aprobar este ajuste:", "Administrador");
+          if (!jefe || !jefe.trim()) return;
+          jefeNombre = jefe.trim();
         }
 
         const ahoraStr = new Date().toLocaleString("es-CL");
@@ -400,12 +440,12 @@
           const detalleTexto = `Inventario General (${item.proveedor}) — Stock físico contado: ${item.cantidadContada} ${item.unidad}${item.observacion ? ` — Nota: ${item.observacion}` : ""}`;
 
           // 1. Registrar en Historial Acumulativo
-          const colHist = db.collection("historial_inventario");
+          const colHist = colHistorialRef();
           await colHist.add({
             producto: prodNorm,
             unidad: item.unidad,
             factura: "INV-GRAL",
-            corregidoPor: jefe.trim(),
+            corregidoPor: jefeNombre,
             fechaHoraAjuste: ahoraStr,
             contadoPor: item.contadoPor,
             fechaHoraConteo: item.fechaHoraConteo,
@@ -423,68 +463,72 @@
             await batchClean.commit();
           }
 
-          // 2. Sincronizar y limpiar cualquier descuadre abierto de este mismo producto en Cuadratura Automática
+          // 2. Sincronizar y limpiar descuadres (solo en colecciones operativas de PGB o stock online en clientes)
           const batchSync = db.batch();
           let desfasesLimpiados = 0;
 
-          // 2a. Limpiar en Incidencias de Ruta
-          const incSnap = await db.collection("incidencias").get();
-          incSnap.docs.forEach((docSnap) => {
-            const inc = docSnap.data();
-            const coincidePrincipal = esMismoProducto(prodNorm, codItem, inc.producto, inc.codigoProducto);
-            const coincideCruce = inc.productoCruce && esMismoProducto(prodNorm, codItem, inc.productoCruce, inc.codigoProductoCruce);
+          if (esPgb) {
+            const incSnap = await db.collection("incidencias").get();
+            incSnap.docs.forEach((docSnap) => {
+              const inc = docSnap.data();
+              const coincidePrincipal = esMismoProducto(prodNorm, codItem, inc.producto, inc.codigoProducto);
+              const coincideCruce = inc.productoCruce && esMismoProducto(prodNorm, codItem, inc.productoCruce, inc.codigoProductoCruce);
 
-            if (coincidePrincipal || coincideCruce) {
-              const acciones = inc.acciones || [];
-              const checks = { ...(inc.checksAcciones || {}) };
-              if (acciones.includes("Ajustar Inventario en Bodega") && !checks["Ajustar Inventario en Bodega"]?.completado) {
-                checks["Ajustar Inventario en Bodega"] = {
-                  completado: true,
-                  por: `${jefe.trim()} (Inv. Gral)`,
-                  fechaHora: ahoraStr
-                };
-                const todasListas = acciones.every((ac) => checks[ac] && checks[ac].completado);
-                batchSync.update(db.collection("incidencias").doc(docSnap.id), {
-                  checksAcciones: checks,
-                  resuelto: todasListas ? true : Boolean(inc.resuelto)
+              if (coincidePrincipal || coincideCruce) {
+                const acciones = inc.acciones || [];
+                const checks = { ...(inc.checksAcciones || {}) };
+                if (acciones.includes("Ajustar Inventario en Bodega") && !checks["Ajustar Inventario en Bodega"]?.completado) {
+                  checks["Ajustar Inventario en Bodega"] = {
+                    completado: true,
+                    por: `${jefeNombre} (Inv. Gral)`,
+                    fechaHora: ahoraStr
+                  };
+                  const todasListas = acciones.every((ac) => checks[ac] && checks[ac].completado);
+                  batchSync.update(db.collection("incidencias").doc(docSnap.id), {
+                    checksAcciones: checks,
+                    resuelto: todasListas ? true : Boolean(inc.resuelto)
+                  });
+                  desfasesLimpiados++;
+                }
+              }
+            });
+
+            const bodegaSnap = await db.collection("incidentes_bodega").where("ajustado", "==", false).get();
+            bodegaSnap.docs.forEach((docSnap) => {
+              const ib = docSnap.data();
+              if (esMismoProducto(prodNorm, codItem, ib.producto, ib.codigoProducto)) {
+                batchSync.update(db.collection("incidentes_bodega").doc(docSnap.id), {
+                  ajustado: true,
+                  ajustadoPor: `${jefeNombre} (Inv. Gral)`,
+                  fechaHoraAjuste: ahoraStr
                 });
                 desfasesLimpiados++;
               }
-            }
-          });
+            });
 
-          // 2b. Limpiar en Incidentes Internos de Bodega
-          const bodegaSnap = await db.collection("incidentes_bodega").where("ajustado", "==", false).get();
-          bodegaSnap.docs.forEach((docSnap) => {
-            const ib = docSnap.data();
-            if (esMismoProducto(prodNorm, codItem, ib.producto, ib.codigoProducto)) {
-              batchSync.update(db.collection("incidentes_bodega").doc(docSnap.id), {
-                ajustado: true,
-                ajustadoPor: `${jefe.trim()} (Inv. Gral)`,
-                fechaHoraAjuste: ahoraStr
-              });
-              desfasesLimpiados++;
-            }
-          });
+            const conteoSnap = await db.collection("conteo_pendiente").get();
+            conteoSnap.docs.forEach((docSnap) => {
+              const cp = docSnap.data();
+              if (esMismoProducto(prodNorm, codItem, cp.producto, cp.codigoProducto)) {
+                batchSync.delete(db.collection("conteo_pendiente").doc(docSnap.id));
+                desfasesLimpiados++;
+              }
+            });
+          } else if (item.productoId) {
+            // Para clientes omnicanal, actualiza el stock físico verificado en su catálogo
+            batchSync.update(colCatalogoRef().doc(item.productoId), {
+              stockOnline: Number(item.cantidadContada)
+            });
+          }
 
-          // 2c. Limpiar en Conteo Cíclico Pendiente
-          const conteoSnap = await db.collection("conteo_pendiente").get();
-          conteoSnap.docs.forEach((docSnap) => {
-            const cp = docSnap.data();
-            if (esMismoProducto(prodNorm, codItem, cp.producto, cp.codigoProducto)) {
-              batchSync.delete(db.collection("conteo_pendiente").doc(docSnap.id));
-              desfasesLimpiados++;
-            }
-          });
-
-          // 3. Quitar de la lista de espera de Inventario General
-          batchSync.delete(db.collection("inventario_general_esperando").doc(item.id));
+          // 3. Quitar de la lista de espera
+          batchSync.delete(colEsperandoRef().doc(item.id));
           await batchSync.commit();
 
           alert(
             desfasesLimpiados > 0
-              ? `✅ Ajustado, enviado al Historial Acumulativo y se limpiaron ${desfasesLimpiados} desfase(s) abierto(s) de este producto en Cuadratura.`
-              : "✅ Ajustado y enviado al Historial Acumulativo de Correcciones de Inventario."
+              ? `Ajustado, enviado al Historial Acumulativo y se limpiaron ${desfasesLimpiados} desfase(s) abierto(s) de este producto en Cuadratura.`
+              : "Ajustado y stock físico confirmado correctamente."
           );
         } catch (err) {
           alert("Error al ajustar: " + err.message);
@@ -494,19 +538,22 @@
       const eliminarDeEspera = async (id) => {
         if (confirm("¿Eliminar este registro de inventario pendiente?")) {
           try {
-            await db.collection("inventario_general_esperando").doc(id).delete();
+            await colEsperandoRef().doc(id).delete();
           } catch (err) {
             alert(err.message);
           }
         }
       };
 
+      const urlVolver = esPgb ? "pgb-operacion.html" : "empresa-panel.html";
+      const nombreEmpresaDisplay = empresaData?.nombre || (esPgb ? "PGB Distribution Chile SpA" : "Empresa");
+
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900">
           {imprimiendoHoja && (
             <div className="print-only bg-white text-black p-8">
               <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-5">
-                <LogoPGB className="h-20 w-auto mb-2" />
+                <LogoEmpresa rutActivo={rutActivo} nombreEmpresa={nombreEmpresaDisplay} className="h-20 w-auto mb-2" />
                 <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
                   HOJA DE TOMA DE INVENTARIO FÍSICO EN BODEGA
                 </h2>
@@ -540,7 +587,7 @@
 
               <div className="mt-12 pt-6 border-t text-xs flex justify-between">
                 <p>Contado por (Bodega): ___________________________</p>
-                <p>Supervisión (Pedro / Bedanli): ___________________________</p>
+                <p>Supervisión: ___________________________</p>
               </div>
             </div>
           )}
@@ -550,13 +597,13 @@
               <div>
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   <a
-                    href="pgb-operacion.html"
+                    href={urlVolver}
                     className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl transition"
                   >
-                    ← Volver a Operación
+                    ← {esPgb ? "Volver a Operación" : "Volver"}
                   </a>
                   <label className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shadow-sm transition">
-                    {importandoExcel ? "⏳ Cargando..." : "📥 Subir Excel (.xlsx)"}
+                    {importandoExcel ? "Cargando..." : "Subir Excel (.xlsx)"}
                     <input type="file" accept=".xlsx,.xls,.csv" onChange={importarCatalogoExcel} disabled={importandoExcel} className="hidden" />
                   </label>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -565,10 +612,10 @@
                   </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                  📦 INVENTARIO <span className="text-amber-500">GENERAL</span>
+                  INVENTARIO <span className="text-amber-500">GENERAL</span>
                 </h1>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Filtra por proveedor, selecciona todo o marca excepciones para PDF o conteo digital.
+                  {nombreEmpresaDisplay} • Filtra por proveedor, selecciona todo o marca excepciones para PDF o conteo digital.
                 </p>
               </div>
 
@@ -589,7 +636,7 @@
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
                   <div>
                     <h2 className="text-lg font-black text-amber-700">
-                      📱 Conteo Digital en Estantería ({productosSeleccionadosLista.length} productos)
+                      Conteo Digital en Estantería ({productosSeleccionadosLista.length} productos)
                     </h2>
                     <p className="text-xs text-slate-500">
                       Registra el stock físico contado. Pasará directo a la bandeja de espera para ajuste de Jefatura.
@@ -600,7 +647,7 @@
                     onClick={() => setModoConteoDigital(false)}
                     className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer"
                   >
-                    ✕ Cancelar
+                    Cancelar
                   </button>
                 </div>
 
@@ -667,7 +714,7 @@
                   disabled={guardandoConteo}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer"
                 >
-                  {guardandoConteo ? "⏳ Guardando conteo..." : "💾 Guardar Conteo y Enviar a Espera de Ajuste"}
+                  {guardandoConteo ? "Guardando conteo..." : "Guardar Conteo y Enviar a Espera de Ajuste"}
                 </button>
               </form>
             )}
@@ -676,7 +723,7 @@
               <div className="light-card rounded-3xl p-5 sm:p-7 space-y-5">
                 <div>
                   <label className="text-xs font-extrabold uppercase tracking-wider text-slate-500 block mb-2">
-                    🏭 Filtrar por Proveedor:
+                    Filtrar por Proveedor:
                   </label>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -716,7 +763,7 @@
                     type="text"
                     value={busqueda}
                     onChange={(e) => setBusqueda(e.target.value)}
-                    placeholder="🔍 Buscar producto por nombre, código o proveedor..."
+                    placeholder="Buscar producto por nombre, código o proveedor..."
                     className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none"
                   />
 
@@ -731,7 +778,7 @@
                         onClick={seleccionarTodosVisibles}
                         className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-1.5 rounded-lg border border-slate-300 cursor-pointer"
                       >
-                        ✓ Seleccionar visibles ({productosFiltrados.length})
+                        Seleccionar visibles ({productosFiltrados.length})
                       </button>
                       {productosSeleccionadosLista.length > 0 && (
                         <button
@@ -753,7 +800,7 @@
                     onClick={iniciarImpresionPDF}
                     className="py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
                   >
-                    🖨️ Imprimir Hoja PDF ({productosSeleccionadosLista.length})
+                    Imprimir Hoja PDF ({productosSeleccionadosLista.length})
                   </button>
                   <button
                     type="button"
@@ -761,7 +808,7 @@
                     onClick={abrirConteoDigital}
                     className="py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-xs sm:text-sm shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
                   >
-                    📱 Hacer Conteo Digital ({productosSeleccionadosLista.length})
+                    Hacer Conteo Digital ({productosSeleccionadosLista.length})
                   </button>
                 </div>
 
@@ -812,12 +859,10 @@
             <div className="light-card rounded-3xl p-5 sm:p-7 border-2 border-amber-200 space-y-4">
               <div>
                 <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                  ⏳ Registro de Inventario Esperando Ajuste ({esperandoAjuste.length})
+                  Registro de Inventario Esperando Ajuste ({esperandoAjuste.length})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Conteos digitales terminados por bodega. Al aprobar Jefatura, se limpian los desfases abiertos en{" "}
-                  <strong className="text-sky-700">Cuadratura</strong> y pasan al{" "}
-                  <strong className="text-emerald-700">Historial Acumulativo</strong>.
+                  Conteos digitales terminados por bodega pendientes de validación por Jefatura.
                 </p>
               </div>
 
@@ -843,7 +888,7 @@
                           </span>
                         </div>
                         <p className="text-slate-600">
-                          📋 Contado por <strong className="text-slate-900">{item.contadoPor}</strong> el {item.fechaHoraConteo}
+                          Contado por <strong className="text-slate-900">{item.contadoPor}</strong> el {item.fechaHoraConteo}
                           {item.observacion ? ` — Nota: "${item.observacion}"` : ""}
                         </p>
                       </div>
@@ -854,7 +899,7 @@
                           onClick={() => aprobarYAjustarInventario(item)}
                           className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2.5 rounded-xl shadow-sm transition cursor-pointer"
                         >
-                          ⚖️ Ajustar y Pasar a Historial
+                          Ajustar y Pasar a Historial
                         </button>
                         <button
                           type="button"
@@ -862,7 +907,7 @@
                           className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-2.5 rounded-xl font-bold transition cursor-pointer"
                           title="Eliminar"
                         >
-                          🗑️
+                          Eliminar
                         </button>
                       </div>
                     </div>
