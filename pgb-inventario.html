@@ -3,38 +3,42 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Inventario General</title>
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>NEXUS ERP • Control de Inventario y Toma Física</title>
+  <script>
+    (function () {
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) window.location.replace("index.html");
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) window.location.replace("index.html");
+        else if (ev.persisted && rutActual !== rutInicial) window.location.reload();
+      });
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .light-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05); }
-    .print-only { display: none; }
-    @media print {
-      body { background: white !important; color: black !important; }
-      .no-print { display: none !important; }
-      .print-only { display: block !important; }
-    }
+    @media print { .no-print { display: none !important; } body { background: white !important; color: black !important; } }
   </style>
-  <script>
-    window.onerror = function (msg, url, line) {
-      var box = document.getElementById("error-fallback");
-      if (box) {
-        box.style.display = "block";
-        box.innerText = "Error detectado (Línea " + line + "): " + msg;
-      }
-    };
-  </script>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-amber-400 selection:text-slate-950">
-  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
+<body class="min-h-screen">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -49,879 +53,171 @@
       appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
     };
 
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
 
     const RUT_PGB = "769497226";
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
 
-    const UNIDADES = ["Unidad", "Caja", "Manga", "Unidad suelta", "Display", "Pack"];
-    const EQUIPO_CONTEO_PGB = ["Nico", "Edwin", "Diego"];
-    const JEFATURA_PGB = ["Pedro", "Bedanli"];
-
-    const normalizarTexto = (str) => {
-      if (str === null || str === undefined) return "";
-      return String(str).trim().replace(/\s+/g, " ").toUpperCase();
+    const TEMAS = {
+      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
+      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
     };
 
-    const huellaFlexible = (txt) =>
-      normalizarTexto(txt)
-        .replace(/^\[[^\]]+\]\s*/, "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\bDE\b/g, " ")
-        .replace(/(\d+)\s+(G|GR|GRS|KG|ML|L|LT|LTS|CC|UN|UND)\b/g, "$1$2")
-        .replace(/[^A-Z0-9]/g, "");
-
-    const extraerCodigo = (txt) => {
-      const m = normalizarTexto(txt).match(/^\[([^\]]+)\]/);
-      return m ? normalizarTexto(m[1]) : "";
-    };
-
-    const esMismoProducto = (prodA, codA, prodB, codB) => {
-      const cA = normalizarTexto(codA) || extraerCodigo(prodA);
-      const cB = normalizarTexto(codB) || extraerCodigo(prodB);
-      if (cA && cB && cA === cB) return true;
-      const hA = huellaFlexible(prodA);
-      const hB = huellaFlexible(prodB);
-      return Boolean(hA && hB && hA === hB);
-    };
-
-    const formatearDisplayProducto = (p) => {
-      if (!p) return "";
-      return p.codigo ? `[${p.codigo}] ${p.nombre}` : p.nombre;
-    };
-
-    const LogoEmpresa = ({ rutActivo, nombreEmpresa, className = "h-16 w-auto" }) => {
-      const [logoUrl, setLogoUrl] = useState("");
-
-      useEffect(() => {
-        if (!rutActivo) return;
-        const unsub = db.collection("saas_empresas").doc(rutActivo).onSnapshot((doc) => {
-          if (doc.exists && doc.data().logoBase64) {
-            setLogoUrl(doc.data().logoBase64);
-          }
-        });
-        return () => unsub();
-      }, [rutActivo]);
-
-      if (logoUrl) {
-        return <img src={logoUrl} alt={nombreEmpresa} className={`${className} object-contain mx-auto`} />;
-      }
-      return <span className="font-extrabold text-slate-800 text-lg">{nombreEmpresa}</span>;
-    };
-
-    function AppInventario() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
-      const esPgb = rutActivo === RUT_PGB;
-
-      const [empresaData, setEmpresaData] = useState(null);
-      const [conectado, setConectado] = useState(false);
-      const [catalogoProductos, setCatalogoProductos] = useState([]);
-      const [esperandoAjuste, setEsperandoAjuste] = useState([]);
-      const [importandoExcel, setImportandoExcel] = useState(false);
-
+    function ControlInventarioApp() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
+      const [empresa, setEmpresa] = useState(null);
+      const [productos, setProductos] = useState([]);
+      const [conteos, setConteos] = useState({});
+      const [filtroProveedor, setFiltroProveedor] = useState("TODOS");
       const [busqueda, setBusqueda] = useState("");
-      const [proveedorActivo, setProveedorActivo] = useState("TODOS");
-      const [seleccionados, setSeleccionados] = useState({});
+      const [guardando, setGuardando] = useState(false);
 
-      const [modoConteoDigital, setModoConteoDigital] = useState(false);
-      const [datosConteo, setDatosConteo] = useState({});
-      const [guardandoConteo, setGuardandoConteo] = useState(false);
-      const [imprimiendoHoja, setImprimiendoHoja] = useState(false);
-
-      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
-      const colCatalogoRef = () => (esPgb ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
-      const colEsperandoRef = () => (esPgb ? db.collection("inventario_general_esperando") : empRef().collection("inventario_general_esperando"));
-      const colHistorialRef = () => (esPgb ? db.collection("historial_inventario") : empRef().collection("historial_inventario"));
+      const esPgb = rutActivo === RUT_PGB;
 
       useEffect(() => {
         if (!rutActivo) {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
+        auth.signInAnonymously().catch(() => {});
+        const empRef = db.collection("saas_empresas").doc(rutActivo);
 
-        let unsubs = [];
-
-        const conectar = () => {
-          const u0 = empRef().onSnapshot((doc) => {
-            if (doc.exists) setEmpresaData({ id: doc.id, ...doc.data() });
-          });
-
-          const u1 = colCatalogoRef().onSnapshot((snap) => {
-            setConectado(true);
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es", { sensitivity: "base" }));
-            setCatalogoProductos(lista);
-          });
-
-          const u2 = colEsperandoRef().onSnapshot((snap) => {
-            const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setEsperandoAjuste(lista);
-          });
-
-          unsubs = [u0, u1, u2];
-        };
-
-        auth.signInAnonymously().then(conectar).catch(conectar);
-        return () => unsubs.forEach((fn) => typeof fn === "function" && fn());
-      }, [rutActivo]);
-
-      const importarCatalogoExcel = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        setImportandoExcel(true);
-
-        try {
-          const buffer = await file.arrayBuffer();
-          const workbook = XLSX.read(buffer, { type: "array" });
-          const sheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-
-          if (!rows || rows.length === 0) {
-            alert("El archivo Excel está vacío.");
-            setImportandoExcel(false);
-            e.target.value = "";
-            return;
-          }
-
-          const normalizarClave = (k) =>
-            String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-          const existentesPorCodigo = new Set(catalogoProductos.filter((p) => p.codigo).map((p) => normalizarTexto(p.codigo)));
-          const existentesPorNombre = new Set(catalogoProductos.filter((p) => p.nombre).map((p) => normalizarTexto(p.nombre)));
-          const existentesPorHuella = new Set(catalogoProductos.filter((p) => p.nombre).map((p) => huellaFlexible(p.nombre)));
-
-          const nuevos = [];
-          const actualizables = [];
-
-          rows.forEach((row) => {
-            const keys = Object.keys(row);
-            let codigoVal = "";
-            let nombreVal = "";
-            let proveedorVal = "";
-
-            keys.forEach((k) => {
-              const kn = normalizarClave(k);
-              const val = row[k];
-              if (!codigoVal && (kn.includes("cod") || kn.includes("sku") || kn === "id" || kn.includes("item"))) {
-                codigoVal = normalizarTexto(val);
-              } else if (!nombreVal && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art") || kn.includes("det"))) {
-                nombreVal = normalizarTexto(val);
-              } else if (!proveedorVal && (kn.includes("prov") || kn.includes("marc") || kn.includes("fab"))) {
-                proveedorVal = normalizarTexto(val);
-              }
-            });
-
-            if (!nombreVal && keys.length >= 2) {
-              codigoVal = normalizarTexto(row[keys[0]]);
-              nombreVal = normalizarTexto(row[keys[1]]);
-              if (keys.length >= 3) proveedorVal = normalizarTexto(row[keys[2]]);
-            } else if (!nombreVal && keys.length === 1) {
-              nombreVal = normalizarTexto(row[keys[0]]);
-            }
-
-            if (!nombreVal) return;
-            const hVal = huellaFlexible(nombreVal);
-
-            const yaExiste =
-              (codigoVal && existentesPorCodigo.has(codigoVal)) ||
-              existentesPorNombre.has(nombreVal) ||
-              (hVal && existentesPorHuella.has(hVal));
-
-            if (yaExiste) {
-              const docExist = catalogoProductos.find(
-                (p) =>
-                  (codigoVal && normalizarTexto(p.codigo) === codigoVal) ||
-                  normalizarTexto(p.nombre) === nombreVal ||
-                  (hVal && huellaFlexible(p.nombre) === hVal)
-              );
-              if (docExist) {
-                const codFinal = codigoVal || docExist.codigo || "";
-                const provFinal = proveedorVal || docExist.proveedor || "";
-                if (codFinal !== docExist.codigo || provFinal !== docExist.proveedor || nombreVal !== docExist.nombre) {
-                  actualizables.push({ id: docExist.id, codigo: codFinal, nombre: nombreVal, proveedor: provFinal });
-                }
-              }
+        const u1 = empRef.onSnapshot((doc) => {
+          if (doc.exists) {
+            const data = { id: doc.id, ...doc.data() };
+            const m = data.modulosActivos || {};
+            if (!esPgb && !m.m5_inv_general && !m.m6_conteo_ciclico) {
+              window.location.replace("empresa-panel.html");
               return;
             }
-
-            if (codigoVal) existentesPorCodigo.add(codigoVal);
-            existentesPorNombre.add(nombreVal);
-            if (hVal) existentesPorHuella.add(hVal);
-            nuevos.push({ codigo: codigoVal, nombre: nombreVal, proveedor: proveedorVal });
-          });
-
-          const col = colCatalogoRef();
-          const CHUNK = 400;
-          for (let i = 0; i < nuevos.length; i += CHUNK) {
-            const batch = db.batch();
-            nuevos.slice(i, i + CHUNK).forEach((item) => batch.set(col.doc(), item));
-            await batch.commit();
-          }
-          for (let i = 0; i < actualizables.length; i += CHUNK) {
-            const batch = db.batch();
-            actualizables.slice(i, i + CHUNK).forEach((item) =>
-              batch.update(col.doc(item.id), {
-                codigo: item.codigo,
-                nombre: item.nombre,
-                proveedor: item.proveedor
-              })
-            );
-            await batch.commit();
-          }
-
-          alert(`Catálogo actualizado: ${nuevos.length} nuevos y ${actualizables.length} fusionados.`);
-        } catch (err) {
-          alert("Error al leer Excel: " + err.message);
-        }
-
-        setImportandoExcel(false);
-        e.target.value = "";
-      };
-
-      const proveedoresDisponibles = useMemo(() => {
-        const setProv = new Set();
-        catalogoProductos.forEach((p) => {
-          if (p.proveedor && p.proveedor.trim()) {
-            setProv.add(normalizarTexto(p.proveedor));
+            setEmpresa(data);
+          } else if (esPgb) {
+            setEmpresa({ nombre: "PGB DISTRIBUTION CHILE SPA", rut: "76.949.722-6", temaVisual: "claro_ejecutivo" });
+          } else {
+            window.location.replace("index.html");
           }
         });
-        return Array.from(setProv).sort((a, b) => a.localeCompare(b, "es"));
-      }, [catalogoProductos]);
 
-      const productosFiltrados = useMemo(() => {
+        const colCat = esPgb ? db.collection("catalogo_productos") : empRef.collection("catalogo");
+        const u2 = colCat.onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, stockOnline: 0, ...d.data() }));
+          lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+          setProductos(lista);
+        });
+
+        return () => { u1(); u2(); };
+      }, [rutActivo, esPgb]);
+
+      const proveedores = useMemo(() => {
+        const set = new Set(productos.map((p) => p.proveedor).filter(Boolean));
+        return ["TODOS", ...Array.from(set).sort()];
+      }, [productos]);
+
+      const filtrados = useMemo(() => {
         const q = busqueda.trim().toLowerCase();
-        return catalogoProductos.filter((p) => {
-          const provNorm = normalizarTexto(p.proveedor);
-          const matchProv = proveedorActivo === "TODOS" ? true : provNorm === proveedorActivo;
-          if (!matchProv) return false;
+        return productos.filter((p) => {
+          if (filtroProveedor !== "TODOS" && p.proveedor !== filtroProveedor) return false;
           if (!q) return true;
-          return (
-            (p.nombre || "").toLowerCase().includes(q) ||
-            (p.codigo || "").toLowerCase().includes(q) ||
-            (p.proveedor || "").toLowerCase().includes(q)
-          );
+          return (p.nombre || "").toLowerCase().includes(q) || (p.codigo || "").toLowerCase().includes(q);
         });
-      }, [catalogoProductos, proveedorActivo, busqueda]);
+      }, [productos, filtroProveedor, busqueda]);
 
-      const productosSeleccionadosLista = useMemo(() => {
-        return catalogoProductos.filter((p) => seleccionados[p.id]);
-      }, [catalogoProductos, seleccionados]);
-
-      const toggleProducto = (id) => {
-        setSeleccionados((prev) => ({ ...prev, [id]: !prev[id] }));
-      };
-
-      const seleccionarTodosVisibles = () => {
-        const nuevo = { ...seleccionados };
-        productosFiltrados.forEach((p) => {
-          nuevo[p.id] = true;
-        });
-        setSeleccionados(nuevo);
-      };
-
-      const limpiarSeleccion = () => {
-        setSeleccionados({});
-      };
-
-      const iniciarImpresionPDF = () => {
-        if (productosSeleccionadosLista.length === 0) {
-          return alert("Selecciona al menos un producto del catálogo para imprimir.");
-        }
-        setImprimiendoHoja(true);
-        setTimeout(() => {
-          window.print();
-          setImprimiendoHoja(false);
-        }, 250);
-      };
-
-      const abrirConteoDigital = () => {
-        if (productosSeleccionadosLista.length === 0) {
-          return alert("Selecciona al menos un producto del catálogo para iniciar el conteo digital.");
-        }
-        const inicial = {};
-        productosSeleccionadosLista.forEach((p) => {
-          inicial[p.id] = datosConteo[p.id] || { cantidad: "", unidad: "Caja", observacion: "" };
-        });
-        setDatosConteo(inicial);
-        setModoConteoDigital(true);
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      };
-
-      const guardarConteoDigital = async (e) => {
-        e.preventDefault();
-        const incompletos = productosSeleccionadosLista.some(
-          (p) => datosConteo[p.id]?.cantidad === "" || datosConteo[p.id]?.cantidad === undefined
-        );
-        if (incompletos) {
-          return alert("Ingresa la cantidad contada en todos los productos seleccionados (puede ser 0 si no hay stock).");
-        }
-
-        let responsableNombre = "";
-        if (esPgb) {
-          const resp = prompt(
-            `¿Quién realizó este conteo físico en bodega?\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`,
-            "Diego"
-          );
-          if (!resp || !EQUIPO_CONTEO_PGB.includes(resp.trim())) {
-            if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
-            return;
-          }
-          responsableNombre = resp.trim();
-        } else {
-          const equipoEmp = Array.isArray(empresaData?.equipo) ? empresaData.equipo.map((m) => m.nombre) : [];
-          const sugerido = equipoEmp[0] || "Operador Bodega";
-          const resp = prompt(
-            `¿Quién realizó este conteo físico en bodega?${equipoEmp.length ? `\nEquipo registrado: ${equipoEmp.join(", ")}` : ""}`,
-            sugerido
-          );
-          if (!resp || !resp.trim()) return;
-          responsableNombre = resp.trim();
-        }
-
-        setGuardandoConteo(true);
-        const ahoraStr = new Date().toLocaleString("es-CL");
-
+      const aplicarConteoAlStock = async () => {
+        const ids = Object.keys(conteos).filter((k) => conteos[k] !== "" && conteos[k] !== undefined);
+        if (ids.length === 0) return alert("Ingresa al menos una cantidad contada.");
+        setGuardando(true);
         try {
+          const colCat = esPgb ? db.collection("catalogo_productos") : db.collection("saas_empresas").doc(rutActivo).collection("catalogo");
           const batch = db.batch();
-          const colEsp = colEsperandoRef();
-          productosSeleccionadosLista.forEach((p) => {
-            const info = datosConteo[p.id];
-            const ref = colEsp.doc();
-            batch.set(ref, {
-              productoId: p.id,
-              codigoProducto: p.codigo || "",
-              nombreProducto: p.nombre,
-              productoDisplay: formatearDisplayProducto(p),
-              proveedor: p.proveedor || "Sin proveedor",
-              cantidadContada: Number(info.cantidad),
-              unidad: info.unidad || "Unidad",
-              observacion: (info.observacion || "").trim(),
-              contadoPor: responsableNombre,
-              fechaHoraConteo: ahoraStr,
-              timestamp: Date.now()
-            });
+          ids.forEach((id) => {
+            batch.update(colCat.doc(id), { stockOnline: Math.max(0, Number(conteos[id])) });
           });
-
           await batch.commit();
-          setModoConteoDigital(false);
-          setSeleccionados({});
-          setDatosConteo({});
-          alert("Conteo enviado a la bandeja de espera de ajuste para Jefatura.");
+          setConteos({});
+          alert(`Inventario actualizado para ${ids.length} producto(s).`);
         } catch (err) {
-          alert("Error al guardar conteo: " + err.message);
+          alert(err.message);
         }
-        setGuardandoConteo(false);
+        setGuardando(false);
       };
 
-      const aprobarYAjustarInventario = async (item) => {
-        let jefeNombre = "";
-        if (esPgb) {
-          const jefe = prompt(
-            `Confirma tu nombre como Jefatura (Pedro o Bedanli) para aprobar el ajuste, limpiar desfases en Cuadratura y enviarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`,
-            "Pedro"
-          );
-          if (!jefe || !JEFATURA_PGB.includes(jefe.trim())) {
-            if (jefe) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
-            return;
-          }
-          jefeNombre = jefe.trim();
-        } else {
-          const jefe = prompt("Confirma tu nombre como Jefatura / Supervisor para aprobar este ajuste:", "Administrador");
-          if (!jefe || !jefe.trim()) return;
-          jefeNombre = jefe.trim();
-        }
-
-        const ahoraStr = new Date().toLocaleString("es-CL");
-        const prodNorm = normalizarTexto(item.productoDisplay || item.nombreProducto);
-        const codItem = item.codigoProducto || extraerCodigo(prodNorm);
-
-        try {
-          const detalleTexto = `Inventario General (${item.proveedor}) — Stock físico contado: ${item.cantidadContada} ${item.unidad}${item.observacion ? ` — Nota: ${item.observacion}` : ""}`;
-
-          const colHist = colHistorialRef();
-          await colHist.add({
-            producto: prodNorm,
-            unidad: item.unidad,
-            factura: "INV-GRAL",
-            corregidoPor: jefeNombre,
-            fechaHoraAjuste: ahoraStr,
-            contadoPor: item.contadoPor,
-            fechaHoraConteo: item.fechaHoraConteo,
-            detalle: detalleTexto,
-            fechaHora: ahoraStr,
-            timestamp: Date.now()
-          });
-
-          const snap = await colHist.where("producto", "==", prodNorm).get();
-          const regs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          regs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          if (regs.length > 10) {
-            const batchClean = db.batch();
-            regs.slice(5).forEach((r) => batchClean.delete(colHist.doc(r.id)));
-            await batchClean.commit();
-          }
-
-          const batchSync = db.batch();
-          let desfasesLimpiados = 0;
-
-          if (esPgb) {
-            const incSnap = await db.collection("incidencias").get();
-            incSnap.docs.forEach((docSnap) => {
-              const inc = docSnap.data();
-              const coincidePrincipal = esMismoProducto(prodNorm, codItem, inc.producto, inc.codigoProducto);
-              const coincideCruce = inc.productoCruce && esMismoProducto(prodNorm, codItem, inc.productoCruce, inc.codigoProductoCruce);
-
-              if (coincidePrincipal || coincideCruce) {
-                const acciones = inc.acciones || [];
-                const checks = { ...(inc.checksAcciones || {}) };
-                if (acciones.includes("Ajustar Inventario en Bodega") && !checks["Ajustar Inventario en Bodega"]?.completado) {
-                  checks["Ajustar Inventario en Bodega"] = {
-                    completado: true,
-                    por: `${jefeNombre} (Inv. Gral)`,
-                    fechaHora: ahoraStr
-                  };
-                  const todasListas = acciones.every((ac) => checks[ac] && checks[ac].completado);
-                  batchSync.update(db.collection("incidencias").doc(docSnap.id), {
-                    checksAcciones: checks,
-                    resuelto: todasListas ? true : Boolean(inc.resuelto)
-                  });
-                  desfasesLimpiados++;
-                }
-              }
-            });
-
-            const bodegaSnap = await db.collection("incidentes_bodega").where("ajustado", "==", false).get();
-            bodegaSnap.docs.forEach((docSnap) => {
-              const ib = docSnap.data();
-              if (esMismoProducto(prodNorm, codItem, ib.producto, ib.codigoProducto)) {
-                batchSync.update(db.collection("incidentes_bodega").doc(docSnap.id), {
-                  ajustado: true,
-                  ajustadoPor: `${jefeNombre} (Inv. Gral)`,
-                  fechaHoraAjuste: ahoraStr
-                });
-                desfasesLimpiados++;
-              }
-            });
-
-            const conteoSnap = await db.collection("conteo_pendiente").get();
-            conteoSnap.docs.forEach((docSnap) => {
-              const cp = docSnap.data();
-              if (esMismoProducto(prodNorm, codItem, cp.producto, cp.codigoProducto)) {
-                batchSync.delete(db.collection("conteo_pendiente").doc(docSnap.id));
-                desfasesLimpiados++;
-              }
-            });
-          } else if (item.productoId) {
-            batchSync.update(colCatalogoRef().doc(item.productoId), {
-              stockOnline: Number(item.cantidadContada)
-            });
-          }
-
-          batchSync.delete(colEsperandoRef().doc(item.id));
-          await batchSync.commit();
-
-          alert(
-            desfasesLimpiados > 0
-              ? `Ajustado, enviado al Historial Acumulativo y se limpiaron ${desfasesLimpiados} desfase(s) abierto(s) de este producto en Cuadratura.`
-              : "Ajustado y stock físico confirmado correctamente."
-          );
-        } catch (err) {
-          alert("Error al ajustar: " + err.message);
-        }
-      };
-
-      const eliminarDeEspera = async (id) => {
-        if (confirm("¿Eliminar este registro de inventario pendiente?")) {
-          try {
-            await colEsperandoRef().doc(id).delete();
-          } catch (err) {
-            alert(err.message);
-          }
-        }
-      };
-
+      if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Cargando inventario...</div>;
+      const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
       const urlVolver = esPgb ? "pgb-operacion.html" : "empresa-panel.html";
-      const nombreEmpresaDisplay = empresaData?.nombre || (esPgb ? "PGB Distribution Chile SpA" : "Empresa");
 
       return (
-        <div className="min-h-screen bg-slate-50 text-slate-900">
-          {imprimiendoHoja && (
-            <div className="print-only bg-white text-black p-8">
-              <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-5">
-                <LogoEmpresa rutActivo={rutActivo} nombreEmpresa={nombreEmpresaDisplay} className="h-20 w-auto mb-2" />
-                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
-                  HOJA DE TOMA DE INVENTARIO FÍSICO EN BODEGA
-                </h2>
-                <p className="text-xs text-gray-600 mt-1">
-                  Proveedor: <strong>{proveedorActivo}</strong> | Total Ítems: <strong>{productosSeleccionadosLista.length}</strong> | Fecha: {new Date().toLocaleDateString("es-CL")}
-                </p>
-              </div>
-
-              <table className="w-full text-left text-xs border-collapse border border-gray-400">
-                <thead>
-                  <tr className="bg-gray-200">
-                    <th className="border border-gray-400 p-2 w-10">#</th>
-                    <th className="border border-gray-400 p-2 w-28">Código</th>
-                    <th className="border border-gray-400 p-2">Producto / Descripción</th>
-                    <th className="border border-gray-400 p-2 w-32">Proveedor</th>
-                    <th className="border border-gray-400 p-2 w-36">Conteo Físico (Cajas / Und)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {productosSeleccionadosLista.map((p, idx) => (
-                    <tr key={p.id}>
-                      <td className="border border-gray-400 p-2 text-center">{idx + 1}</td>
-                      <td className="border border-gray-400 p-2 font-mono font-bold">{p.codigo || "—"}</td>
-                      <td className="border border-gray-400 p-2 font-bold">{p.nombre}</td>
-                      <td className="border border-gray-400 p-2">{p.proveedor || "—"}</td>
-                      <td className="border border-gray-400 p-2 h-9"></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div className="mt-12 pt-6 border-t text-xs flex justify-between">
-                <p>Contado por (Bodega): ___________________________</p>
-                <p>Supervisión: ___________________________</p>
-              </div>
-            </div>
-          )}
-
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-6 no-print">
-            <div className="light-card rounded-3xl p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className={`min-h-screen pb-24 ${T.page}`}>
+          <div className="max-w-5xl mx-auto px-4 pt-5 space-y-4">
+            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print`}>
               <div>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <a
-                    href={urlVolver}
-                    className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl transition"
-                  >
-                    ← {esPgb ? "Volver a Operación" : "Volver"}
-                  </a>
-                  <label className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shadow-sm transition">
-                    {importandoExcel ? "Cargando..." : "Subir Excel (.xlsx)"}
-                    <input type="file" accept=".xlsx,.xls,.csv" onChange={importarCatalogoExcel} disabled={importandoExcel} className="hidden" />
-                  </label>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <span className={`h-2 w-2 rounded-full ${conectado ? "bg-emerald-500 animate-ping" : "bg-amber-500"}`}></span>
-                    {conectado ? "EN VIVO" : "CONECTANDO..."}
-                  </span>
+                <div className="flex items-center gap-2 mb-1">
+                  <button onClick={() => window.location.replace(urlVolver)} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
+                    Volver
+                  </button>
+                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${T.tag}`}>{empresa.nombre}</span>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                  INVENTARIO <span className="text-amber-500">GENERAL</span>
-                </h1>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {nombreEmpresaDisplay} • Filtra por proveedor, selecciona todo o marca excepciones para PDF o conteo digital.
-                </p>
+                <h1 className={`text-xl font-extrabold ${T.main}`}>Control de Inventario y Toma Física</h1>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5 shrink-0">
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-center">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Catálogo</span>
-                  <span className="text-xl font-black text-slate-900">{catalogoProductos.length}</span>
-                </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 text-center">
-                  <span className="text-[10px] font-bold text-amber-800 uppercase block">Esperando Ajuste</span>
-                  <span className="text-xl font-black text-amber-600">{esperandoAjuste.length}</span>
-                </div>
+              <div className="flex gap-2">
+                <button onClick={() => window.print()} className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer ${T.sec}`}>
+                  Imprimir Planilla PDF
+                </button>
+                <button onClick={aplicarConteoAlStock} disabled={guardando} className={`text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer ${T.btn}`}>
+                  {guardando ? "Aplicando..." : "Guardar Conteo Físico"}
+                </button>
               </div>
             </div>
 
-            {modoConteoDigital && (
-              <form onSubmit={guardarConteoDigital} className="light-card rounded-3xl p-5 sm:p-7 border-2 border-amber-400 space-y-5">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
-                  <div>
-                    <h2 className="text-lg font-black text-amber-700">
-                      Conteo Digital en Estantería ({productosSeleccionadosLista.length} productos)
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Registra el stock físico contado. Pasará directo a la bandeja de espera para ajuste de Jefatura.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setModoConteoDigital(false)}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                </div>
+            <div className={`${T.card} rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 no-print`}>
+              <input
+                type="text"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar SKU o producto..."
+                className={`sm:col-span-2 rounded-xl px-4 py-2 text-xs font-semibold outline-none ${T.input}`}
+              />
+              <select value={filtroProveedor} onChange={(e) => setFiltroProveedor(e.target.value)} className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}>
+                {proveedores.map((pr) => <option key={pr} value={pr}>{pr === "TODOS" ? "Todos los proveedores" : pr}</option>)}
+              </select>
+            </div>
 
-                <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                  {productosSeleccionadosLista.map((p) => {
-                    const estado = datosConteo[p.id] || { cantidad: "", unidad: "Caja", observacion: "" };
-                    return (
-                      <div key={p.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                        <div>
-                          <span className="font-black text-slate-900 text-sm block">
-                            {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}
-                          </span>
-                          <span className="text-[11px] font-bold text-amber-700">
-                            Proveedor: {p.proveedor || "General"}
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-600 block mb-1">Cantidad Física *</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              placeholder="Ej: 12"
-                              value={estado.cantidad}
-                              onChange={(e) => setDatosConteo({ ...datosConteo, [p.id]: { ...estado, cantidad: e.target.value } })}
-                              className="w-full bg-white border border-amber-400 rounded-xl px-3 py-2 text-sm font-black text-slate-900 outline-none"
-                              required
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-600 block mb-1">Unidad</label>
-                            <select
-                              value={estado.unidad}
-                              onChange={(e) => setDatosConteo({ ...datosConteo, [p.id]: { ...estado, unidad: e.target.value } })}
-                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none"
-                            >
-                              {UNIDADES.map((u) => (
-                                <option key={u} value={u}>{u}</option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-600 block mb-1">Observación (Opcional)</label>
-                            <input
-                              type="text"
-                              placeholder="Ej: Pasillo 2 / Vence pronto"
-                              value={estado.observacion}
-                              onChange={(e) => setDatosConteo({ ...datosConteo, [p.id]: { ...estado, observacion: e.target.value } })}
-                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={guardandoConteo}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer"
-                >
-                  {guardandoConteo ? "Guardando conteo..." : "Guardar Conteo y Enviar a Espera de Ajuste"}
-                </button>
-              </form>
-            )}
-
-            {!modoConteoDigital && (
-              <div className="light-card rounded-3xl p-5 sm:p-7 space-y-5">
-                <div>
-                  <label className="text-xs font-extrabold uppercase tracking-wider text-slate-500 block mb-2">
-                    Filtrar por Proveedor:
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setProveedorActivo("TODOS")}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-black border transition cursor-pointer ${
-                        proveedorActivo === "TODOS"
-                          ? "bg-slate-900 text-white border-slate-900 shadow-sm"
-                          : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
-                      }`}
-                    >
-                      Todos ({catalogoProductos.length})
-                    </button>
-
-                    {proveedoresDisponibles.map((prov) => {
-                      const count = catalogoProductos.filter((p) => normalizarTexto(p.proveedor) === prov).length;
-                      return (
-                        <button
-                          type="button"
-                          key={prov}
-                          onClick={() => setProveedorActivo(prov)}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-black border transition cursor-pointer ${
-                            proveedorActivo === prov
-                              ? "bg-amber-500 text-slate-950 border-amber-500 shadow-sm"
-                              : "bg-white text-slate-700 border-slate-300 hover:bg-amber-50"
-                          }`}
-                        >
-                          {prov} ({count})
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    value={busqueda}
-                    onChange={(e) => setBusqueda(e.target.value)}
-                    placeholder="Buscar producto por nombre, código o proveedor..."
-                    className="w-full bg-slate-50 border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none"
-                  />
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="font-bold text-slate-500">
-                      Mostrando {productosFiltrados.length} productos •{" "}
-                      <strong className="text-amber-700">{productosSeleccionadosLista.length} seleccionados</strong>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={seleccionarTodosVisibles}
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-1.5 rounded-lg border border-slate-300 cursor-pointer"
-                      >
-                        Seleccionar visibles ({productosFiltrados.length})
-                      </button>
-                      {productosSeleccionadosLista.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={limpiarSeleccion}
-                          className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-3 py-1.5 rounded-lg border border-rose-200 cursor-pointer"
-                        >
-                          Limpiar ({productosSeleccionadosLista.length})
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-2xl bg-amber-50/80 border border-amber-300">
-                  <button
-                    type="button"
-                    disabled={productosSeleccionadosLista.length === 0}
-                    onClick={iniciarImpresionPDF}
-                    className="py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    Imprimir Hoja PDF ({productosSeleccionadosLista.length})
-                  </button>
-                  <button
-                    type="button"
-                    disabled={productosSeleccionadosLista.length === 0}
-                    onClick={abrirConteoDigital}
-                    className="py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-xs sm:text-sm shadow-sm transition cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    Hacer Conteo Digital ({productosSeleccionadosLista.length})
-                  </button>
-                </div>
-
-                {productosFiltrados.length === 0 ? (
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-10 text-center text-xs text-slate-500">
-                    No se encontraron productos con ese filtro.
-                  </div>
+            <div className={`${T.card} rounded-2xl p-5`}>
+              <div className="divide-y divide-slate-200/40">
+                {filtrados.length === 0 ? (
+                  <p className={`text-xs text-center py-8 ${T.sub}`}>No hay productos registrados en el catálogo.</p>
                 ) : (
-                  <div className="max-h-[430px] overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-2xl bg-white">
-                    {productosFiltrados.map((p) => {
-                      const marcado = !!seleccionados[p.id];
-                      return (
-                        <label
-                          key={p.id}
-                          className={`flex items-center justify-between gap-3 px-4 py-3 cursor-pointer transition ${
-                            marcado ? "bg-amber-50/90" : "hover:bg-slate-50"
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={marcado}
-                              onChange={() => toggleProducto(p.id)}
-                              className="w-4 h-4 accent-amber-500 shrink-0 cursor-pointer"
-                            />
-                            <div className="min-w-0">
-                              <span className="text-xs sm:text-sm font-bold text-slate-900 block truncate">
-                                {p.codigo && (
-                                  <span className="font-mono text-amber-700 mr-1.5">[{p.codigo}]</span>
-                                )}
-                                {p.nombre}
-                              </span>
-                            </div>
-                          </div>
-                          {p.proveedor && (
-                            <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
-                              {p.proveedor}
-                            </span>
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
+                  filtrados.map((p) => (
+                    <div key={p.id} className="py-3 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <span className={`font-extrabold block truncate ${T.main}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
+                        <span className={`text-[11px] ${T.sub}`}>{p.proveedor || "General"} • Stock Sistema: <strong>{Number(p.stockOnline ?? 0)}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="Físico"
+                          value={conteos[p.id] ?? ""}
+                          onChange={(e) => setConteos({ ...conteos, [p.id]: e.target.value })}
+                          className={`w-24 rounded-xl px-3 py-2 text-xs font-extrabold text-center ${T.input}`}
+                        />
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
-            )}
-
-            <div className="light-card rounded-3xl p-5 sm:p-7 border-2 border-amber-200 space-y-4">
-              <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                  Registro de Inventario Esperando Ajuste ({esperandoAjuste.length})
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Conteos digitales terminados por bodega pendientes de validación por Jefatura.
-                </p>
-              </div>
-
-              {esperandoAjuste.length === 0 ? (
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center text-xs text-slate-500">
-                  No hay conteos de inventario esperando ajuste en este momento.
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {esperandoAjuste.map((item) => (
-                    <div
-                      key={item.id}
-                      className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-black text-slate-900 text-sm">{item.productoDisplay}</span>
-                          <span className="bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-0.5 rounded-lg font-black">
-                            Contado: {item.cantidadContada} {item.unidad}
-                          </span>
-                          <span className="bg-white text-slate-600 border border-slate-300 px-2 py-0.5 rounded-lg font-bold text-[10px]">
-                            {item.proveedor}
-                          </span>
-                        </div>
-                        <p className="text-slate-600">
-                          Contado por <strong className="text-slate-900">{item.contadoPor}</strong> el {item.fechaHoraConteo}
-                          {item.observacion ? ` — Nota: "${item.observacion}"` : ""}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => aprobarYAjustarInventario(item)}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2.5 rounded-xl shadow-sm transition cursor-pointer"
-                        >
-                          Ajustar y Pasar a Historial
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => eliminarDeEspera(item.id)}
-                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-2.5 rounded-xl font-bold transition cursor-pointer"
-                          title="Eliminar"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<AppInventario />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<ControlInventarioApp />);
   </script>
 </body>
 </html>
