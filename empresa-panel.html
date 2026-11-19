@@ -3,7 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>NEXUS ERP • Plataforma Empresarial</title>
+  <script>
+    // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE ENTRE EMPRESAS)
+    (function () {
+      var RUT_PGB = "769497226";
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) {
+        window.location.replace("index.html");
+      } else if (rutInicial === RUT_PGB) {
+        window.location.replace("pgb-operacion.html");
+      }
+
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) {
+          window.location.replace("index.html");
+        } else if (rutActual === RUT_PGB) {
+          window.location.replace("pgb-operacion.html");
+        } else if (ev.persisted && rutActual !== rutInicial) {
+          window.location.reload();
+        }
+      });
+
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -374,7 +408,7 @@
       const [compras, setCompras] = useState([]);
 
       const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
-      const [canalNuevo, setCanalNuevo] = useState("Mercado Libre");
+      const [canalNuevo, setCanalNuevo] = useState("Venta Directa");
       const [compradorNuevo, setCompradorNuevo] = useState("");
       const [rutCompradorNuevo, setRutCompradorNuevo] = useState("");
       const [skuSeleccionado, setSkuSeleccionado] = useState("");
@@ -425,11 +459,11 @@
 
       useEffect(() => {
         if (!rutActivo) {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
         if (rutActivo === RUT_PGB) {
-          window.location.href = "pgb-operacion.html";
+          window.location.replace("pgb-operacion.html");
           return;
         }
         auth.signInAnonymously().catch(() => {});
@@ -438,12 +472,21 @@
         const u1 = empRef.onSnapshot((doc) => {
           if (doc.exists) {
             const data = { id: doc.id, ...doc.data() };
+            if (data.activa === false) {
+              localStorage.removeItem("nexus_empresa_rut");
+              window.location.replace("index.html");
+              return;
+            }
             setEmpresa(data);
             if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
             if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
             if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
+            if (data.modulosActivos?.m8_omnicanal) {
+              setCanalNuevo((prev) => (prev === "Venta Directa" ? "Mercado Libre" : prev));
+            }
           } else {
-            window.location.href = "index.html";
+            localStorage.removeItem("nexus_empresa_rut");
+            window.location.replace("index.html");
           }
         });
 
@@ -471,24 +514,29 @@
 
       const cerrarSesion = () => {
         localStorage.removeItem("nexus_empresa_rut");
-        window.location.href = "index.html";
+        localStorage.removeItem("nexus_session_ts");
+        sessionStorage.clear();
+        window.location.replace("index.html");
       };
 
       const navegarAislado = (destinoUrl) => {
         if (!destinoUrl || destinoUrl === "pgb-operacion.html" || destinoUrl === "pgb-backup.html") {
-          window.location.href = "index.html";
+          window.location.replace("index.html");
           return;
         }
         localStorage.setItem("nexus_empresa_rut", rutActivo);
         window.location.href = destinoUrl;
       };
 
-      // Evaluación estricta de switches encendidos en super-admin.html
+      const mods = empresa?.modulosActivos || {};
+      const usaOmnicanal = Boolean(mods.m8_omnicanal);
+      const usaColaLider = Boolean(mods.m11_colas_print);
+      const usaLectorComprasXml = Boolean(mods.m17_compras_prov);
+
       const areasHabilitadasPorSwitch = useMemo(() => {
-        const m = empresa?.modulosActivos || {};
         const lista = [];
 
-        if (m.m17_compras_prov || m.m18_finanzas_bi) {
+        if (mods.m17_compras_prov || mods.m18_finanzas_bi) {
           lista.push({
             id: "compras",
             titulo: "Recepción de Facturas SII / XML",
@@ -497,7 +545,7 @@
           });
         }
 
-        if (m.m5_inv_general || m.m6_conteo_ciclico) {
+        if (mods.m5_inv_general || mods.m6_conteo_ciclico) {
           lista.push({
             id: "inventario",
             titulo: "Toma de Inventario Físico",
@@ -506,7 +554,7 @@
           });
         }
 
-        if (m.m12_ruta_inc || m.m13_retornos_merma || m.m14_analitica_err || m.m7_auditoria_inv) {
+        if (mods.m12_ruta_inc || mods.m13_retornos_merma || mods.m14_analitica_err || mods.m7_auditoria_inv) {
           lista.push({
             id: "logistica",
             titulo: "Logística, Rutas y Trazabilidad",
@@ -515,7 +563,7 @@
           });
         }
 
-        if (m.m15_pos_ventas || m.m16_caja_cobros) {
+        if (mods.m15_pos_ventas || mods.m16_caja_cobros) {
           lista.push({
             id: "pos",
             titulo: "Punto de Venta (POS) y Caja",
@@ -525,10 +573,7 @@
         }
 
         return lista;
-      }, [empresa]);
-
-      const usaColaLider = Boolean(empresa?.modulosActivos?.m11_colas_print);
-      const usaLectorComprasXml = Boolean(empresa?.modulosActivos?.m17_compras_prov);
+      }, [mods]);
 
       const temaId = empresa?.temaVisual || (empresa?.paleta === "ejecutivo" ? "claro_ejecutivo" : empresa?.paleta === "logistica" ? "claro_esmeralda" : "claro_retail");
       const T = TEMAS_DISPONIBLES[temaId] || TEMAS_DISPONIBLES.claro_retail;
@@ -572,7 +617,7 @@
         };
       }, [empresa]);
 
-      const faltanApis = !estadoConexiones.sii || (!estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
+      const faltanApis = !estadoConexiones.sii || (usaOmnicanal && !estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
       const registrarOrdenOmnicanal = async (e) => {
         e.preventDefault();
@@ -606,7 +651,7 @@
           tipoDte,
           folioSii: folioAsignado,
           timbradoSii: true,
-          enviadoMarketplace: !esLider,
+          enviadoMarketplace: !esLider && canalNuevo !== "Venta Directa",
           esSimulacion: !esRealSii,
           colaImpresion: esLider ? "lider" : "general",
           etiquetaImpresa: false,
@@ -648,7 +693,21 @@
           return alert("Documento real emitido al SII: no se puede eliminar por normativa tributaria.");
         }
         if (!confirm(`¿Eliminar simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
-        await empRef().collection("ecommerce_ordenes").doc(orden.id).delete();
+        const batch = db.batch();
+        batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
+        const esFactura33 = orden.tipoDte === 33;
+        batch.set(
+          empRef(),
+          {
+            cafConfig: {
+              ...cafConfig,
+              factura33Actual: esFactura33 ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
+              boleta39Actual: !esFactura33 ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
+            }
+          },
+          { merge: true }
+        );
+        await batch.commit();
       };
 
       const sugeridosCatalogo = useMemo(() => {
@@ -750,6 +809,11 @@
         setManualSku("");
         setManualNombre("");
         setManualProveedor("");
+      };
+
+      const eliminarProductoCatalogo = async (prod) => {
+        if (!confirm(`¿Eliminar "${prod.nombre}" del catálogo?`)) return;
+        await empRef().collection("catalogo").doc(prod.id).delete();
       };
 
       const subirExcelCatalogo = async (e) => {
@@ -948,8 +1012,8 @@
                   <div>
                     <label className={`text-xs font-bold block mb-1 ${T.textSub}`}>Canal de Venta</label>
                     <select value={canalNuevo} onChange={(e) => setCanalNuevo(e.target.value)} className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold ${T.input}`}>
-                      <option value="Mercado Libre">Mercado Libre</option>
-                      <option value="Falabella">Falabella</option>
+                      {usaOmnicanal && <option value="Mercado Libre">Mercado Libre</option>}
+                      {usaOmnicanal && <option value="Falabella">Falabella</option>}
                       {usaColaLider && <option value="Lider">Lider (Solo Impresión Física)</option>}
                       <option value="Venta Directa">Venta Directa / Mesón</option>
                     </select>
@@ -1118,7 +1182,6 @@
                       </div>
                     )}
 
-                    {/* SOLO RENDERIZA LOS MÓDULOS QUE TIENEN SU SWITCH ENCENDIDO */}
                     {areasHabilitadasPorSwitch.length > 0 && (
                       <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                         <h2 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Áreas Operativas Habilitadas</h2>
@@ -1197,7 +1260,7 @@
                       className={`flex-1 rounded-xl px-4 py-2 text-xs font-semibold outline-none ${T.input}`}
                     />
                     <div className="flex flex-wrap gap-1.5">
-                      {["TODOS", "Mercado Libre", "Falabella", ...(usaColaLider ? ["Lider"] : [])].map((c) => (
+                      {["TODOS", ...(usaOmnicanal ? ["Mercado Libre", "Falabella"] : []), ...(usaColaLider ? ["Lider"] : []), "Venta Directa"].map((c) => (
                         <button
                           key={c}
                           onClick={() => setFiltroCanalVenta(c)}
@@ -1521,6 +1584,9 @@
                                 <span className={`font-extrabold px-2.5 py-1 rounded-lg ${T.tag}`}>{st} unds</span>
                                 <button onClick={() => empRef().collection("catalogo").doc(p.id).update({ stockOnline: Math.max(0, st - 1) })} className={`px-2 py-1 rounded-lg font-bold cursor-pointer ${T.btnSec}`}>-1</button>
                                 <button onClick={() => empRef().collection("catalogo").doc(p.id).update({ stockOnline: st + 1 })} className={`px-2 py-1 rounded-lg font-bold cursor-pointer ${T.btn}`}>+1</button>
+                                <button onClick={() => eliminarProductoCatalogo(p)} className="px-2 py-1 rounded-lg font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 cursor-pointer" title="Eliminar producto">
+                                  ✕
+                                </button>
                               </div>
                             </div>
                           );
@@ -1602,31 +1668,37 @@
                         <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                       </div>
 
-                      <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
-                        <div className="flex items-center justify-between">
-                          <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>2. Mercado Libre Chile</h3>
-                          <button type="button" onClick={() => setAyudaApiModal("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
-                        </div>
-                        <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
-                        <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
-                      </div>
+                      {usaOmnicanal && (
+                        <>
+                          <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
+                            <div className="flex items-center justify-between">
+                              <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>2. Mercado Libre Chile</h3>
+                              <button type="button" onClick={() => setAyudaApiModal("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                            </div>
+                            <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                            <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                          </div>
 
-                      <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
-                        <div className="flex items-center justify-between">
-                          <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>3. Falabella Seller Center</h3>
-                          <button type="button" onClick={() => setAyudaApiModal("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
-                        </div>
-                        <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
-                        <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
-                      </div>
+                          <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
+                            <div className="flex items-center justify-between">
+                              <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>3. Falabella Seller Center</h3>
+                              <button type="button" onClick={() => setAyudaApiModal("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                            </div>
+                            <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                            <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                          </div>
+                        </>
+                      )}
 
-                      <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
-                        <div className="flex items-center justify-between">
-                          <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>4. Lider / Walmart Marketplace</h3>
-                          <button type="button" onClick={() => setAyudaApiModal("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                      {usaColaLider && (
+                        <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
+                          <div className="flex items-center justify-between">
+                            <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>4. Lider / Walmart Marketplace</h3>
+                            <button type="button" onClick={() => setAyudaApiModal("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                          </div>
+                          <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                         </div>
-                        <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
-                      </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200/30">
