@@ -145,7 +145,6 @@
       </svg>
     );
 
-    // HOJA OFICIAL SII: FACTURA ELECTRÓNICA (DTE 33 - HOJA COMPLETA) O BOLETA ELECTRÓNICA (DTE 39)
     const HojaDocumentoOficialSii = ({ orden, empresa, datosEmisor }) => {
       if (!orden) return null;
       const esFactura = orden.tipoDte === 33;
@@ -156,37 +155,33 @@
       const precioUnitNeto = Math.round(neto / cant);
       const fechaIso = orden.fechaIso || new Date(orden.timestamp || Date.now()).toISOString().slice(0, 10);
 
-      // FORMATO HOJA COMPLETA FACTURA ELECTRÓNICA DEL SII (SIN MENCIONES A MARKETPLACES)
       if (esFactura) {
         return (
           <div className="hoja-sii bg-white text-black p-6 sm:p-8 max-w-[780px] mx-auto border border-slate-300 text-xs">
-            {/* CABECERA OFICIAL SII */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-5 border-b border-slate-300">
               <div className="space-y-1 max-w-md">
                 {empresa?.logoBase64 && (
                   <img src={empresa.logoBase64} alt={empresa.nombre} className="h-12 object-contain mb-2" />
                 )}
                 <p className="text-base font-extrabold uppercase tracking-tight">
-                  {(empresa?.nombre || "TECNOSHOP COMPANY SPA").toUpperCase()}
+                  {(empresa?.nombre || "EMPRESA").toUpperCase()}
                 </p>
                 <p className="text-[11px] uppercase">
-                  Giro: {datosEmisor.giro || "VENTAS POR INTERNET DE ARTICULOS PARA EL HOGAR, DEPORTE Y OTROS"}
+                  Giro: {datosEmisor.giro || "COMERCIAL"}
                 </p>
                 <p className="text-[11px] uppercase">
-                  Casa Matriz: {datosEmisor.direccion || "MERCED 838 A INT OF 117"}, {datosEmisor.comuna || "Santiago"}
+                  Casa Matriz: {datosEmisor.direccion || "SANTIAGO"}, {datosEmisor.comuna || "Santiago"}
                 </p>
               </div>
 
-              {/* RECUADRO OFICIAL SII */}
               <div className="border-2 border-red-600 text-red-600 px-5 py-3 text-center font-extrabold shrink-0 min-w-[230px]">
-                <p className="text-xs">R.U.T.: {empresa?.rut || "77.528.042-5"}</p>
+                <p className="text-xs">R.U.T.: {empresa?.rut || ""}</p>
                 <p className="text-sm my-1">FACTURA ELECTRÓNICA</p>
                 <p className="text-sm">N° {Number(orden.folioSii || 0).toLocaleString("es-CL")}</p>
                 <p className="text-[10px] mt-1 tracking-wider">S.I.I. - SANTIAGO CENTRO</p>
               </div>
             </div>
 
-            {/* FECHA Y DATOS DEL RECEPTOR */}
             <div className="mt-4 border border-slate-400 p-3.5 space-y-1.5 text-[11px]">
               <div className="flex justify-between">
                 <span><strong>Señor(es):</strong> <span className="uppercase">{orden.comprador}</span></span>
@@ -204,7 +199,6 @@
               </div>
             </div>
 
-            {/* TABLA FORMAL DE DETALLE DE FACTURA */}
             <div className="mt-5">
               <table className="w-full border-collapse border border-slate-400 text-[11px]">
                 <thead>
@@ -235,7 +229,6 @@
               </table>
             </div>
 
-            {/* PIE DE FACTURA: TIMBRE ELECTRÓNICO SII + TOTALES NETO/IVA/TOTAL */}
             <div className="mt-6 flex flex-col sm:flex-row justify-between items-start gap-6">
               <div className="text-center max-w-[260px]">
                 <TimbrePdf417Svg />
@@ -269,14 +262,13 @@
         );
       }
 
-      // FORMATO OFICIAL BOLETA ELECTRÓNICA (DTE 39)
       return (
         <div className="hoja-sii bg-white text-black p-6 max-w-[360px] mx-auto border border-slate-300 font-ticket text-[12px] leading-relaxed">
           <div className="space-y-0.5 text-left">
-            <p className="font-bold uppercase text-[13px]">{(empresa?.nombre || "TECNOSHOP COMPANY SPA").toUpperCase()}</p>
-            <p>{empresa?.rut || "77.528.042-5"}</p>
-            <p className="uppercase">Giro: {datosEmisor.giro || "VENTAS POR INTERNET DE ARTICULOS PARA EL HOGAR, DEPORTE Y OTROS"}</p>
-            <p className="uppercase">{datosEmisor.direccion || "MERCED 838 A INT OF 117"}</p>
+            <p className="font-bold uppercase text-[13px]">{(empresa?.nombre || "EMPRESA").toUpperCase()}</p>
+            <p>{empresa?.rut || ""}</p>
+            <p className="uppercase">Giro: {datosEmisor.giro || "COMERCIAL"}</p>
+            <p className="uppercase">{datosEmisor.direccion || "SANTIAGO"}</p>
             <p>{datosEmisor.comuna || "Santiago"}</p>
             <p className="pt-1 font-bold">
               BOLETA ELECTRÓNICA NUMERO: {Number(orden.folioSii || 0).toLocaleString("es-CL")}
@@ -315,7 +307,7 @@
     };
 
     function AppEcommerceSII() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "775280425");
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
       const [empresa, setEmpresa] = useState(null);
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
@@ -364,6 +356,11 @@
       const [totalNuevo, setTotalNuevo] = useState(19990);
 
       useEffect(() => {
+        if (!rutActivo) {
+          window.location.href = "index.html";
+          return;
+        }
+
         let unsubs = [];
         const conectar = () => {
           const empRef = db.collection("saas_empresas").doc(rutActivo);
@@ -376,12 +373,7 @@
               if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
               if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
             } else {
-              setEmpresa({
-                id: rutActivo,
-                rut: formatearRut(rutActivo),
-                nombre: "TECNOSHOP COMPANY SPA",
-                paleta: "ecommerce"
-              });
+              window.location.href = "index.html";
             }
           });
 
@@ -547,7 +539,6 @@
         setSeleccionLoteIds(pendientes);
       };
 
-      // GENERA UN ÚNICO PDF CON UNA HOJA POR DOCUMENTO EN ORDEN CRONOLÓGICO ESTRICTO
       const generarEImprimirLotePdf = () => {
         if (seleccionLoteIds.length === 0) {
           return alert("Selecciona al menos una factura o boleta de la lista para generar el lote.");
@@ -604,7 +595,6 @@
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-900">
-          {/* ZONA DE IMPRESIÓN: DOCUMENTO INDIVIDUAL O LOTE PDF EN HOJAS SEPARADAS */}
           {dteVisualizando && (
             <div className="print-only bg-white p-2">
               <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
@@ -624,7 +614,6 @@
             </div>
           )}
 
-          {/* MODAL VISTA PREVIA DOCUMENTO INDIVIDUAL */}
           {dteVisualizando && (
             <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto no-print">
               <div className="bg-slate-100 rounded-3xl max-w-3xl w-full p-5 space-y-4 shadow-2xl">
@@ -667,7 +656,6 @@
             </div>
           )}
 
-          {/* MODAL DE AYUDA (?) PARA API KEYS */}
           {ayudaAbierta && AYUDA_APIS[ayudaAbierta] && (
             <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 no-print">
               <div className="corp-card rounded-2xl max-w-md w-full p-6 space-y-4">
@@ -695,7 +683,6 @@
             </div>
           )}
 
-          {/* INTERFAZ PRINCIPAL */}
           <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
             <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
@@ -819,7 +806,6 @@
               </button>
             </div>
 
-            {/* PESTAÑA 1: VENTAS Y DOCUMENTOS DTE */}
             {tab === "ordenes" && (
               <div className="space-y-4">
                 <div className="corp-card rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
@@ -924,7 +910,6 @@
               </div>
             )}
 
-            {/* PESTAÑA 2: SELECCIÓN INDIVIDUAL Y GENERACIÓN DE LOTE PDF EN ORDEN CRONOLÓGICO */}
             {tab === "impresion" && (
               <div className="corp-card rounded-2xl p-6 space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
@@ -1025,7 +1010,6 @@
               </div>
             )}
 
-            {/* PESTAÑA 3: STOCK COMPARTIDO & FOLIOS CAF */}
             {tab === "stock" && (
               <div className="space-y-5">
                 <form onSubmit={guardarNuevosFoliosCaf} className="corp-card rounded-2xl p-6 space-y-4">
@@ -1102,7 +1086,6 @@
               </div>
             )}
 
-            {/* PESTAÑA 4: API KEYS CON BOTÓN DE AYUDA (?) EN CADA CAJA */}
             {tab === "credenciales" && (
               <form onSubmit={guardarCredencialesEmpresa} className="corp-card rounded-2xl p-6 space-y-5">
                 <div>
@@ -1147,7 +1130,7 @@
                       <h3 className="text-xs font-extrabold uppercase text-slate-800">4. Lider / Walmart Marketplace</h3>
                       <button type="button" onClick={() => setAyudaAbierta("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
                     </div>
-                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
                 </div>
 
