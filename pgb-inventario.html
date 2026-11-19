@@ -99,6 +99,7 @@
       const [logoUrl, setLogoUrl] = useState("");
 
       useEffect(() => {
+        if (!rutActivo) return;
         const unsub = db.collection("saas_empresas").doc(rutActivo).onSnapshot((doc) => {
           if (doc.exists && doc.data().logoBase64) {
             setLogoUrl(doc.data().logoBase64);
@@ -114,7 +115,7 @@
     };
 
     function AppInventario() {
-      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || RUT_PGB);
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut")) || "");
       const esPgb = rutActivo === RUT_PGB;
 
       const [empresaData, setEmpresaData] = useState(null);
@@ -132,13 +133,17 @@
       const [guardandoConteo, setGuardandoConteo] = useState(false);
       const [imprimiendoHoja, setImprimiendoHoja] = useState(false);
 
-      // Rutas de colección dinámicas: PGB conserva sus colecciones raíz 100% intactas; otras empresas usan su carpeta aislada por RUT
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const colCatalogoRef = () => (esPgb ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
       const colEsperandoRef = () => (esPgb ? db.collection("inventario_general_esperando") : empRef().collection("inventario_general_esperando"));
       const colHistorialRef = () => (esPgb ? db.collection("historial_inventario") : empRef().collection("historial_inventario"));
 
       useEffect(() => {
+        if (!rutActivo) {
+          window.location.href = "index.html";
+          return;
+        }
+
         let unsubs = [];
 
         const conectar = () => {
@@ -439,7 +444,6 @@
         try {
           const detalleTexto = `Inventario General (${item.proveedor}) — Stock físico contado: ${item.cantidadContada} ${item.unidad}${item.observacion ? ` — Nota: ${item.observacion}` : ""}`;
 
-          // 1. Registrar en Historial Acumulativo
           const colHist = colHistorialRef();
           await colHist.add({
             producto: prodNorm,
@@ -463,7 +467,6 @@
             await batchClean.commit();
           }
 
-          // 2. Sincronizar y limpiar descuadres (solo en colecciones operativas de PGB o stock online en clientes)
           const batchSync = db.batch();
           let desfasesLimpiados = 0;
 
@@ -515,13 +518,11 @@
               }
             });
           } else if (item.productoId) {
-            // Para clientes omnicanal, actualiza el stock físico verificado en su catálogo
             batchSync.update(colCatalogoRef().doc(item.productoId), {
               stockOnline: Number(item.cantidadContada)
             });
           }
 
-          // 3. Quitar de la lista de espera
           batchSync.delete(colEsperandoRef().doc(item.id));
           await batchSync.commit();
 
