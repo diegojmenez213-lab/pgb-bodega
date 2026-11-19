@@ -3,36 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS ERP • Infraestructura Empresarial Global</title>
+  <title>NEXUS ERP • Infraestructura Empresarial</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 2px 14px -2px rgba(15, 23, 42, 0.04); }
+    .corp-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.06); }
   </style>
-  <script>
-    window.onerror = function (msg, url, line) {
-      var box = document.getElementById("error-fallback");
-      if (box) {
-        box.style.display = "block";
-        box.innerText = "Error detectado (Línea " + line + "): " + msg;
-      }
-    };
-  </script>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
-  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -48,1308 +37,191 @@
     const db = firebase.firestore();
 
     const RUT_PGB = "769497226";
-
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
-    const formatearRut = (r) => {
-      const c = limpiarRut(r);
-      if (c.length < 2) return c;
-      const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-      return `${cuerpo}-${c.slice(-1)}`;
+
+    const MODULOS_PGB = {
+      m1_empresa: true, m2_jerarquia: true, m3_catalogo: true, m4_apis: false,
+      m5_inv_general: true, m6_conteo_ciclico: true, m7_auditoria_inv: true,
+      m8_omnicanal: false, m9_stock_sync: false, m10_sii_dte: false, m11_colas_print: false,
+      m12_ruta_inc: true, m13_retornos_merma: true, m14_analitica_err: true,
+      m15_pos_ventas: false, m16_caja_cobros: false, m17_compras_prov: false, m18_finanzas_bi: false
     };
 
-    const IconLock = ({ className = "w-3.5 h-3.5" }) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-      </svg>
-    );
-
-    const IconBuilding = ({ className = "w-5 h-5" }) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
-        <line x1="9" y1="6" x2="9.01" y2="6" />
-        <line x1="15" y1="6" x2="15.01" y2="6" />
-        <line x1="9" y1="10" x2="9.01" y2="10" />
-        <line x1="15" y1="10" x2="15.01" y2="10" />
-        <line x1="9" y1="14" x2="9.01" y2="14" />
-        <line x1="15" y1="14" x2="15.01" y2="14" />
-        <path d="M9 22v-4h6v4" />
-      </svg>
-    );
-
-    const IconUpload = ({ className = "w-4 h-4" }) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-        <polyline points="17 8 12 3 7 8" />
-        <line x1="12" y1="3" x2="12" y2="15" />
-      </svg>
-    );
-
-    const SwitchToggle = ({ checked, onChange }) => (
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={onChange}
-        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-          checked ? "bg-slate-900" : "bg-slate-200"
-        }`}
-      >
-        <span
-          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
-            checked ? "translate-x-4" : "translate-x-0"
-          }`}
-        />
-      </button>
-    );
-
-    const CATALOGO_18_MODULOS = [
-      { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Identidad y Logo PNG", desc: "Logotipo corporativo en alta definición para sistema y reportes PDF.", archivo: "#config_equipo" },
-      { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, vendedores, bodega y despacho.", archivo: "#config_equipo" },
-      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro Inteligente", desc: "Carga masiva en Excel (.xlsx) vinculada a toda la operación.", archivo: "#config_catalogo" },
-      { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Conexión para Mercado Libre, Falabella, Lider y OpenFactura.", archivo: "#config_apis" },
-      { id: "m5_inv_general", num: "05", grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Filtrado por proveedor y selección masiva para toma física.", archivo: "pgb-inventario.html" },
-      { id: "m6_conteo_ciclico", num: "06", grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería desde dispositivos.", archivo: "pgb-inventario.html" },
-      { id: "m7_auditoria_inv", num: "07", grupo: "Inventario", nombre: "Auditoría Acumulativa de Stock", desc: "Aprobación de jefatura e historial de ajustes de inventario.", archivo: "pgb-operacion.html" },
-      { id: "m8_omnicanal", num: "08", grupo: "E-Commerce & SII", nombre: "Consola Omnicanal 24/7", desc: "Órdenes centralizadas de Mercado Libre, Falabella y Lider.", archivo: "ecommerce-sii.html" },
-      { id: "m9_stock_sync", num: "09", grupo: "E-Commerce & SII", nombre: "Stock Compartido en Vivo", desc: "Descuento sincronizado multi-canal para evitar sobreventas.", archivo: "ecommerce-sii.html" },
-      { id: "m10_sii_dte", num: "10", grupo: "E-Commerce & SII", nombre: "Motor Tributario SII (33/39)", desc: "Emisión automática de Boleta o Factura y control de folios CAF.", archivo: "ecommerce-sii.html" },
-      { id: "m11_colas_print", num: "11", grupo: "E-Commerce & SII", nombre: "Colas de Impresión Logística", desc: "Lote general MeLi/Falabella y bandeja física exclusiva Lider.", archivo: "ecommerce-sii.html" },
-      { id: "m12_ruta_inc", num: "12", grupo: "Logística", nombre: "Tablero de Incidencias y Ruta", desc: "Control de faltantes, cruces, rechazos y errores comerciales.", archivo: "pgb-operacion.html" },
-      { id: "m13_retornos_merma", num: "13", grupo: "Logística", nombre: "Retornos y Mermas Internas", desc: "Recepción de devoluciones, roturas y compras de personal.", archivo: "pgb-operacion.html" },
-      { id: "m14_analitica_err", num: "14", grupo: "Logística", nombre: "Analítica Operativa 100%", desc: "Indicadores mensuales de desempeño por área y colaborador.", archivo: "pgb-operacion.html" },
-      { id: "m15_pos_ventas", num: "15", grupo: "Comercial", nombre: "Punto de Venta (POS) y Cotizaciones", desc: "Facturación rápida de mesón y conversión de cotizaciones.", archivo: "ventas-pos.html" },
-      { id: "m16_caja_cobros", num: "16", grupo: "Comercial", nombre: "Cuentas por Cobrar y Arqueo", desc: "Control de créditos, abonos parciales y cierre de efectivo.", archivo: "ventas-pos.html" },
-      { id: "m17_compras_prov", num: "17", grupo: "Gerencia", nombre: "Pedidos a Proveedores", desc: "Reposición por proveedor y recepción directa a inventario.", archivo: "compras-finanzas.html" },
-      { id: "m18_finanzas_bi", num: "18", grupo: "Gerencia", nombre: "Balance y Flujo Financiero", desc: "Consolidado de ingresos, egresos operativos y margen neto.", archivo: "compras-finanzas.html" }
-    ];
-
-    const MODULOS_REALES_PGB = {
-      m1_empresa: true,
-      m2_jerarquia: true,
-      m3_catalogo: true,
-      m4_apis: false,
-      m5_inv_general: true,
-      m6_conteo_ciclico: true,
-      m7_auditoria_inv: true,
-      m8_omnicanal: false,
-      m9_stock_sync: false,
-      m10_sii_dte: false,
-      m11_colas_print: false,
-      m12_ruta_inc: true,
-      m13_retornos_merma: true,
-      m14_analitica_err: true,
-      m15_pos_ventas: false,
-      m16_caja_cobros: false,
-      m17_compras_prov: false,
-      m18_finanzas_bi: false
-    };
-
-    const ROLES_JERARQUIA = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
-
-    function App() {
-      const [rutActivo, setRutActivo] = useState(() => {
-        const guardado = limpiarRut(localStorage.getItem("nexus_empresa_rut") || "");
-        return guardado === RUT_PGB ? "" : guardado;
-      });
-      const [modoSuperAdmin, setModoSuperAdmin] = useState(() => window.location.hash === "#/comando");
-      const [toquesCandado, setToquesCandado] = useState(0);
-      const [pinAdmin, setPinAdmin] = useState("");
-      const [claveMaestraGuardada, setClaveMaestraGuardada] = useState("2026");
-      const [nuevaClaveMaestra, setNuevaClaveMaestra] = useState("");
-      const [adminAutenticado, setAdminAutenticado] = useState(false);
-
+    function PortadaApp() {
+      const [toques, setToques] = useState(0);
       const [rutInput, setRutInput] = useState("");
       const [claveInput, setClaveInput] = useState("");
-      const [cargandoAuth, setCargandoAuth] = useState(false);
-
-      const [rutNuevoAdmin, setRutNuevoAdmin] = useState("");
-      const [nombreReg, setNombreReg] = useState("");
-      const [rubroReg, setRubroReg] = useState("E-Commerce / Retail Omnicanal");
-      const [jefeReg, setJefeReg] = useState("");
-      const [claveNuevaEmpresa, setClaveNuevaEmpresa] = useState("1234");
-      const [creandoEmpresaAdmin, setCreandoEmpresaAdmin] = useState(false);
-
-      const [empresa, setEmpresa] = useState(null);
-      const [todasEmpresas, setTodasEmpresas] = useState([]);
-      const [filtroSuperAdmin, setFiltroSuperAdmin] = useState("");
-      const [tabPanel, setTabPanel] = useState("modulos");
-      const [subiendoLogo, setSubiendoLogo] = useState(false);
-
-      const [nuevoNombreMiembro, setNuevoNombreMiembro] = useState("");
-      const [nuevoRolMiembro, setNuevoRolMiembro] = useState(ROLES_JERARQUIA[1]);
-
-      const [catalogoLocal, setCatalogoLocal] = useState([]);
-      const [busquedaCat, setBusquedaCat] = useState("");
-      const [importandoXlsx, setImportandoXlsx] = useState(false);
-      const [prodManualCod, setProdManualCod] = useState("");
-      const [prodManualNom, setProdManualNom] = useState("");
-      const [prodManualProv, setProdManualProv] = useState("");
-
-      const [apisForm, setApisForm] = useState({
-        meliClientId: "",
-        meliSecret: "",
-        falabellaUser: "",
-        falabellaApiKey: "",
-        liderApiKey: "",
-        siiProveedor: "OpenFactura (Haulmer)",
-        siiApiKey: "",
-        siiAmbiente: "Producción"
-      });
-      const [guardandoApis, setGuardandoApis] = useState(false);
+      const [cargando, setCargando] = useState(false);
 
       useEffect(() => {
-        const onHash = () => setModoSuperAdmin(window.location.hash === "#/comando");
-        window.addEventListener("hashchange", onHash);
-
+        if (window.location.hash === "#/comando") {
+          window.location.href = "super-admin.html";
+          return;
+        }
         auth.signInAnonymously().then(() => {
-          const pgbRef = db.collection("saas_empresas").doc(RUT_PGB);
-          pgbRef.set({
+          db.collection("saas_empresas").doc(RUT_PGB).set({
             rut: "76.949.722-6",
             nombre: "PGB Distribution Chile SpA",
             rubro: "Distribuidora / Mayorista",
             activa: true,
             pinAcceso: "1234",
             archivoPrincipal: "pgb-operacion.html",
-            modulosActivos: MODULOS_REALES_PGB
+            modulosActivos: MODULOS_PGB
           }, { merge: true }).catch(() => {});
         }).catch(() => {});
-
-        const unsubCfg = db.collection("saas_config").doc("master").onSnapshot((doc) => {
-          if (doc.exists && doc.data().pin) {
-            setClaveMaestraGuardada(String(doc.data().pin));
-          }
-        }, () => {});
-
-        return () => {
-          window.removeEventListener("hashchange", onHash);
-          unsubCfg();
-        };
       }, []);
 
-      useEffect(() => {
-        if (!modoSuperAdmin) return;
-        const unsub = db.collection("saas_empresas").onSnapshot((snap) => {
-          setTodasEmpresas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        });
-        return () => unsub();
-      }, [modoSuperAdmin]);
-
-      useEffect(() => {
-        const rutClean = limpiarRut(rutActivo);
-        if (!rutClean || rutClean === RUT_PGB) {
-          setEmpresa(null);
-          return;
-        }
-        const unsub = db.collection("saas_empresas").doc(rutClean).onSnapshot((doc) => {
-          if (doc.exists) {
-            const data = { id: doc.id, ...doc.data() };
-            setEmpresa(data);
-            if (data.apis) {
-              setApisForm((prev) => ({ ...prev, ...data.apis }));
-            }
-          } else {
-            localStorage.removeItem("nexus_empresa_rut");
-            setRutActivo("");
-            setEmpresa(null);
-          }
-        });
-
-        const colCat = db.collection("saas_empresas").doc(rutClean).collection("catalogo");
-        const unsubCat = colCat.onSnapshot((snap) => {
-          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
-          setCatalogoLocal(lista);
-        });
-
-        return () => {
-          unsub();
-          unsubCat();
-        };
-      }, [rutActivo]);
-
-      const manejarToqueCandado = () => {
-        const nuevo = toquesCandado + 1;
-        if (nuevo >= 5) {
-          setToquesCandado(0);
-          window.location.hash = "#/comando";
-          setModoSuperAdmin(true);
+      const toqueCandado = () => {
+        const next = toques + 1;
+        if (next >= 5) {
+          setToques(0);
+          window.location.href = "super-admin.html";
         } else {
-          setToquesCandado(nuevo);
+          setToques(next);
         }
       };
 
-      const validarAccesoAdmin = (e) => {
+      const ingresar = async (e) => {
         e.preventDefault();
-        if (pinAdmin === claveMaestraGuardada || pinAdmin === "2026") {
-          setAdminAutenticado(true);
-          setPinAdmin("");
-        } else {
-          alert("Clave maestra incorrecta.");
-        }
-      };
+        const raw = rutInput.trim();
+        const clean = limpiarRut(raw);
+        if (clean.length < 7) return alert("Ingresa un RUT válido.");
 
-      const actualizarClaveMaestra = async (e) => {
-        e.preventDefault();
-        if (nuevaClaveMaestra.trim().length < 4) return alert("La clave debe tener al menos 4 caracteres.");
-        await db.collection("saas_config").doc("master").set({ pin: nuevaClaveMaestra.trim() }, { merge: true });
-        setClaveMaestraGuardada(nuevaClaveMaestra.trim());
-        setNuevaClaveMaestra("");
-        alert("Clave maestra actualizada correctamente.");
-      };
-
-      const subirLogoEmpresaPng = async (empresaId, e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        if (file.size > 900 * 1024) {
-          alert("El archivo PNG supera los 900 KB. Usa una versión optimizada.");
-          e.target.value = "";
-          return;
-        }
-        setSubiendoLogo(true);
-        try {
-          const reader = new FileReader();
-          reader.onload = async (ev) => {
-            const base64Str = ev.target.result;
-            await db.collection("saas_empresas").doc(empresaId).set({ logoBase64: base64Str }, { merge: true });
-            setSubiendoLogo(false);
-            alert("Logotipo PNG guardado y sincronizado.");
-          };
-          reader.readAsDataURL(file);
-        } catch (err) {
-          setSubiendoLogo(false);
-          alert("Error al cargar logotipo: " + err.message);
-        }
-        e.target.value = "";
-      };
-
-      const eliminarLogoEmpresa = async (empresaId) => {
-        if (!confirm("¿Eliminar el logotipo cargado de esta empresa?")) return;
-        await db.collection("saas_empresas").doc(empresaId).update({ logoBase64: "" });
-      };
-
-      const ingresarConRut = async (e) => {
-        e.preventDefault();
-        const rawRut = rutInput.trim();
-        const rutClean = limpiarRut(rawRut);
-
-        if (rutClean.length < 7) {
-          return alert("Ingresa un RUT corporativo válido.");
-        }
-
-        if (rutClean === RUT_PGB) {
-          if (rawRut !== RUT_PGB) {
-            return alert("Para esta organización debes ingresar el RUT sin puntos ni guiones.");
-          }
-          if (claveInput.trim() !== "1234") {
-            return alert("Clave de acceso incorrecta.");
-          }
+        if (clean === RUT_PGB) {
+          if (raw !== RUT_PGB) return alert("Para esta organización ingresa el RUT sin puntos ni guiones.");
+          if (claveInput.trim() !== "1234") return alert("Clave incorrecta.");
           localStorage.setItem("nexus_empresa_rut", RUT_PGB);
           window.location.href = "pgb-operacion.html";
           return;
         }
 
-        setCargandoAuth(true);
+        setCargando(true);
         try {
-          const docRef = db.collection("saas_empresas").doc(rutClean);
-          const snap = await docRef.get();
+          const snap = await db.collection("saas_empresas").doc(clean).get();
           if (!snap.exists) {
-            alert("El RUT ingresado no se encuentra habilitado en el sistema.");
-            setCargandoAuth(false);
+            alert("La organización ingresada no está registrada.");
+            setCargando(false);
             return;
           }
           const data = snap.data();
           if (data.activa === false) {
-            alert("Esta organización se encuentra temporalmente inactiva.");
-            setCargandoAuth(false);
+            alert("Esta organización se encuentra pausada.");
+            setCargando(false);
             return;
           }
-          const claveEsperada = String(data.pinAcceso || "1234");
-          if (claveInput.trim() !== claveEsperada) {
-            alert("Clave de acceso incorrecta.");
-            setCargandoAuth(false);
+          if (claveInput.trim() !== String(data.pinAcceso || "1234")) {
+            alert("Clave incorrecta.");
+            setCargando(false);
             return;
           }
-          localStorage.setItem("nexus_empresa_rut", rutClean);
-          setRutActivo(rutClean);
+          localStorage.setItem("nexus_empresa_rut", clean);
+          window.location.href = "empresa-panel.html";
         } catch (err) {
           alert("Error de conexión: " + err.message);
         }
-        setCargandoAuth(false);
+        setCargando(false);
       };
 
-      const crearEmpresaDesdeSuperAdmin = async (e) => {
-        e.preventDefault();
-        const rutClean = limpiarRut(rutNuevoAdmin);
-        if (rutClean.length < 7 || !nombreReg.trim() || !jefeReg.trim()) {
-          return alert("Completa RUT, Razón Social y Nombre del Administrador.");
-        }
-        if (rutClean === RUT_PGB) {
-          return alert("El RUT 769497226 pertenece a PGB Distribution Chile SpA y ya está protegido.");
-        }
-        setCreandoEmpresaAdmin(true);
-        try {
-          const modulosApagados = CATALOGO_18_MODULOS.reduce((acc, m) => ({ ...acc, [m.id]: false }), {});
-          await db.collection("saas_empresas").doc(rutClean).set({
-            rut: formatearRut(rutClean),
-            nombre: nombreReg.trim(),
-            rubro: rubroReg,
-            activa: true,
-            pinAcceso: claveNuevaEmpresa.trim() || "1234",
-            equipo: [{ id: Date.now().toString(), nombre: jefeReg.trim(), rol: "Jefatura / Admin" }],
-            modulosActivos: modulosApagados,
-            creadoEn: new Date().toISOString()
-          }, { merge: true });
-
-          setRutNuevoAdmin("");
-          setNombreReg("");
-          setJefeReg("");
-          setClaveNuevaEmpresa("1234");
-          alert(`Organización "${nombreReg.trim()}" creada con todos los switches apagados. Activa solo los módulos que esta empresa utilice.`);
-        } catch (err) {
-          alert("Error al crear empresa: " + err.message);
-        }
-        setCreandoEmpresaAdmin(false);
-      };
-
-      const cerrarSesion = () => {
-        localStorage.removeItem("nexus_empresa_rut");
-        setRutActivo("");
-        setEmpresa(null);
-      };
-
-      const agregarMiembroEquipo = async (e) => {
-        e.preventDefault();
-        if (!nuevoNombreMiembro.trim() || !empresa) return;
-        const actual = Array.isArray(empresa.equipo) ? empresa.equipo : [];
-        const actualizado = [
-          ...actual,
-          { id: Date.now().toString(), nombre: nuevoNombreMiembro.trim(), rol: nuevoRolMiembro }
-        ];
-        await db.collection("saas_empresas").doc(empresa.id).update({ equipo: actualizado });
-        setNuevoNombreMiembro("");
-      };
-
-      const eliminarMiembroEquipo = async (idMiembro) => {
-        if (!empresa) return;
-        const actualizado = (empresa.equipo || []).filter((m) => m.id !== idMiembro);
-        await db.collection("saas_empresas").doc(empresa.id).update({ equipo: actualizado });
-      };
-
-      const getColeccionCatalogo = () => {
-        const rutClean = limpiarRut(rutActivo);
-        return db.collection("saas_empresas").doc(rutClean).collection("catalogo");
-      };
-
-      const subirExcelCatalogo = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        setImportandoXlsx(true);
-        try {
-          const buf = await file.arrayBuffer();
-          const wb = XLSX.read(buf, { type: "array" });
-          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-          const normKey = (k) => String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-          const normVal = (v) => String(v || "").trim().replace(/\s+/g, " ").toUpperCase();
-
-          const existentes = new Set(catalogoLocal.map((p) => normVal(p.nombre)));
-          const nuevos = [];
-
-          rows.forEach((row) => {
-            const keys = Object.keys(row);
-            let cod = "", nom = "", prov = "";
-            keys.forEach((k) => {
-              const kn = normKey(k);
-              if (!cod && (kn.includes("cod") || kn.includes("sku") || kn === "id")) cod = normVal(row[k]);
-              else if (!nom && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art"))) nom = normVal(row[k]);
-              else if (!prov && (kn.includes("prov") || kn.includes("marc"))) prov = normVal(row[k]);
-            });
-            if (!nom && keys.length >= 2) {
-              cod = normVal(row[keys[0]]);
-              nom = normVal(row[keys[1]]);
-              if (keys.length >= 3) prov = normVal(row[keys[2]]);
-            } else if (!nom && keys.length === 1) {
-              nom = normVal(row[keys[0]]);
-            }
-            if (nom && !existentes.has(nom)) {
-              existentes.add(nom);
-              nuevos.push({ codigo: cod, nombre: nom, proveedor: prov });
-            }
-          });
-
-          const col = getColeccionCatalogo();
-          for (let i = 0; i < nuevos.length; i += 400) {
-            const batch = db.batch();
-            nuevos.slice(i, i + 400).forEach((item) => batch.set(col.doc(), item));
-            await batch.commit();
-          }
-          alert(`Catálogo actualizado: ${nuevos.length} productos incorporados.`);
-        } catch (err) {
-          alert("Error leyendo archivo Excel: " + err.message);
-        }
-        setImportandoXlsx(false);
-        e.target.value = "";
-      };
-
-      const agregarProductoManual = async (e) => {
-        e.preventDefault();
-        if (!prodManualNom.trim()) return;
-        const col = getColeccionCatalogo();
-        await col.add({
-          codigo: prodManualCod.trim().toUpperCase(),
-          nombre: prodManualNom.trim().toUpperCase(),
-          proveedor: prodManualProv.trim().toUpperCase()
-        });
-        setProdManualCod("");
-        setProdManualNom("");
-        setProdManualProv("");
-      };
-
-      const borrarProductoCat = async (id) => {
-        await getColeccionCatalogo().doc(id).delete();
-      };
-
-      const guardarConfigApis = async (e) => {
-        e.preventDefault();
-        if (!empresa) return;
-        setGuardandoApis(true);
-        try {
-          await db.collection("saas_empresas").doc(empresa.id).update({ apis: apisForm });
-          alert("Parámetros de integración API y SII guardados.");
-        } catch (err) {
-          alert("Error al guardar: " + err.message);
-        }
-        setGuardandoApis(false);
-      };
-
-      const toggleModuloEmpresa = async (emp, modId) => {
-        const actuales = emp.modulosActivos || {};
-        const nuevoValor = actuales[modId] === true ? false : true;
-        await db.collection("saas_empresas").doc(emp.id).update({
-          [`modulosActivos.${modId}`]: nuevoValor
-        });
-      };
-
-      const toggleEstadoEmpresa = async (emp) => {
-        const nuevoEstado = emp.activa === false ? true : false;
-        await db.collection("saas_empresas").doc(emp.id).update({ activa: nuevoEstado });
-      };
-
-      const empresasFiltradasAdmin = useMemo(() => {
-        const q = filtroSuperAdmin.trim().toLowerCase();
-        if (!q) return todasEmpresas;
-        return todasEmpresas.filter(
-          (e) =>
-            (e.nombre || "").toLowerCase().includes(q) ||
-            (e.rut || "").toLowerCase().includes(q) ||
-            (e.id || "").toLowerCase().includes(q)
-        );
-      }, [todasEmpresas, filtroSuperAdmin]);
-
-      const catalogoFiltrado = useMemo(() => {
-        const q = busquedaCat.trim().toLowerCase();
-        if (!q) return catalogoLocal;
-        return catalogoLocal.filter((p) =>
-          (p.nombre || "").toLowerCase().includes(q) ||
-          (p.codigo || "").toLowerCase().includes(q) ||
-          (p.proveedor || "").toLowerCase().includes(q)
-        );
-      }, [catalogoLocal, busquedaCat]);
-
-      const abrirModulo = (mod) => {
-        if (mod.archivo.startsWith("#config_")) {
-          const destino = mod.archivo.replace("#config_", "");
-          setTabPanel(destino === "empresa" ? "equipo" : destino);
-          return;
-        }
-        window.location.href = mod.archivo;
-      };
-
-      if (modoSuperAdmin) {
-        if (!adminAutenticado) {
-          return (
-            <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4">
-              <form onSubmit={validarAccesoAdmin} className="max-w-sm w-full corp-card rounded-2xl p-8 space-y-5">
-                <div className="space-y-1">
-                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">NEXUS Global Control</span>
-                  <h1 className="text-xl font-extrabold text-slate-900">Acceso Super Administrador</h1>
-                  <p className="text-xs text-slate-500">Ingresa tu clave maestra para gobernar todas las organizaciones.</p>
-                </div>
-                <div>
-                  <input
-                    type="password"
-                    value={pinAdmin}
-                    onChange={(e) => setPinAdmin(e.target.value)}
-                    placeholder="Clave maestra (Inicial: 2026)"
-                    className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-4 py-3 text-sm font-semibold outline-none transition"
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl text-sm transition cursor-pointer"
-                >
-                  Ingresar a Plataforma Central
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
-                  className="w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-900 pt-1 cursor-pointer"
-                >
-                  Volver al portal
-                </button>
-              </form>
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between p-4 sm:p-8">
+          <header className="max-w-6xl w-full mx-auto flex items-center justify-between py-2">
+            <div className="flex items-center gap-2.5 select-none">
+              <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-extrabold text-sm">
+                N
+              </div>
+              <button
+                type="button"
+                onClick={toqueCandado}
+                aria-label="Acceso reservado"
+                className="text-slate-300 hover:text-slate-400 p-0.5 cursor-pointer"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-3 h-3">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </button>
+              <span className="font-extrabold tracking-tight text-base">NEXUS ERP</span>
             </div>
-          );
-        }
+            <span className="text-xs font-semibold text-slate-500">Chile • Cloud Multi-Empresa</span>
+          </header>
 
-        const totalEmpresasActivas = todasEmpresas.filter((e) => e.activa !== false).length;
-
-        return (
-          <div className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-8">
-            <div className="max-w-6xl mx-auto space-y-6">
-              <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-                    NEXUS Enterprise Cloud • Master Console
-                  </span>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5">
-                    Centro de Comando Global Multi-Empresa
-                  </h1>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Orquestación central de corporaciones, identidad visual y arquitectura modular aislada por organización.
-                  </p>
-                </div>
-                <button
-                  onClick={() => { window.location.hash = ""; setModoSuperAdmin(false); }}
-                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-3 rounded-xl cursor-pointer shrink-0"
-                >
-                  Cerrar Consola
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <main className="max-w-6xl w-full mx-auto my-auto py-6 lg:grid lg:grid-cols-12 lg:gap-10 lg:items-center space-y-8 lg:space-y-0">
+            <div className="lg:col-span-7 space-y-4 text-center lg:text-left">
+              <span className="inline-block text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                Arquitectura Modular de Alta Precisión
+              </span>
+              <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight">
+                Control operativo, stock sincronizado y facturación sin fricción.
+              </h1>
+              <p className="text-sm sm:text-base text-slate-500 max-w-xl mx-auto lg:mx-0 leading-relaxed">
+                Cada organización opera con datos aislados por RUT, módulos activados según su necesidad real y conexión directa a canales y SII.
+              </p>
+              <div className="hidden lg:grid grid-cols-3 gap-3 pt-2 max-w-xl">
                 <div className="corp-card rounded-2xl p-4">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Empresas Registradas</span>
-                  <p className="text-2xl font-extrabold text-slate-900 mt-1">{todasEmpresas.length}</p>
+                  <p className="text-xs font-extrabold text-slate-900">100% Aislado por RUT</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Cero cruce de datos entre clientes.</p>
                 </div>
                 <div className="corp-card rounded-2xl p-4">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Organizaciones Activas</span>
-                  <p className="text-2xl font-extrabold text-emerald-700 mt-1">{totalEmpresasActivas}</p>
+                  <p className="text-xs font-extrabold text-slate-900">Activación por Switch</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Cada empresa usa solo lo que necesita.</p>
                 </div>
                 <div className="corp-card rounded-2xl p-4">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Arquitectura Base</span>
-                  <p className="text-2xl font-extrabold text-slate-900 mt-1">18 Módulos</p>
-                </div>
-                <div className="corp-card rounded-2xl p-4">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Aislamiento de Datos</span>
-                  <p className="text-sm font-extrabold text-slate-900 mt-2">100% Independiente por RUT</p>
+                  <p className="text-xs font-extrabold text-slate-900">Multi-Sucursal</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Escala sin frenos ni caídas.</p>
                 </div>
               </div>
-
-              <form onSubmit={crearEmpresaDesdeSuperAdmin} className="corp-card rounded-2xl p-6 space-y-4">
-                <div>
-                  <h2 className="text-base font-extrabold text-slate-900">Dar de Alta Nueva Organización</h2>
-                  <p className="text-xs text-slate-500">
-                    La organización se crea con todos los interruptores apagados para encender exclusivamente los módulos que utilice.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                  <input
-                    type="text"
-                    value={rutNuevoAdmin}
-                    onChange={(e) => setRutNuevoAdmin(e.target.value)}
-                    placeholder="RUT Empresa *"
-                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                    required
-                  />
-                  <input
-                    type="text"
-                    value={nombreReg}
-                    onChange={(e) => setNombreReg(e.target.value)}
-                    placeholder="Razón Social *"
-                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                    required
-                  />
-                  <select
-                    value={rubroReg}
-                    onChange={(e) => setRubroReg(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                  >
-                    <option>E-Commerce / Retail Omnicanal</option>
-                    <option>Distribuidora / Mayorista</option>
-                    <option>Minimarket / Almacén</option>
-                    <option>Ferretería / Materiales</option>
-                    <option>Corporación Internacional</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={jefeReg}
-                    onChange={(e) => setJefeReg(e.target.value)}
-                    placeholder="Director / Administrador *"
-                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                    required
-                  />
-                  <input
-                    type="text"
-                    value={claveNuevaEmpresa}
-                    onChange={(e) => setClaveNuevaEmpresa(e.target.value)}
-                    placeholder="Clave acceso (Ej: 1234)"
-                    className="bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={creandoEmpresaAdmin}
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer"
-                >
-                  {creandoEmpresaAdmin ? "Registrando..." : "Registrar Organización"}
-                </button>
-              </form>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2 corp-card rounded-2xl p-4 flex items-center">
-                  <input
-                    type="text"
-                    value={filtroSuperAdmin}
-                    onChange={(e) => setFiltroSuperAdmin(e.target.value)}
-                    placeholder="Filtrar organizaciones por Razón Social o RUT..."
-                    className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
-                  />
-                </div>
-
-                <form onSubmit={actualizarClaveMaestra} className="corp-card rounded-2xl p-4 flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={nuevaClaveMaestra}
-                    onChange={(e) => setNuevaClaveMaestra(e.target.value)}
-                    placeholder="Nueva clave maestra..."
-                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
-                  />
-                  <button type="submit" className="bg-slate-200 hover:bg-slate-300 text-slate-900 font-bold px-3.5 py-2 rounded-xl text-xs cursor-pointer shrink-0">
-                    Cambiar Clave
-                  </button>
-                </form>
-              </div>
-
-              {empresasFiltradasAdmin.map((emp) => {
-                const empresaActiva = emp.activa !== false;
-                const esPgb = limpiarRut(emp.id) === RUT_PGB;
-                const activosCount = CATALOGO_18_MODULOS.filter((m) => emp.modulosActivos?.[m.id] === true).length;
-
-                return (
-                  <div key={emp.id} className="corp-card rounded-2xl p-6 space-y-5">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-20 h-14 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center p-1.5 overflow-hidden shrink-0">
-                          {emp.logoBase64 ? (
-                            <img src={emp.logoBase64} alt={emp.nombre} className="max-h-full max-w-full object-contain" />
-                          ) : (
-                            <span className="text-[10px] font-bold text-slate-400 text-center">Sin Logo PNG</span>
-                          )}
-                        </div>
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2.5">
-                            <h2 className="text-lg font-extrabold text-slate-900">{emp.nombre}</h2>
-                            <SwitchToggle checked={empresaActiva} onChange={() => toggleEstadoEmpresa(emp)} />
-                            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${empresaActiva ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                              {empresaActiva ? "Activa" : "Pausada"}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            RUT: {emp.rut} • Rubro: {emp.rubro || "General"} • Clave: {emp.pinAcceso || "1234"}
-                          </p>
-                          {esPgb && (
-                            <span className="inline-block mt-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded">
-                              Entorno Dedicado Protegido (pgb-operacion.html — Solo encendidos los 9 módulos que PGB utiliza en vivo)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer transition">
-                          <IconUpload className="w-3.5 h-3.5" />
-                          <span>{subiendoLogo ? "Cargando..." : "Cargar Logo PNG"}</span>
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => subirLogoEmpresaPng(emp.id, e)}
-                            disabled={subiendoLogo}
-                            className="hidden"
-                          />
-                        </label>
-                        {emp.logoBase64 && (
-                          <button
-                            type="button"
-                            onClick={() => eliminarLogoEmpresa(emp.id)}
-                            className="text-xs font-bold text-slate-400 hover:text-rose-600 px-2.5 py-2 rounded-xl cursor-pointer"
-                          >
-                            Quitar Logo
-                          </button>
-                        )}
-                        {!esPgb && (
-                          <button
-                            onClick={() => {
-                              localStorage.setItem("nexus_empresa_rut", emp.id);
-                              setRutActivo(emp.id);
-                              window.location.hash = "";
-                              setModoSuperAdmin(false);
-                            }}
-                            className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
-                          >
-                            Inspeccionar Espacio
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-2.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                          {esPgb
-                            ? `Módulos Activos en PGB (${activosCount} de 18 — Apagados los que PGB no utiliza)`
-                            : `Interruptores de Módulos (${activosCount} de 18 encendidos)`}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
-                        {CATALOGO_18_MODULOS.map((m) => {
-                          const encendido = emp.modulosActivos?.[m.id] === true;
-                          return (
-                            <div
-                              key={m.id}
-                              onClick={() => toggleModuloEmpresa(emp, m.id)}
-                              className={`p-2.5 rounded-xl border transition cursor-pointer flex flex-col justify-between gap-2 ${
-                                encendido ? "bg-white border-slate-900 text-slate-900" : "bg-slate-50 border-slate-200 text-slate-400"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-extrabold text-slate-500">M{m.num}</span>
-                                <SwitchToggle checked={encendido} onChange={() => {}} />
-                              </div>
-                              <span className="text-[11px] font-bold leading-tight">{m.nombre}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
-          </div>
-        );
-      }
 
-      if (!rutActivo || !empresa) {
-        return (
-          <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between p-4 sm:p-8">
-            <header className="max-w-5xl w-full mx-auto flex items-center justify-between py-2">
-              <div className="flex items-center gap-2.5 select-none">
-                <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-extrabold text-sm">
-                  N
-                </div>
-                <button
-                  type="button"
-                  onClick={manejarToqueCandado}
-                  aria-label="Seguridad"
-                  className="text-slate-300 hover:text-slate-400 transition p-0.5 cursor-pointer"
-                >
-                  <IconLock className="w-3 h-3" />
-                </button>
-                <span className="font-extrabold tracking-tight text-slate-900 text-base">NEXUS ERP</span>
-              </div>
-              <span className="text-xs font-semibold text-slate-500">Santiago, Chile</span>
-            </header>
-
-            <main className="max-w-md w-full mx-auto my-auto py-8">
-              <div className="corp-card rounded-3xl p-8 sm:p-10 space-y-7">
-                <div className="space-y-2.5">
-                  <span className="inline-block text-[11px] font-bold uppercase tracking-widest text-slate-400">
-                    Plataforma Empresarial Integral
-                  </span>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 leading-tight">
-                    Sistema ERP Logístico y Empresarial de Máxima Calidad
-                  </h1>
-                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
-                    Administra tu empresa, estructura tu equipo, sincroniza tu catálogo en Excel y opera inventario, rutas, punto de venta y facturación SII en tiempo real.
-                  </p>
+            <div className="lg:col-span-5 max-w-md w-full mx-auto">
+              <div className="corp-card rounded-3xl p-7 sm:p-9 space-y-6">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Ingreso Corporativo</span>
+                  <h2 className="text-xl font-extrabold text-slate-900 mt-1">Acceder a tu Organización</h2>
                 </div>
 
-                <form onSubmit={ingresarConRut} className="space-y-4">
+                <form onSubmit={ingresar} className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-                      RUT de la Empresa
-                    </label>
+                    <label className="text-xs font-bold text-slate-700 block mb-1.5">RUT de la Empresa</label>
                     <input
                       type="text"
                       value={rutInput}
                       onChange={(e) => setRutInput(e.target.value)}
-                      placeholder="Ingresa RUT sin puntos ni guiones"
-                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold text-slate-900 tracking-wide outline-none transition"
+                      placeholder="Ingresa el RUT"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold outline-none"
                       required
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-                      Clave de Acceso
-                    </label>
+                    <label className="text-xs font-bold text-slate-700 block mb-1.5">Clave de Acceso</label>
                     <input
                       type="password"
                       value={claveInput}
                       onChange={(e) => setClaveInput(e.target.value)}
-                      placeholder="Ingresa tu clave corporativa"
-                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold text-slate-900 tracking-wide outline-none transition"
+                      placeholder="Ingresa tu clave"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold outline-none"
                       required
                     />
                   </div>
                   <button
                     type="submit"
-                    disabled={cargandoAuth}
-                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm shadow-sm transition cursor-pointer mt-1"
+                    disabled={cargando}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm transition cursor-pointer"
                   >
-                    {cargandoAuth ? "Verificando credenciales..." : "Ingresar al Sistema"}
+                    {cargando ? "Verificando..." : "Ingresar al Sistema"}
                   </button>
                 </form>
-
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>Infraestructura Cloud Multi-Empresa</span>
-                  <span>Acceso Cifrado</span>
-                </div>
-              </div>
-            </main>
-
-            <footer className="max-w-5xl w-full mx-auto text-center text-[11px] text-slate-400 py-2">
-              NEXUS Enterprise Resource Planning • Todos los derechos reservados
-            </footer>
-          </div>
-        );
-      }
-
-      const modulosHabilitados = CATALOGO_18_MODULOS.filter((m) => empresa.modulosActivos?.[m.id] === true);
-      const equipoLista = Array.isArray(empresa.equipo) ? empresa.equipo : [];
-      const tieneApis = !!(empresa.apis?.meliClientId || empresa.apis?.falabellaApiKey || empresa.apis?.siiApiKey);
-
-      return (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-6">
-          <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              {empresa.logoBase64 ? (
-                <div className="w-24 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
-                  <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
-                </div>
-              ) : (
-                <div className="w-14 h-14 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center shrink-0">
-                  <IconBuilding className="w-6 h-6 text-slate-400" />
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-3 py-1 rounded-full">
-                    RUT {empresa.rut}
-                  </span>
-                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-3 py-1 rounded-full">
-                    {modulosHabilitados.length} Módulos Activos
-                  </span>
-                </div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-                  {empresa.nombre}
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-500">
-                  Configura tu logotipo, estructura tu equipo, carga tu catálogo maestro y accede a tus módulos habilitados.
-                </p>
               </div>
             </div>
+          </main>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={cerrarSesion}
-                className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer"
-              >
-                Cerrar Sesión
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <button
-              onClick={() => setTabPanel("equipo")}
-              className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
-            >
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">01 • Identidad y Jerarquía</span>
-                <p className="text-sm font-extrabold text-slate-900 mt-0.5">
-                  {equipoLista.length > 0 ? `${equipoLista.length} Colaboradores` : "Logo PNG y Equipo"}
-                </p>
-              </div>
-              <span className="text-xs font-bold text-slate-500">{empresa.logoBase64 || equipoLista.length > 0 ? "Configurado" : "Editar"}</span>
-            </button>
-
-            <button
-              onClick={() => setTabPanel("catalogo")}
-              className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
-            >
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">02 • Maestro Productos</span>
-                <p className="text-sm font-extrabold text-slate-900 mt-0.5">
-                  {catalogoLocal.length > 0 ? `${catalogoLocal.length} Ítems en Catálogo` : "Importar Catálogo Excel"}
-                </p>
-              </div>
-              <span className="text-xs font-bold text-slate-500">{catalogoLocal.length > 0 ? "Sincronizado" : "Pendiente"}</span>
-            </button>
-
-            <button
-              onClick={() => setTabPanel("apis")}
-              className="corp-card rounded-2xl p-4 text-left hover:border-slate-400 transition cursor-pointer flex items-center justify-between"
-            >
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">03 • Canales y SII</span>
-                <p className="text-sm font-extrabold text-slate-900 mt-0.5">
-                  {tieneApis ? "Integraciones Activas" : "Conectar APIs / OpenFactura"}
-                </p>
-              </div>
-              <span className="text-xs font-bold text-slate-500">{tieneApis ? "Conectado" : "Opcional"}</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
-            <button
-              onClick={() => setTabPanel("modulos")}
-              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "modulos" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-            >
-              Módulos ({modulosHabilitados.length})
-            </button>
-            <button
-              onClick={() => setTabPanel("equipo")}
-              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "equipo" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-            >
-              Identidad y Equipo ({equipoLista.length})
-            </button>
-            <button
-              onClick={() => setTabPanel("catalogo")}
-              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "catalogo" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-            >
-              Catálogo Maestro ({catalogoLocal.length})
-            </button>
-            <button
-              onClick={() => setTabPanel("apis")}
-              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${tabPanel === "apis" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-            >
-              Integraciones API / SII
-            </button>
-          </div>
-
-          {tabPanel === "modulos" && (
-            modulosHabilitados.length === 0 ? (
-              <div className="corp-card rounded-2xl p-10 text-center space-y-2">
-                <h3 className="text-base font-extrabold text-slate-900">No hay módulos operativos encendidos todavía</h3>
-                <p className="text-xs text-slate-500">
-                  Puedes configurar tu logotipo, equipo, catálogo Excel y credenciales API en las pestañas superiores mientras administración activa los interruptores de tus módulos.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {modulosHabilitados.map((mod) => (
-                  <div
-                    key={mod.id}
-                    onClick={() => abrirModulo(mod)}
-                    className="corp-card rounded-2xl p-5 hover:border-slate-400 transition cursor-pointer flex flex-col justify-between gap-4"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                          Módulo {mod.num} • {mod.grupo}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-700">
-                          Activo
-                        </span>
-                      </div>
-                      <h3 className="text-base font-extrabold text-slate-900">
-                        {mod.nombre}
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{mod.desc}</p>
-                    </div>
-
-                    <div className="text-xs font-bold text-slate-900 flex items-center justify-between pt-3 border-t border-slate-100">
-                      <span>Abrir módulo</span>
-                      <span>→</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
-          )}
-
-          {tabPanel === "equipo" && (
-            <div className="space-y-6">
-              <div className="corp-card rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-28 h-20 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center p-2 shrink-0">
-                    {empresa.logoBase64 ? (
-                      <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
-                    ) : (
-                      <span className="text-[11px] font-semibold text-slate-400 text-center">Sin Logo PNG</span>
-                    )}
-                  </div>
-                  <div>
-                    <h2 className="text-base font-extrabold text-slate-900">Logotipo Corporativo (PNG / Alta Definición)</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Se aplica automáticamente en los encabezados operativos, hojas de conteo y reportes PDF oficiales.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <label className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition">
-                    <IconUpload className="w-4 h-4" />
-                    <span>{subiendoLogo ? "Subiendo..." : "Subir Logo PNG"}</span>
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      onChange={(e) => subirLogoEmpresaPng(empresa.id, e)}
-                      disabled={subiendoLogo}
-                      className="hidden"
-                    />
-                  </label>
-                  {empresa.logoBase64 && (
-                    <button
-                      type="button"
-                      onClick={() => eliminarLogoEmpresa(empresa.id)}
-                      className="text-xs font-bold text-slate-500 hover:text-rose-600 px-3 py-2.5 rounded-xl border border-slate-200 cursor-pointer"
-                    >
-                      Eliminar
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-900">Estructura y Jerarquía de la Organización</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Registra jefaturas, vendedores, personal de bodega y despacho. Los módulos operativos utilizarán este directorio.
-                  </p>
-                </div>
-
-                <form onSubmit={agregarMiembroEquipo} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  <input
-                    type="text"
-                    value={nuevoNombreMiembro}
-                    onChange={(e) => setNuevoNombreMiembro(e.target.value)}
-                    placeholder="Nombre completo del colaborador..."
-                    className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-slate-900"
-                    required
-                  />
-                  <select
-                    value={nuevoRolMiembro}
-                    onChange={(e) => setNuevoRolMiembro(e.target.value)}
-                    className="bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
-                  >
-                    {ROLES_JERARQUIA.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                  <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer">
-                    Agregar Colaborador
-                  </button>
-                </form>
-
-                {equipoLista.length === 0 ? (
-                  <div className="text-center p-8 bg-slate-50 rounded-xl text-xs text-slate-500">
-                    Aún no hay colaboradores registrados en esta empresa.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {equipoLista.map((m) => (
-                      <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-bold text-slate-900">{m.nombre}</p>
-                          <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded mt-1 inline-block">
-                            {m.rol}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => eliminarMiembroEquipo(m.id)}
-                          className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1 cursor-pointer"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {tabPanel === "catalogo" && (
-            <div className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo Maestro de Productos</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Sincronizado automáticamente con Inventario, Punto de Venta, Logística y Canales E-Commerce.
-                  </p>
-                </div>
-                <label className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-3 rounded-xl cursor-pointer text-center shrink-0">
-                  {importandoXlsx ? "Procesando archivo..." : "Importar Excel (.xlsx)"}
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={subirExcelCatalogo} disabled={importandoXlsx} className="hidden" />
-                </label>
-              </div>
-
-              <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <input
-                  type="text"
-                  value={prodManualCod}
-                  onChange={(e) => setProdManualCod(e.target.value)}
-                  placeholder="Código / SKU"
-                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
-                />
-                <input
-                  type="text"
-                  value={prodManualNom}
-                  onChange={(e) => setProdManualNom(e.target.value)}
-                  placeholder="Descripción del producto *"
-                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
-                  required
-                />
-                <input
-                  type="text"
-                  value={prodManualProv}
-                  onChange={(e) => setProdManualProv(e.target.value)}
-                  placeholder="Proveedor / Marca"
-                  className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none"
-                />
-                <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 px-4 rounded-xl text-xs cursor-pointer">
-                  Agregar Producto
-                </button>
-              </form>
-
-              <input
-                type="text"
-                value={busquedaCat}
-                onChange={(e) => setBusquedaCat(e.target.value)}
-                placeholder="Buscar por código, descripción o proveedor..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-slate-900"
-              />
-
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-xl">
-                {catalogoFiltrado.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">No hay productos registrados en el catálogo.</p>
-                ) : (
-                  catalogoFiltrado.slice(0, 150).map((p) => (
-                    <div key={p.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-slate-50">
-                      <div className="min-w-0">
-                        <span className="font-bold text-slate-900 block truncate">
-                          {p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}
-                        </span>
-                        {p.proveedor && <span className="text-[10px] text-slate-500">Proveedor: {p.proveedor}</span>}
-                      </div>
-                      <button onClick={() => borrarProductoCat(p.id)} className="text-slate-400 hover:text-rose-600 font-bold text-[11px] px-2 py-1 cursor-pointer">
-                        Eliminar
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {tabPanel === "apis" && (
-            <form onSubmit={guardarConfigApis} className="corp-card rounded-2xl p-6 sm:p-8 space-y-6">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Integraciones Omnicanal y Facturación Electrónica (SII)</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Configura las credenciales de tus canales de venta y tu proveedor tributario.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Mercado Libre Chile API</h3>
-                  <input
-                    type="text"
-                    value={apisForm.meliClientId}
-                    onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })}
-                    placeholder="App ID / Client ID"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                  <input
-                    type="password"
-                    value={apisForm.meliSecret}
-                    onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })}
-                    placeholder="Client Secret / Access Token"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Falabella Seller Center API</h3>
-                  <input
-                    type="text"
-                    value={apisForm.falabellaUser}
-                    onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })}
-                    placeholder="User ID (Correo Seller Center)"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                  <input
-                    type="password"
-                    value={apisForm.falabellaApiKey}
-                    onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })}
-                    placeholder="API Key Falabella"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Lider / Walmart Marketplace API</h3>
-                  <input
-                    type="password"
-                    value={apisForm.liderApiKey}
-                    onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })}
-                    placeholder="Client Secret / Token Lider"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                  <p className="text-[11px] text-slate-500">
-                    Incluye bandeja física separada para impresión de etiquetas Lider.
-                  </p>
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">SII / OpenFactura (DTE 33 y 39)</h3>
-                  <select
-                    value={apisForm.siiProveedor}
-                    onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  >
-                    <option>OpenFactura (Haulmer)</option>
-                    <option>SimpleFactura</option>
-                    <option>SII Directo (Certificado .PFX + CAF)</option>
-                  </select>
-                  <input
-                    type="password"
-                    value={apisForm.siiApiKey}
-                    onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })}
-                    placeholder="API Key OpenFactura / Clave Certificado"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-semibold outline-none"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={guardandoApis}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl text-sm transition cursor-pointer"
-              >
-                {guardandoApis ? "Guardando..." : "Guardar Credenciales y Parámetros SII"}
-              </button>
-            </form>
-          )}
+          <footer className="max-w-6xl w-full mx-auto text-center text-[11px] text-slate-400 py-2">
+            NEXUS ERP • Plataforma Multi-Empresa
+          </footer>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<PortadaApp />);
   </script>
 </body>
 </html>
