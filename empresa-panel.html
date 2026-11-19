@@ -47,10 +47,17 @@
       industrial: { btn: "bg-amber-700 hover:bg-amber-800 text-white", tag: "bg-amber-50 text-amber-800", border: "border-amber-700" }
     };
 
+    const AYUDA_APIS = {
+      sii: "En OpenFactura (Haulmer) o tu proveedor DTE, entra a Configuración → API Keys y copia tu llave de producción.",
+      meli: "En developers.mercadolibre.cl → Mis Aplicaciones, copia el App ID (Client ID) y el Client Secret.",
+      falabella: "En Falabella Seller Center → Configuración → Administrar Usuarios, copia tu correo y tu API Key.",
+      lider: "En Walmart/Lider Seller Center → Configuración → Credenciales API, copia tu Token / Client Secret."
+    };
+
     const MODULOS_BASE = [
       { id: "m1_empresa", num: "01", grupo: "Núcleo", nombre: "Identidad y Logo PNG", desc: "Logotipo corporativo para sistema y documentos.", tab: "equipo" },
       { id: "m2_jerarquia", num: "02", grupo: "Núcleo", nombre: "Jerarquía y Equipo", desc: "Administración de jefaturas, ventas, bodega y despacho.", tab: "equipo" },
-      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro Excel", desc: "Carga masiva en Excel (.xlsx) vinculada a toda la operación.", tab: "catalogo" },
+      { id: "m3_catalogo", num: "03", grupo: "Núcleo", nombre: "Catálogo Maestro (Excel y Manual)", desc: "Carga masiva en Excel (.xlsx) o ingreso manual.", tab: "catalogo" },
       { id: "m4_apis", num: "04", grupo: "Núcleo", nombre: "Integraciones API y SII", desc: "Credenciales de Mercado Libre, Falabella, Lider y SII.", tab: "apis" },
       { id: "m5_inv_general", num: "05", grupo: "Inventario", nombre: "Inventario General y Proveedor", desc: "Filtrado por proveedor para toma física.", url: "pgb-inventario.html" },
       { id: "m6_conteo_ciclico", num: "06", grupo: "Inventario", nombre: "Conteo Cíclico Digital y PDF", desc: "Hojas en columnas y conteo en estantería.", url: "pgb-inventario.html" },
@@ -82,6 +89,11 @@
       const [busquedaCat, setBusquedaCat] = useState("");
       const [importando, setImportando] = useState(false);
 
+      // Campos para agregar producto manualmente
+      const [manualSku, setManualSku] = useState("");
+      const [manualNombre, setManualNombre] = useState("");
+      const [manualProveedor, setManualProveedor] = useState("");
+
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
         meliSecret: "",
@@ -92,6 +104,7 @@
         siiApiKey: "",
         siiModoAutomatico: true
       });
+      const [ayudaTip, setAyudaTip] = useState(null);
       const [guardandoApis, setGuardandoApis] = useState(false);
 
       useEffect(() => {
@@ -134,6 +147,24 @@
         setNuevoNombre("");
       };
 
+      const agregarProductoManual = async (e) => {
+        e.preventDefault();
+        if (!manualNombre.trim()) return;
+        await db.collection("saas_empresas").doc(rutActivo).collection("catalogo").add({
+          codigo: manualSku.trim().toUpperCase(),
+          nombre: manualNombre.trim().toUpperCase(),
+          proveedor: manualProveedor.trim().toUpperCase(),
+          stockOnline: 25
+        });
+        setManualSku("");
+        setManualNombre("");
+        setManualProveedor("");
+      };
+
+      const eliminarProducto = async (id) => {
+        await db.collection("saas_empresas").doc(rutActivo).collection("catalogo").doc(id).delete();
+      };
+
       const subirExcel = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -165,7 +196,7 @@
             }
             if (nom && !existentes.has(nom)) {
               existentes.add(nom);
-              nuevos.push({ codigo: cod, nombre: nom, proveedor: prov });
+              nuevos.push({ codigo: cod, nombre: nom, proveedor: prov, stockOnline: 25 });
             }
           });
 
@@ -240,9 +271,8 @@
       const equipo = Array.isArray(empresa.equipo) ? empresa.equipo : [];
 
       return (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-6">
-          {/* CABECERA DEDICADA CON PALETA DE LA EMPRESA */}
-          <div className={`corp-card rounded-2xl p-6 sm:p-8 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-20 space-y-5">
+          <div className={`corp-card rounded-2xl p-6 sm:p-7 border-t-4 ${tema.border} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
             <div className="flex items-center gap-4">
               {empresa.logoBase64 && (
                 <div className="w-24 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
@@ -258,54 +288,43 @@
                     {modulosActivos.length} Módulos Activos
                   </span>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">{empresa.nombre}</h1>
+                <h1 className="text-2xl font-extrabold text-slate-900">{empresa.nombre}</h1>
                 <p className="text-xs text-slate-500 mt-0.5">{empresa.rubro || "Entorno Empresarial Dedicado"}</p>
               </div>
             </div>
 
-            <button
-              onClick={cerrarSesion}
-              className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
-            >
+            <button onClick={cerrarSesion} className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}>
               Cerrar Sesión
             </button>
           </div>
 
-          {/* DETECCIÓN AUTOMÁTICA DE DATOS O CREDENCIALES FALTANTES */}
           {faltanDatosEsenciales.length > 0 && (
-            <div className="corp-card rounded-2xl p-5 border-amber-300 bg-amber-50/30 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-amber-900">
-                  Datos Pendientes Detectados para Operar al 100%
-                </span>
-                <button
-                  onClick={() => setTab(tieneEcommerceActivo && !apisForm.siiApiKey ? "apis" : "catalogo")}
-                  className={`text-xs font-bold px-3.5 py-1.5 rounded-xl cursor-pointer ${tema.btn}`}
-                >
-                  Completar Ahora
-                </button>
+            <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-extrabold text-amber-900 block">Datos pendientes para operar al 100%:</span>
+                <p className="text-xs text-slate-700 mt-0.5">{faltanDatosEsenciales.join(" • ")}</p>
               </div>
-              <ul className="text-xs text-slate-700 space-y-1 list-disc list-inside">
-                {faltanDatosEsenciales.map((item, idx) => (
-                  <li key={idx} className="font-semibold">{item}</li>
-                ))}
-              </ul>
+              <button
+                onClick={() => setTab(tieneEcommerceActivo && !apisForm.siiApiKey ? "apis" : "catalogo")}
+                className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
+              >
+                Completar
+              </button>
             </div>
           )}
 
-          {/* NAVEGACIÓN DEL ESPACIO */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
             <button onClick={() => setTab("modulos")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "modulos" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Módulos ({modulosActivos.length})
-            </button>
-            <button onClick={() => setTab("equipo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "equipo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Equipo ({equipo.length})
+              1. Módulos ({modulosActivos.length})
             </button>
             <button onClick={() => setTab("catalogo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "catalogo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              Catálogo ({catalogo.length})
+              2. Catálogo ({catalogo.length})
             </button>
             <button onClick={() => setTab("apis")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "apis" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-              APIs y SII
+              3. APIs y SII
+            </button>
+            <button onClick={() => setTab("equipo")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "equipo" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
+              4. Equipo ({equipo.length})
             </button>
           </div>
 
@@ -313,7 +332,7 @@
             modulosActivos.length === 0 ? (
               <div className="corp-card rounded-2xl p-10 text-center space-y-2">
                 <h2 className="text-base font-extrabold text-slate-900">Aún no hay módulos encendidos para esta empresa</h2>
-                <p className="text-xs text-slate-500">Enciende los interruptores correspondientes en la consola Super Admin para habilitar sus accesos aquí.</p>
+                <p className="text-xs text-slate-500">Enciende los interruptores correspondientes en Super Admin para habilitar sus accesos aquí.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -343,6 +362,137 @@
             )
           )}
 
+          {tab === "catalogo" && (
+            <div className="corp-card rounded-2xl p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo Maestro de Productos</h2>
+                  <p className="text-xs text-slate-500">Agrega productos uno a uno manualmente o importa un archivo Excel (.xlsx) completo.</p>
+                </div>
+                <label className={`text-xs font-bold px-5 py-3 rounded-xl cursor-pointer text-center shrink-0 ${tema.btn}`}>
+                  {importando ? "Importando..." : "Importar Excel (.xlsx)"}
+                  <input type="file" accept=".xlsx,.xls,.csv" onChange={subirExcel} disabled={importando} className="hidden" />
+                </label>
+              </div>
+
+              {/* INGRESO MANUAL DE PRODUCTO */}
+              <form onSubmit={agregarProductoManual} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <input
+                  type="text"
+                  value={manualSku}
+                  onChange={(e) => setManualSku(e.target.value)}
+                  placeholder="Código / SKU"
+                  className="bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
+                />
+                <input
+                  type="text"
+                  value={manualNombre}
+                  onChange={(e) => setManualNombre(e.target.value)}
+                  placeholder="Nombre del producto *"
+                  className="bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
+                  required
+                />
+                <input
+                  type="text"
+                  value={manualProveedor}
+                  onChange={(e) => setManualProveedor(e.target.value)}
+                  placeholder="Proveedor / Marca"
+                  className="bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
+                />
+                <button type="submit" className={`font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                  + Agregar Manual
+                </button>
+              </form>
+
+              <input
+                type="text"
+                value={busquedaCat}
+                onChange={(e) => setBusquedaCat(e.target.value)}
+                placeholder="Buscar producto por SKU, nombre o proveedor..."
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
+              />
+
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-xl">
+                {catalogoFiltrado.length === 0 ? (
+                  <p className="p-8 text-center text-xs text-slate-500">Aún no hay productos cargados para esta organización.</p>
+                ) : (
+                  catalogoFiltrado.slice(0, 150).map((p) => (
+                    <div key={p.id} className="px-4 py-2.5 text-xs flex items-center justify-between gap-2">
+                      <div>
+                        <span className="font-bold text-slate-900">{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
+                        {p.proveedor && <span className="text-slate-500 text-[11px] ml-2">({p.proveedor})</span>}
+                      </div>
+                      <button onClick={() => eliminarProducto(p.id)} className="text-slate-400 hover:text-rose-600 font-bold text-[11px] cursor-pointer">
+                        Eliminar
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {tab === "apis" && (
+            <form onSubmit={guardarApis} className="corp-card rounded-2xl p-6 space-y-5">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">Credenciales API y Facturación Automática SII</h2>
+                <p className="text-xs text-slate-500">Toca el icono <strong>?</strong> en cada bloque para ver cómo obtener la clave en esa plataforma.</p>
+              </div>
+
+              {ayudaTip && (
+                <div className="bg-slate-900 text-white p-3.5 rounded-xl text-xs flex items-center justify-between gap-3">
+                  <span>{AYUDA_APIS[ayudaTip]}</span>
+                  <button type="button" onClick={() => setAyudaTip(null)} className="font-bold underline shrink-0 cursor-pointer">Cerrar</button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase text-slate-800">SII / OpenFactura</h3>
+                    <button type="button" onClick={() => setAyudaTip("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                  </div>
+                  <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold">
+                    <option>OpenFactura (Haulmer)</option>
+                    <option>SimpleFactura</option>
+                    <option>SII Directo (Certificado .PFX + CAF)</option>
+                  </select>
+                  <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase text-slate-800">Mercado Libre Chile</h3>
+                    <button type="button" onClick={() => setAyudaTip("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                  </div>
+                  <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                  <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase text-slate-800">Falabella Seller Center</h3>
+                    <button type="button" onClick={() => setAyudaTip("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                  </div>
+                  <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                  <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase text-slate-800">Lider / Walmart Marketplace</h3>
+                    <button type="button" onClick={() => setAyudaTip("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
+                  </div>
+                  <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                </div>
+              </div>
+
+              <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
+                {guardandoApis ? "Guardando..." : "Guardar Configuración"}
+              </button>
+            </form>
+          )}
+
           {tab === "equipo" && (
             <div className="corp-card rounded-2xl p-6 space-y-5">
               <div>
@@ -367,77 +517,6 @@
                 ))}
               </div>
             </div>
-          )}
-
-          {tab === "catalogo" && (
-            <div className="corp-card rounded-2xl p-6 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-900">Catálogo Maestro de Productos</h2>
-                  <p className="text-xs text-slate-500">Base compartida para inventario, stock omnicanal y ventas.</p>
-                </div>
-                <label className={`text-xs font-bold px-5 py-3 rounded-xl cursor-pointer text-center ${tema.btn}`}>
-                  {importando ? "Importando..." : "Importar Excel (.xlsx)"}
-                  <input type="file" accept=".xlsx,.xls,.csv" onChange={subirExcel} disabled={importando} className="hidden" />
-                </label>
-              </div>
-              <input
-                type="text"
-                value={busquedaCat}
-                onChange={(e) => setBusquedaCat(e.target.value)}
-                placeholder="Buscar producto por SKU, nombre o proveedor..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none"
-              />
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-xl">
-                {catalogoFiltrado.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">Aún no hay productos cargados para esta organización.</p>
-                ) : (
-                  catalogoFiltrado.slice(0, 150).map((p) => (
-                    <div key={p.id} className="px-4 py-2.5 text-xs flex justify-between">
-                      <span className="font-bold text-slate-900">{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
-                      {p.proveedor && <span className="text-slate-500 text-[11px]">{p.proveedor}</span>}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {tab === "apis" && (
-            <form onSubmit={guardarApis} className="corp-card rounded-2xl p-6 space-y-5">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Credenciales API y Facturación Automática SII</h2>
-                <p className="text-xs text-slate-500">Configura solo las plataformas y el método de facturación SII que utilice {empresa.nombre}.</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <h3 className="text-xs font-extrabold uppercase text-slate-800">SII / OpenFactura (Modo Automático)</h3>
-                  <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold">
-                    <option>OpenFactura (Haulmer)</option>
-                    <option>SimpleFactura</option>
-                    <option>SII Directo (Certificado .PFX + CAF)</option>
-                  </select>
-                  <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <h3 className="text-xs font-extrabold uppercase text-slate-800">Mercado Libre Chile</h3>
-                  <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                  <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <h3 className="text-xs font-extrabold uppercase text-slate-800">Falabella Seller Center</h3>
-                  <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                  <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
-                  <h3 className="text-xs font-extrabold uppercase text-slate-800">Lider / Walmart Marketplace</h3>
-                  <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                </div>
-              </div>
-              <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                {guardandoApis ? "Guardando..." : "Guardar Configuración"}
-              </button>
-            </form>
           )}
         </div>
       );
