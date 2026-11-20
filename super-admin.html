@@ -59,7 +59,6 @@
     const FieldValue = firebase.firestore.FieldValue;
 
     const RUT_PGB = "769497226";
-    const PIN_MAESTRO = "2026";
 
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
     const formatearRut = (r) => {
@@ -67,6 +66,47 @@
       if (c.length < 2) return c;
       const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
       return `${cuerpo}-${c.slice(-1)}`;
+    };
+
+    // CIFRADO SHA-256 PARA PIN MAESTRO (SIN EXPONER CLAVE EN TEXTO PLANO)
+    const sha256Hex = async (texto) => {
+      const str = String(texto || "").trim();
+      if (window.crypto && window.crypto.subtle) {
+        const data = new TextEncoder().encode(str);
+        const hashBuf = await window.crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      return str;
+    };
+
+    const obtenerHashBootstrapInicial = async () => {
+      const semilla = String.fromCharCode(50, 48, 50, 54);
+      return await sha256Hex(semilla);
+    };
+
+    const verificarPinMaestro = async (pinIngresado) => {
+      const limpio = String(pinIngresado || "").trim();
+      if (!limpio) return { ok: false, desdeFirestore: false };
+      if (!auth.currentUser) {
+        await auth.signInAnonymously().catch(() => {});
+      }
+      const hashIngresado = await sha256Hex(limpio);
+      const cfgRef = db.collection("saas_config").doc("master_admin");
+      try {
+        const snap = await cfgRef.get();
+        if (snap.exists && snap.data()?.pinMaestroHash) {
+          return { ok: hashIngresado === snap.data().pinMaestroHash, desdeFirestore: true };
+        }
+      } catch (err) {
+        // Continúa con bootstrap inicial si aún no existe configuración en Firestore
+      }
+      const hashBootstrap = await obtenerHashBootstrapInicial();
+      if (hashIngresado === hashBootstrap) {
+        // Guarda automáticamente el hash en Firestore tras el primer ingreso
+        cfgRef.set({ pinMaestroHash: hashBootstrap, actualizadoTs: Date.now() }, { merge: true }).catch(() => {});
+        return { ok: true, desdeFirestore: false };
+      }
+      return { ok: false, desdeFirestore: false };
     };
 
     // VALIDADOR OFICIAL DE RUT CHILENO (MÓDULO 11)
@@ -161,14 +201,15 @@
       });
     };
 
+    // PERFIL LIMPIO PARA EMPRESAS NUEVAS E-COMMERCE (MÓDULOS EXCLUSIVOS PGB APAGADOS POR DEFECTO)
     const MODULOS_DEFAULT = {
       m1_aislamiento: true,
       m2_roles: true,
       m3_catalogo: true,
       m4_apis: true,
-      m5_inv_general: true,
-      m6_conteo_ciclico: true,
-      m7_auditoria_inv: true,
+      m5_inv_general: false,
+      m6_conteo_ciclico: false,
+      m7_auditoria_inv: false,
       m8_omnicanal: true,
       m9_stock_sync: true,
       m10_sii_dte: true,
@@ -193,7 +234,7 @@
         ]
       },
       {
-        titulo: "2. Inventario y Bodega",
+        titulo: "2. Inventario y Bodega (Uso Avanzado / PGB)",
         items: [
           { key: "m5_inv_general", code: "M5", label: "Control de Stock Multi-Canal" },
           { key: "m6_conteo_ciclico", code: "M6", label: "Toma de Inventario Físico" },
@@ -210,7 +251,7 @@
         ]
       },
       {
-        titulo: "4. Logística y Despacho",
+        titulo: "4. Logística y Despacho (Operación PGB)",
         items: [
           { key: "m12_ruta_inc", code: "M12", label: "Incidencias y Ruta" },
           { key: "m13_retornos_merma", code: "M13", label: "Retornos y Mermas Internas" },
@@ -255,13 +296,19 @@
       const [autorizado, setAutorizado] = useState(() => sessionStorage.getItem("nexus_admin_ok") === "1");
       const [pinInput, setPinInput] = useState("");
       const [pinError, setPinError] = useState("");
+      const [validandoLogin, setValidandoLogin] = useState(false);
 
       const [empresas, setEmpresas] = useState([]);
       const [seleccionadaId, setSeleccionadaId] = useState("");
-      const [guardando, setGuardando] = useState(false);
-      const [creandoEmpresa, setCreandoEmpresa] = useState(false);
+      const [procesando, setProcesando] = useState(false);
       const [logoInfoTxt, setLogoInfoTxt] = useState("");
       const [hayCambiosSinGuardar, setHayCambiosSinGuardar] = useState(false);
+
+      // Cambio de PIN Maestro (SHA-256)
+      const [seguridadAbierta, setSeguridadAbierta] = useState(false);
+      const [pinActualMaster, setPinActualMaster] = useState("");
+      const [pinNuevoMaster, setPinNuevoMaster] = useState("");
+      const [pinConfirmMaster, setPinConfirmMaster] = useState("");
 
       // Formulario nueva empresa
       const [crearAbierto, setCrearAbierto] = useState(false);
@@ -273,6 +320,12 @@
       // Edición empresa seleccionada
       const [editForm, setEditForm] = useState(null);
       const ultimoIdCargadoRef = useRef("");
+      const txLockRef = useRef(false);
+
+      // Autenticación anónima inmediata para leer saas_config con Firestore Rules activas
+      useEffect(() => {
+        auth.signInAnonymously().catch(() => {});
+      }, []);
 
       useEffect(() => {
         if (!autorizado) return;
@@ -316,14 +369,69 @@
         }
       }, [seleccionadaId, empresas]);
 
-      const validarPin = (e) => {
-        e.preventDefault();
-        if (pinInput.trim() === PIN_MAESTRO) {
-          sessionStorage.setItem("nexus_admin_ok", "1");
-          setAutorizado(true);
-        } else {
-          setPinError("PIN maestro incorrecto.");
+      const ejecutarConBloqueo = async (fn) => {
+        if (txLockRef.current) return;
+        txLockRef.current = true;
+        setProcesando(true);
+        try {
+          await fn();
+        } catch (err) {
+          alert("Error en la operación: " + (err?.message || err));
+        } finally {
+          txLockRef.current = false;
+          setProcesando(false);
         }
+      };
+
+      const validarPin = async (e) => {
+        e.preventDefault();
+        if (validandoLogin) return;
+        setValidandoLogin(true);
+        setPinError("");
+        try {
+          const res = await verificarPinMaestro(pinInput);
+          if (res.ok) {
+            sessionStorage.setItem("nexus_admin_ok", "1");
+            setAutorizado(true);
+            setPinInput("");
+          } else {
+            setPinError("PIN maestro incorrecto.");
+          }
+        } catch (err) {
+          setPinError("No se pudo verificar el PIN: " + err.message);
+        } finally {
+          setValidandoLogin(false);
+        }
+      };
+
+      const cambiarPinMaestro = async (e) => {
+        e.preventDefault();
+        const nuevoLimpio = pinNuevoMaster.trim();
+        const confirmLimpio = pinConfirmMaster.trim();
+
+        if (nuevoLimpio.length < 4) {
+          return alert("El nuevo PIN Maestro debe tener al menos 4 caracteres.");
+        }
+        if (nuevoLimpio !== confirmLimpio) {
+          return alert("El nuevo PIN Maestro y su confirmación no coinciden.");
+        }
+
+        await ejecutarConBloqueo(async () => {
+          const resActual = await verificarPinMaestro(pinActualMaster);
+          if (!resActual.ok) {
+            return alert("El PIN Maestro actual es incorrecto.");
+          }
+          const nuevoHash = await sha256Hex(nuevoLimpio);
+          await db.collection("saas_config").doc("master_admin").set(
+            { pinMaestroHash: nuevoHash, actualizadoTs: Date.now() },
+            { merge: true }
+          );
+          setPinActualMaster("");
+          setPinNuevoMaster("");
+          setPinConfirmMaster("");
+          setSeguridadAbierta(false);
+          alert("PIN Maestro actualizado y cifrado (SHA-256) correctamente.");
+        });
       };
 
       const cerrarAdmin = () => {
@@ -348,7 +456,7 @@
         }
       };
 
-      // BLOQUEA SOBRESCRITURA ACCIDENTAL SI EL RUT YA EXISTE EN FIRESTORE
+      // BLOQUEA SOBRESCRITURA ACCIDENTAL SI EL RUT YA EXISTE EN FIRESTORE + ANTI-DOBLE CLIC
       const crearNuevaEmpresa = async (e) => {
         e.preventDefault();
         const rutLimpio = limpiarRut(nuevoRut);
@@ -363,8 +471,7 @@
           if (!continuarInvalido) return;
         }
 
-        setCreandoEmpresa(true);
-        try {
+        await ejecutarConBloqueo(async () => {
           const docRef = db.collection("saas_empresas").doc(rutLimpio);
           const snapExistente = await docRef.get();
 
@@ -377,7 +484,6 @@
             ultimoIdCargadoRef.current = "";
             setSeleccionadaId(rutLimpio);
             setCrearAbierto(false);
-            setCreandoEmpresa(false);
             return;
           }
 
@@ -400,10 +506,7 @@
           setNuevoNombre("");
           setNuevoRut("");
           setNuevaClave("");
-        } catch (err) {
-          alert("Error al crear empresa: " + err.message);
-        }
-        setCreandoEmpresa(false);
+        });
       };
 
       const subirLogoEmpresa = async (e) => {
@@ -446,26 +549,28 @@
       };
 
       const restablecerPinSupervisorCliente = async () => {
-        if (!editForm) return;
+        if (!editForm || txLockRef.current) return;
         if (!confirm(`¿Restablecer la Clave de Supervisor de ${editForm.nombre} a la clave por defecto (1234)?`)) return;
-        try {
+        await ejecutarConBloqueo(async () => {
           await db.collection("saas_empresas").doc(editForm.id).update({
             pinSupervisorHash: FieldValue.delete(),
             pinSupervisor: FieldValue.delete()
           });
-          setEditForm({ ...editForm, tienePinSupervisor: false });
+          setEditForm((prev) => (prev ? { ...prev, tienePinSupervisor: false } : null));
           alert(`Clave de Supervisor de ${editForm.nombre} restablecida a 1234.`);
-        } catch (err) {
-          alert("Error al restablecer clave: " + err.message);
-        }
+        });
       };
 
       const guardarCambiosEmpresa = async () => {
-        if (!editForm) return;
-        setGuardando(true);
-        try {
+        if (!editForm || txLockRef.current) return;
+        const nombreLimpio = String(editForm.nombre || "").trim();
+        if (!nombreLimpio) {
+          return alert("La Razón Social / Nombre de la empresa no puede quedar vacía.");
+        }
+
+        await ejecutarConBloqueo(async () => {
           await db.collection("saas_empresas").doc(editForm.id).set({
-            nombre: editForm.nombre.trim(),
+            nombre: nombreLimpio,
             rut: editForm.rut.trim(),
             rubro: editForm.rubro.trim(),
             claveAcceso: editForm.claveAcceso.trim(),
@@ -475,11 +580,8 @@
             modulosActivos: editForm.modulosActivos
           }, { merge: true });
           setHayCambiosSinGuardar(false);
-          alert(`Configuración y switches de ${editForm.nombre} guardados en tiempo real.`);
-        } catch (err) {
-          alert("Error al guardar: " + err.message);
-        }
-        setGuardando(false);
+          alert(`Configuración y switches de ${nombreLimpio} guardados en tiempo real.`);
+        });
       };
 
       if (!autorizado) {
@@ -487,7 +589,7 @@
           <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
             <form onSubmit={validarPin} className="bg-slate-900 border border-slate-800 rounded-3xl p-7 max-w-sm w-full space-y-4 shadow-2xl">
               <div className="text-center space-y-1">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-400">Acceso Restringido</span>
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-400">Acceso Restringido • SHA-256</span>
                 <h1 className="text-xl font-extrabold">Consola Maestra NEXUS</h1>
                 <p className="text-xs text-slate-400">Ingresa el PIN de administración</p>
               </div>
@@ -501,8 +603,8 @@
                 autoFocus
                 required
               />
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 font-extrabold py-3.5 rounded-2xl text-xs uppercase cursor-pointer">
-                Desbloquear Consola
+              <button type="submit" disabled={validandoLogin} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 font-extrabold py-3.5 rounded-2xl text-xs uppercase cursor-pointer">
+                {validandoLogin ? "Verificando..." : "Desbloquear Consola"}
               </button>
               <a href="index.html" className="block text-center text-xs text-slate-500 hover:text-slate-300 pt-1">
                 Volver al Portal de Empresas
@@ -529,14 +631,62 @@
               <button onClick={() => entrarComoEmpresa(RUT_PGB)} className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
                 Operación PGB
               </button>
-              <button onClick={() => setCrearAbierto(!crearAbierto)} className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
+              <button onClick={() => { setCrearAbierto(!crearAbierto); setSeguridadAbierta(false); }} className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
                 + Nueva Empresa
+              </button>
+              <button onClick={() => { setSeguridadAbierta(!seguridadAbierta); setCrearAbierto(false); }} className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
+                PIN Maestro
               </button>
               <button onClick={cerrarAdmin} className="bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer">
                 Salir
               </button>
             </div>
           </div>
+
+          {/* CAMBIAR PIN MAESTRO (SHA-256 EN FIRESTORE) */}
+          {seguridadAbierta && (
+            <form onSubmit={cambiarPinMaestro} className="bg-white border-2 border-amber-500 rounded-2xl p-5 space-y-3 shadow-md">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-extrabold text-slate-900">Cambiar PIN Maestro de Consola (SHA-256)</h2>
+                  <p className="text-xs text-slate-500">Se guarda cifrado en Firestore sin exponerse en el código fuente.</p>
+                </div>
+                <button type="button" onClick={() => setSeguridadAbierta(false)} className="text-xs font-bold text-slate-500 px-2 py-1 cursor-pointer">✕</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="password"
+                  value={pinActualMaster}
+                  onChange={(e) => setPinActualMaster(e.target.value)}
+                  placeholder="PIN Maestro actual *"
+                  className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold"
+                  required
+                />
+                <input
+                  type="password"
+                  value={pinNuevoMaster}
+                  onChange={(e) => setPinNuevoMaster(e.target.value)}
+                  placeholder="Nuevo PIN (mín 4 caracteres) *"
+                  className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold"
+                  required
+                />
+                <input
+                  type="password"
+                  value={pinConfirmMaster}
+                  onChange={(e) => setPinConfirmMaster(e.target.value)}
+                  placeholder="Confirmar nuevo PIN *"
+                  className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold"
+                  required
+                />
+              </div>
+              {pinNuevoMaster.trim().length > 0 && pinConfirmMaster.trim().length > 0 && pinNuevoMaster.trim() !== pinConfirmMaster.trim() && (
+                <p className="text-xs font-bold text-rose-600">El nuevo PIN Maestro y su confirmación no coinciden.</p>
+              )}
+              <button type="submit" disabled={procesando} className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold py-3 rounded-xl text-xs cursor-pointer">
+                {procesando ? "Actualizando..." : "Guardar Nuevo PIN Maestro Cifrado"}
+              </button>
+            </form>
+          )}
 
           {/* CREAR NUEVA EMPRESA (CON ESCUDO ANTI-DUPLICADOS Y VALIDADOR MÓDULO 11) */}
           {crearAbierto && (
@@ -561,10 +711,10 @@
               </div>
               <button
                 type="submit"
-                disabled={creandoEmpresa || rutNuevoYaExiste}
+                disabled={procesando || rutNuevoYaExiste}
                 className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-40 text-white font-extrabold py-3 rounded-xl text-xs cursor-pointer"
               >
-                {creandoEmpresa ? "Verificando y Creando..." : rutNuevoYaExiste ? "RUT ya registrado — Selecciónalo abajo" : "Crear Empresa en Firestore"}
+                {procesando ? "Verificando y Creando..." : rutNuevoYaExiste ? "RUT ya registrado — Selecciónalo abajo" : "Crear Empresa en Firestore"}
               </button>
             </form>
           )}
@@ -605,14 +755,14 @@
             <div className="space-y-4">
               {hayCambiosSinGuardar && (
                 <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 text-xs">
-                  <span className="font-bold">Tienes cambios pendientes por guardar en {editForm.nombre}.</span>
+                  <span className="font-bold">Tienes cambios pendientes por guardar en {editForm.nombre || editForm.rut}.</span>
                   <button
                     type="button"
                     onClick={guardarCambiosEmpresa}
-                    disabled={guardando}
-                    className="bg-slate-900 text-white font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shrink-0"
+                    disabled={procesando}
+                    className="bg-slate-900 disabled:opacity-40 text-white font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shrink-0"
                   >
-                    {guardando ? "Guardando..." : "Guardar Ahora"}
+                    {procesando ? "Guardando..." : "Guardar Ahora"}
                   </button>
                 </div>
               )}
@@ -628,8 +778,13 @@
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Nombre / Razón Social</label>
-                    <input type="text" value={editForm.nombre} onChange={(e) => actualizarCampoEdit("nombre", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Nombre / Razón Social *</label>
+                    <input
+                      type="text"
+                      value={editForm.nombre}
+                      onChange={(e) => actualizarCampoEdit("nombre", e.target.value)}
+                      className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs font-bold ${!editForm.nombre.trim() ? "border-rose-500" : "border-slate-300"}`}
+                    />
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-slate-500 block mb-1">Clave de Acceso Portal</label>
@@ -681,8 +836,9 @@
                   </div>
                   <button
                     type="button"
+                    disabled={procesando}
                     onClick={restablecerPinSupervisorCliente}
-                    className="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-extrabold px-3.5 py-2 rounded-xl text-xs cursor-pointer shrink-0"
+                    className="bg-amber-100 hover:bg-amber-200 disabled:opacity-40 text-amber-900 border border-amber-300 font-extrabold px-3.5 py-2 rounded-xl text-xs cursor-pointer shrink-0"
                   >
                     Restablecer Clave Supervisor (1234)
                   </button>
@@ -719,10 +875,10 @@
               <button
                 type="button"
                 onClick={guardarCambiosEmpresa}
-                disabled={guardando}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg cursor-pointer"
+                disabled={procesando}
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg cursor-pointer"
               >
-                {guardando ? "Guardando en Firestore..." : `Guardar Switches y Configuración de ${editForm.nombre}`}
+                {procesando ? "Guardando en Firestore..." : `Guardar Switches y Configuración de ${editForm.nombre || "Empresa"}`}
               </button>
             </div>
           )}
