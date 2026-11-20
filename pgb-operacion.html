@@ -88,6 +88,45 @@
     }
     const auth = firebase.auth();
     const db = firebase.firestore();
+    const FieldValue = firebase.firestore.FieldValue;
+
+    // FECHA Y HORA LOCAL OFICIAL DE CHILE (EVITA DESFASE UTC DESPUÉS DE LAS 21:00)
+    const fechaIsoChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date(ts));
+      } catch (e) {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+
+    const fechaCortaChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          dateStyle: "short"
+        }).format(new Date(ts));
+      } catch (e) {
+        return new Date(ts).toLocaleDateString("es-CL");
+      }
+    };
+
+    const fechaLegibleChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          dateStyle: "short",
+          timeStyle: "short"
+        }).format(new Date(ts));
+      } catch (e) {
+        return new Date(ts).toLocaleString("es-CL");
+      }
+    };
 
     const LogoPGB = ({ className = "w-full h-auto" }) => {
       const [logoUrl, setLogoUrl] = useState("");
@@ -300,7 +339,7 @@
       const [filtroFechaDesde, setFiltroFechaDesde] = useState("");
       const [filtroFechaHasta, setFiltroFechaHasta] = useState("");
 
-      const hoy = new Date().toISOString().split("T")[0];
+      const hoy = fechaIsoChile();
       const mesActualDefault = hoy.slice(0, 7);
       const [mesGrafico, setMesGrafico] = useState(mesActualDefault);
       const [vistaGrafico, setVistaGrafico] = useState("armadores");
@@ -502,7 +541,8 @@
       };
 
       const limpiarFormulario = () => {
-        setFactura(""); setCliente(""); setProducto(""); setCantidad(1); setUnidad(UNIDADES[0]);
+        setFactura(""); setCliente(""); setFecha(fechaIsoChile());
+        setProducto(""); setCantidad(1); setUnidad(UNIDADES[0]);
         setProductoCruce(""); setCantidadCruce(1); setUnidadCruce(UNIDADES[0]);
         setProductoMalFacturado(""); setCantidadMalFacturada(1); setUnidadMalFacturada(UNIDADES[0]);
         setNotas(""); setEditandoId(null);
@@ -778,10 +818,9 @@
           if (existenteDoc) {
             const dataExist = existenteDoc.data();
             if (dataExist.factura && dataExist.factura.includes(fact)) return;
-            const nuevaCantidad = (Number(dataExist.cantidad) || 0) + Number(cant);
             const nuevasFacturas = dataExist.factura ? `${dataExist.factura}, #${fact}` : fact;
             await db.collection("conteo_pendiente").doc(existenteDoc.id).update({
-              cantidad: nuevaCantidad,
+              cantidad: FieldValue.increment(Number(cant)),
               factura: nuevasFacturas,
               codigoProducto: metaProd.codigo || dataExist.codigoProducto || "",
               proveedorProducto: metaProd.proveedor || dataExist.proveedorProducto || "",
@@ -944,7 +983,7 @@
         const datos = {
           factura: factura.trim(),
           cliente: clienteNorm,
-          fecha,
+          fecha: fecha || fechaIsoChile(),
           ruta: rutaTextoFinal,
           rutaTipo,
           integrantesRuta,
@@ -996,16 +1035,17 @@
         try {
           const prodNorm = normalizarTexto(productoNombre);
           const colRef = db.collection("historial_inventario");
+          const ahoraStr = fechaLegibleChile();
           await colRef.add({
             producto: prodNorm,
             unidad: unidadMedida,
             factura: facturaNum || "INTERNO",
             corregidoPor: responsableAjuste,
-            fechaHoraAjuste: fechaAjuste || new Date().toLocaleString("es-CL"),
+            fechaHoraAjuste: fechaAjuste || ahoraStr,
             contadoPor: responsableConteo || "No especificado",
             fechaHoraConteo: fechaConteo || "No especificada",
             detalle: detalleExtra,
-            fechaHora: new Date().toLocaleString("es-CL"),
+            fechaHora: ahoraStr,
             timestamp: Date.now()
           });
 
@@ -1039,6 +1079,7 @@
             responsable: responsableBodega,
             notas: notasBodega.trim(),
             registradoPor: "Equipo Bodega",
+            fecha: fechaIsoChile(),
             ajustado: false,
             ajustadoPor: "",
             fechaHoraAjuste: "",
@@ -1061,7 +1102,7 @@
           return;
         }
 
-        const ahoraStr = new Date().toLocaleString("es-CL");
+        const ahoraStr = fechaLegibleChile();
         try {
           await db.collection("incidentes_bodega").doc(inc.id).update({
             ajustado: true,
@@ -1128,17 +1169,17 @@
           }
         }
 
+        const ahoraStr = fechaLegibleChile();
         const infoRetorno = {
           recibido: true,
           completo: todoCompleto,
           discrepanciasTexto: discrepancias.join(" | "),
           itemsDetalle: items,
           recibidoPor: resp,
-          fechaHoraRecibo: new Date().toLocaleString("es-CL")
+          fechaHoraRecibo: ahoraStr
         };
 
         const checks = item.checksAcciones || {};
-        const ahoraStr = new Date().toLocaleString("es-CL");
         checks["Chofer Retorna Producto a Bodega"] = {
           completado: true,
           por: resp,
@@ -1166,7 +1207,7 @@
           if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
           return;
         }
-        const ahoraStr = new Date().toLocaleString("es-CL");
+        const ahoraStr = fechaLegibleChile();
         try {
           await db.collection("conteo_pendiente").doc(id).update({
             conteoFisicoHecho: !estadoActual,
@@ -1188,7 +1229,7 @@
         const itemConteo = conteoPendiente.find(cp => cp.id === id);
         if (!itemConteo) return;
 
-        const ahoraStr = new Date().toLocaleString("es-CL");
+        const ahoraStr = fechaLegibleChile();
 
         try {
           const detalleTexto = itemConteo.cantidadContada !== undefined
@@ -1253,7 +1294,7 @@
           return;
         }
 
-        const ahoraStr = new Date().toLocaleString("es-CL");
+        const ahoraStr = fechaLegibleChile();
 
         try {
           const batch = db.batch();
@@ -1332,7 +1373,7 @@
         if (!incidenciaActual) return;
 
         const checks = incidenciaActual.checksAcciones || {};
-        const ahora = new Date().toLocaleString("es-CL");
+        const ahora = fechaLegibleChile();
         const nuevoEstado = !estadoActual;
 
         checks[accionNombre] = {
@@ -1373,7 +1414,7 @@
 
       const cargarParaEditar = (item) => {
         setEditandoId(item.id);
-        setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || hoy);
+        setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || fechaIsoChile());
         
         if (item.rutaTipo) {
           setRutaTipo(item.rutaTipo);
@@ -1435,9 +1476,11 @@
         if (!nombreSemana) return;
 
         try {
+          const ahoraTs = Date.now();
           await db.collection("cierres_semanales").add({
             nombreSemana,
-            fechaCierre: new Date().toISOString(),
+            fechaCierre: new Date(ahoraTs).toISOString(),
+            fechaCierreChile: fechaLegibleChile(ahoraTs),
             totalRegistros: incidencias.length + incidentesBodega.filter(ib => ib.ajustado).length,
             registros: incidencias,
             incidentesBodega: incidentesBodega.filter(ib => ib.ajustado)
@@ -1473,7 +1516,7 @@
 
       const copiarResumenWhatsApp = () => {
         if (incidencias.length === 0) return alert("Sin incidencias para copiar.");
-        let texto = `📦 *REPORTE BODEGA PGB DISTRIBUTION*\n📅 Fecha: ${hoy}\n━━━━━━━━━━━━━━\n`;
+        let texto = `📦 *REPORTE BODEGA PGB DISTRIBUTION*\n📅 Fecha: ${fechaIsoChile()}\n━━━━━━━━━━━━━━\n`;
         incidencias.forEach((i, idx) => {
           const estado = i.resuelto ? "✅ RESUELTO" : "⏳ PENDIENTE";
           const acs = i.acciones ? i.acciones.join(" + ") : (i.accionResolucion || "N/A");
@@ -1880,7 +1923,7 @@
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
                     <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE INCIDENCIAS DE BODEGA, VENTAS Y RUTAS</h2>
-                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {fechaCortaChile()}</p>
                   </div>
 
                   <div className="mb-6 bg-gray-100 p-4 rounded text-xs">
@@ -1918,7 +1961,7 @@
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
                     <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE OFICIAL DE CORRECCIÓN Y AUDITORÍA DE INVENTARIO</h2>
-                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {fechaCortaChile()}</p>
                   </div>
 
                   <table className="w-full text-left text-xs border-collapse border border-gray-400">
@@ -1957,7 +2000,7 @@
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
                     <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE DE INCIDENTES Y MERMAS INTERNAS EN BODEGA</h2>
-                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {fechaCortaChile()}</p>
                   </div>
 
                   <table className="w-full text-left text-xs border-collapse border border-gray-400 mb-6">
@@ -1995,7 +2038,7 @@
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-6">
                     <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE CONSOLIDADO DE RETORNOS A BODEGA (AGRUPADO POR RUTA)</h2>
-                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+                    <p className="text-xs text-gray-600 mt-1">Supervisión General: Pedro y Bedanli | Fecha de Emisión: {fechaCortaChile()}</p>
                   </div>
 
                   {(() => {
@@ -2049,7 +2092,7 @@
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-4">
                     <LogoPGB className="h-24 w-auto mb-2" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">REPORTE DE RECEPCIÓN DE RETORNO EN BODEGA</h2>
-                    <p className="text-xs text-gray-600 mt-1">Factura #{facturaImprimirIndividual.factura} | Fecha de Emisión: {new Date().toLocaleDateString("es-CL")}</p>
+                    <p className="text-xs text-gray-600 mt-1">Factura #{facturaImprimirIndividual.factura} | Fecha de Emisión: {fechaCortaChile()}</p>
                   </div>
 
                   <div className="mb-6 space-y-2 text-xs border p-4 rounded bg-gray-50">
@@ -2085,7 +2128,7 @@
                   <div className="flex flex-col items-center justify-center border-b-2 border-gray-300 pb-4 mb-4">
                     <LogoPGB className="h-24 w-auto mb-2" />
                     <p className="text-xs font-bold uppercase tracking-wider text-gray-800">HOJA DE CONTEO FÍSICAMENTE PENDIENTE (CONTROL CÍCLICO)</p>
-                    <p className="text-[11px] text-gray-600">Fecha: {new Date().toLocaleDateString("es-CL")} | Supervisión: Pedro y Bedanli</p>
+                    <p className="text-[11px] text-gray-600">Fecha: {fechaCortaChile()} | Supervisión: Pedro y Bedanli</p>
                   </div>
                   <table className="w-full text-left text-xs border-collapse border border-gray-400 mt-4">
                     <thead>
@@ -2965,7 +3008,7 @@
                       </datalist>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-700 block mb-1">Fecha</label>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Fecha (Hora Chile)</label>
                       <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none" />
                     </div>
                   </div>
@@ -4031,7 +4074,7 @@
                         <div onClick={() => setCierreExpandido(cierreExpandido === c.id ? null : c.id)} className="flex justify-between items-center cursor-pointer">
                           <div>
                             <h3 className="font-black text-slate-900 text-base">📦 {c.nombreSemana}</h3>
-                            <p className="text-xs text-slate-500">Cerrado el {new Date(c.fechaCierre).toLocaleString("es-CL")}</p>
+                            <p className="text-xs text-slate-500">Cerrado el {c.fechaCierreChile || fechaLegibleChile(c.fechaCierre)}</p>
                           </div>
                           <span className="text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl">
                             {c.totalRegistros} registros {cierreExpandido === c.id ? "▲" : "▼"}
