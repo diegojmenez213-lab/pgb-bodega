@@ -7,6 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>NEXUS ERP • Control de Inventario y Toma Física</title>
   <script>
+    // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE ENTRE EMPRESAS)
     (function () {
       var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
       var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
@@ -35,14 +36,30 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    @media print { .no-print { display: none !important; } body { background: white !important; color: black !important; } }
+    .print-only { display: none; }
+    @media print {
+      @page { size: auto; margin: 10mm; }
+      body { background: white !important; color: black !important; margin: 0; padding: 0; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+    }
   </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
 </head>
 <body class="min-h-screen">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -58,13 +75,64 @@
     const db = firebase.firestore();
 
     const RUT_PGB = "769497226";
+    const EQUIPO_PGB_CONTEO = ["Diego", "Edwin", "Nico", "Pedro", "Bedanli"];
+
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
 
+    // FECHA Y HORA LOCAL OFICIAL DE CHILE (AMERICA/SANTIAGO)
+    const fechaIsoChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date(ts));
+      } catch (e) {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+
+    const fechaLegibleChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          dateStyle: "short",
+          timeStyle: "short"
+        }).format(new Date(ts));
+      } catch (e) {
+        return new Date(ts).toLocaleString("es-CL");
+      }
+    };
+
+    // CIFRADO SHA-256 SINCRONIZADO CON EMPRESA-PANEL, COMPRAS-FINANZAS Y SUPERVISOR-BI
+    const sha256Hex = async (texto) => {
+      const str = String(texto || "").trim();
+      if (window.crypto && window.crypto.subtle) {
+        const data = new TextEncoder().encode(str);
+        const hashBuf = await window.crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      return str;
+    };
+
+    const verificarClaveSupervisor = async (pinIngresado, empObj) => {
+      const limpio = String(pinIngresado || "").trim();
+      if (!limpio) return false;
+      if (empObj?.pinSupervisorHash) {
+        const h = await sha256Hex(limpio);
+        return h === empObj.pinSupervisorHash;
+      }
+      const fallback = String(empObj?.pinSupervisor || "1234").trim();
+      return limpio === fallback;
+    };
+
     const TEMAS = {
-      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
-      claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
-      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
-      claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
+      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", muted: "bg-slate-100 border border-slate-200", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
+      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", muted: "bg-slate-950 border border-slate-800", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200 border border-slate-700", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-emerald-50/40 border border-emerald-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
     };
 
     function ControlInventarioApp() {
@@ -76,6 +144,14 @@
       const [busqueda, setBusqueda] = useState("");
       const [guardando, setGuardando] = useState(false);
 
+      // Modal de autorización Supervisor (SHA-256) antes de sobrescribir stock
+      const [modalPinAbierto, setModalPinAbierto] = useState(false);
+      const [pinInput, setPinInput] = useState("");
+      const [pinError, setPinError] = useState("");
+      const [responsableConteo, setResponsableConteo] = useState("Diego");
+      const [notaConteo, setNotaConteo] = useState("");
+
+      const guardandoLockRef = useRef(false);
       const esPgb = rutActivo === RUT_PGB;
 
       useEffect(() => {
@@ -89,8 +165,13 @@
         const u1 = empRef.onSnapshot((doc) => {
           if (doc.exists) {
             const data = { id: doc.id, ...doc.data() };
+            if (data.activa === false) {
+              localStorage.removeItem("nexus_empresa_rut");
+              window.location.replace("index.html");
+              return;
+            }
             const m = data.modulosActivos || {};
-            if (!esPgb && !m.m5_inv_general && !m.m6_conteo_ciclico) {
+            if (!esPgb && !m.m5_inv_general && !m.m6_conteo_ciclico && !m.m7_auditoria_inv) {
               window.location.replace("empresa-panel.html");
               return;
             }
@@ -98,6 +179,7 @@
           } else if (esPgb) {
             setEmpresa({ nombre: "PGB DISTRIBUTION CHILE SPA", rut: "76.949.722-6", temaVisual: "claro_ejecutivo" });
           } else {
+            localStorage.removeItem("nexus_empresa_rut");
             window.location.replace("index.html");
           }
         });
@@ -126,33 +208,266 @@
         });
       }, [productos, filtroProveedor, busqueda]);
 
-      const aplicarConteoAlStock = async () => {
-        const ids = Object.keys(conteos).filter((k) => conteos[k] !== "" && conteos[k] !== undefined);
-        if (ids.length === 0) return alert("Ingresa al menos una cantidad contada.");
-        setGuardando(true);
-        try {
-          const colCat = esPgb ? db.collection("catalogo_productos") : db.collection("saas_empresas").doc(rutActivo).collection("catalogo");
-          const batch = db.batch();
-          ids.forEach((id) => {
-            batch.update(colCat.doc(id), { stockOnline: Math.max(0, Number(conteos[id])) });
-          });
-          await batch.commit();
-          setConteos({});
-          alert(`Inventario actualizado para ${ids.length} producto(s).`);
-        } catch (err) {
-          alert(err.message);
+      // Resumen en vivo de productos con conteo ingresado (solo productos vigentes en catálogo)
+      const resumenContados = useMemo(() => {
+        const mapaProd = new Map(productos.map((p) => [p.id, p]));
+        const lista = [];
+        let conDiferencia = 0;
+
+        Object.entries(conteos).forEach(([id, valStr]) => {
+          if (valStr === "" || valStr === undefined || valStr === null) return;
+          const prod = mapaProd.get(id);
+          if (!prod) return;
+          const fisico = Math.max(0, parseInt(String(valStr), 10) || 0);
+          const sistema = Number(prod.stockOnline ?? 0);
+          const diff = fisico - sistema;
+          if (diff !== 0) conDiferencia++;
+          lista.push({ id, prod, sistema, fisico, diff });
+        });
+
+        return { lista, total: lista.length, conDiferencia };
+      }, [conteos, productos]);
+
+      const actualizarConteoInput = (id, rawVal) => {
+        const soloDigitos = String(rawVal || "").replace(/[^0-9]/g, "");
+        setConteos((prev) => {
+          if (soloDigitos === "") {
+            const copia = { ...prev };
+            delete copia[id];
+            return copia;
+          }
+          return { ...prev, [id]: soloDigitos };
+        });
+      };
+
+      const abrirConfirmacionGuardar = () => {
+        if (guardandoLockRef.current) return;
+        if (resumenContados.total === 0) {
+          return alert("Ingresa al menos una cantidad física contada antes de guardar.");
         }
-        setGuardando(false);
+        setPinInput("");
+        setPinError("");
+        setModalPinAbierto(true);
+      };
+
+      // GUARDADO ATÓMICO EN BLOQUES DE 450 + TRAZABILIDAD EN AUDITORÍA / HISTORIAL PGB
+      const ejecutarGuardadoConPin = async (e) => {
+        e.preventDefault();
+        if (guardandoLockRef.current) return;
+
+        const ok = await verificarClaveSupervisor(pinInput, empresa);
+        if (!ok) {
+          setPinError("Clave de Supervisor incorrecta.");
+          return;
+        }
+
+        guardandoLockRef.current = true;
+        setModalPinAbierto(false);
+        setPinInput("");
+        setPinError("");
+        setGuardando(true);
+
+        try {
+          const ahora = Date.now();
+          const fechaLegible = fechaLegibleChile(ahora);
+          const empDocRef = db.collection("saas_empresas").doc(rutActivo);
+          const colCat = esPgb ? db.collection("catalogo_productos") : empDocRef.collection("catalogo");
+
+          const ops = [];
+          resumenContados.lista.forEach((item) => {
+            ops.push({
+              type: "update",
+              ref: colCat.doc(item.id),
+              data: { stockOnline: item.fisico }
+            });
+
+            if (esPgb) {
+              ops.push({
+                type: "set",
+                ref: db.collection("historial_inventario").doc(),
+                data: {
+                  producto: item.prod.codigo ? `[${item.prod.codigo}] ${item.prod.nombre}` : item.prod.nombre,
+                  unidad: "Unidad",
+                  factura: "TOMA-FISICA",
+                  corregidoPor: responsableConteo || "Supervisor",
+                  fechaHoraAjuste: fechaLegible,
+                  contadoPor: responsableConteo || "Bodega",
+                  fechaHoraConteo: fechaLegible,
+                  detalle: `Toma Física: Sistema ${item.sistema} → Físico ${item.fisico} (Dif: ${item.diff >= 0 ? "+" : ""}${item.diff})${notaConteo.trim() ? ` • ${notaConteo.trim()}` : ""}`,
+                  fechaHora: fechaLegible,
+                  timestamp: ahora
+                }
+              });
+            } else {
+              ops.push({
+                type: "set",
+                ref: empDocRef.collection("auditoria_inventario").doc(),
+                data: {
+                  producto: item.prod.nombre,
+                  detalle: `Toma Física autorizada • Stock: ${item.sistema} → ${item.fisico} unds (Dif: ${item.diff >= 0 ? "+" : ""}${item.diff})${notaConteo.trim() ? ` • Nota: ${notaConteo.trim()}` : ""}`,
+                  fecha: fechaLegible,
+                  timestamp: ahora
+                }
+              });
+            }
+          });
+
+          const CHUNK = 450;
+          for (let i = 0; i < ops.length; i += CHUNK) {
+            const batch = db.batch();
+            ops.slice(i, i + CHUNK).forEach((op) => {
+              if (op.type === "update") batch.update(op.ref, op.data);
+              else batch.set(op.ref, op.data);
+            });
+            await batch.commit();
+          }
+
+          setConteos({});
+          setNotaConteo("");
+          alert(`Inventario actualizado y auditado para ${resumenContados.total} producto(s) (${resumenContados.conDiferencia} con ajuste de diferencia).`);
+        } catch (err) {
+          alert("Error al guardar conteo físico: " + err.message);
+        } finally {
+          setGuardando(false);
+          guardandoLockRef.current = false;
+        }
       };
 
       if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Cargando inventario...</div>;
       const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
       const urlVolver = esPgb ? "pgb-operacion.html" : "empresa-panel.html";
+      const tienePinPersonalizado = Boolean(empresa.pinSupervisorHash || empresa.pinSupervisor);
 
       return (
         <div className={`min-h-screen pb-24 ${T.page}`}>
-          <div className="max-w-5xl mx-auto px-4 pt-5 space-y-4">
-            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print`}>
+          {/* PLANILLA EJECUTIVA PDF (SIEMPRE BLANCO Y NEGRO, SIN CORTAR NOMBRES NI INPUTS) */}
+          <div className="print-only bg-white text-black p-6 text-xs">
+            <div className="flex justify-between items-start gap-4 pb-4 border-b-2 border-slate-900">
+              <div>
+                {empresa.logoBase64 && (
+                  <img src={empresa.logoBase64} alt={empresa.nombre} className="h-11 object-contain mb-2" />
+                )}
+                <p className="text-base font-extrabold uppercase">{(empresa.nombre || "EMPRESA").toUpperCase()}</p>
+                <p className="text-[11px]">R.U.T.: {empresa.rut || ""}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-extrabold uppercase">PLANILLA DE TOMA DE INVENTARIO FÍSICO</p>
+                <p className="text-[11px]">Fecha Emisión: {fechaIsoChile()}</p>
+                <p className="text-[11px]">Filtro Proveedor: {filtroProveedor === "TODOS" ? "Todos los proveedores" : filtroProveedor}</p>
+                <p className="text-[11px]">Total SKUs en Planilla: {filtrados.length}</p>
+              </div>
+            </div>
+
+            <table className="w-full border-collapse border border-slate-400 text-[11px] mt-4">
+              <thead>
+                <tr className="bg-slate-100 border-b border-slate-400">
+                  <th className="border-r border-slate-400 p-2 text-left w-24">SKU</th>
+                  <th className="border-r border-slate-400 p-2 text-left">Producto / Descripción</th>
+                  <th className="border-r border-slate-400 p-2 text-left w-32">Proveedor</th>
+                  <th className="border-r border-slate-400 p-2 text-center w-20">Stock Sist.</th>
+                  <th className="border-r border-slate-400 p-2 text-center w-24">Conteo Físico</th>
+                  <th className="p-2 text-center w-20">Dif.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtrados.map((p) => {
+                  const sist = Number(p.stockOnline ?? 0);
+                  const tieneVal = conteos[p.id] !== undefined && conteos[p.id] !== "";
+                  const fis = tieneVal ? parseInt(conteos[p.id], 10) : null;
+                  const diff = tieneVal ? fis - sist : null;
+                  return (
+                    <tr key={p.id} className="border-b border-slate-300">
+                      <td className="border-r border-slate-400 p-2 font-mono">{p.codigo || "-"}</td>
+                      <td className="border-r border-slate-400 p-2 font-semibold uppercase">{p.nombre}</td>
+                      <td className="border-r border-slate-400 p-2">{p.proveedor || "General"}</td>
+                      <td className="border-r border-slate-400 p-2 text-center">{sist}</td>
+                      <td className="border-r border-slate-400 p-2 text-center font-bold">{tieneVal ? fis : ""}</td>
+                      <td className="p-2 text-center font-bold">
+                        {tieneVal ? `${diff > 0 ? "+" : ""}${diff}` : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div className="mt-10 pt-4 border-t border-slate-400 flex justify-between text-[11px]">
+              <span>Contado por: ___________________________</span>
+              <span>Aprobado Supervisor: ___________________________</span>
+              <span>Fecha: _____________</span>
+            </div>
+          </div>
+
+          {/* MODAL AUTORIZACIÓN SUPERVISOR (SHA-256) */}
+          {modalPinAbierto && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <form onSubmit={ejecutarGuardadoConPin} className={`${T.card} rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl`}>
+                <div className="flex items-start justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded">
+                      Autorización Supervisor
+                    </span>
+                    <h2 className={`text-base font-extrabold mt-1 ${T.main}`}>Aplicar Toma Física al Stock</h2>
+                  </div>
+                  <button type="button" onClick={() => setModalPinAbierto(false)} className={`text-xs font-bold px-2.5 py-1 rounded-xl cursor-pointer ${T.sec}`}>✕</button>
+                </div>
+
+                <p className={`text-xs ${T.sub}`}>
+                  Se actualizarán <strong>{resumenContados.total} producto(s)</strong> ({resumenContados.conDiferencia} con diferencia respecto al sistema) y quedará respaldo en Auditoría.
+                </p>
+
+                {esPgb && (
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Responsable del conteo / ajuste:</label>
+                    <select
+                      value={responsableConteo}
+                      onChange={(e) => setResponsableConteo(e.target.value)}
+                      className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                    >
+                      {EQUIPO_PGB_CONTEO.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={notaConteo}
+                  onChange={(e) => setNotaConteo(e.target.value)}
+                  placeholder="Observación del conteo (Opcional)"
+                  className={`w-full rounded-xl px-3.5 py-2 text-xs font-semibold outline-none ${T.input}`}
+                />
+
+                {pinError && (
+                  <p className="text-xs font-bold text-rose-500 bg-rose-500/10 border border-rose-500/30 p-2.5 rounded-xl text-center">
+                    {pinError}
+                  </p>
+                )}
+
+                <div>
+                  <input
+                    type="password"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    placeholder="Ingresa Clave de Supervisor"
+                    className={`w-full rounded-xl px-4 py-3 text-center text-sm font-extrabold tracking-widest outline-none ${T.input}`}
+                    autoFocus
+                    required
+                  />
+                  {!tienePinPersonalizado && (
+                    <p className={`text-[11px] text-center mt-1.5 ${T.sub}`}>Clave inicial por defecto: <strong>1234</strong></p>
+                  )}
+                </div>
+
+                <button type="submit" disabled={guardando} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer disabled:opacity-40 ${T.btn}`}>
+                  {guardando ? "Aplicando..." : "Autorizar y Actualizar Stock"}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* INTERFAZ PRINCIPAL */}
+          <div className="max-w-5xl mx-auto px-4 pt-5 space-y-4 no-print">
+            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <button onClick={() => window.location.replace(urlVolver)} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
@@ -161,19 +476,41 @@
                   <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${T.tag}`}>{empresa.nombre}</span>
                 </div>
                 <h1 className={`text-xl font-extrabold ${T.main}`}>Control de Inventario y Toma Física</h1>
+                <p className={`text-xs mt-0.5 ${T.sub}`}>
+                  Ingresa las cantidades reales contadas en estantería. Guardar requiere Clave de Supervisor y deja registro en Auditoría.
+                </p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button onClick={() => window.print()} className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer ${T.sec}`}>
                   Imprimir Planilla PDF
                 </button>
-                <button onClick={aplicarConteoAlStock} disabled={guardando} className={`text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer ${T.btn}`}>
-                  {guardando ? "Aplicando..." : "Guardar Conteo Físico"}
+                <button
+                  onClick={abrirConfirmacionGuardar}
+                  disabled={guardando || resumenContados.total === 0}
+                  className={`text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer disabled:opacity-40 ${T.btn}`}
+                >
+                  {guardando ? "Aplicando..." : `Guardar Conteo (${resumenContados.total})`}
                 </button>
               </div>
             </div>
 
-            <div className={`${T.card} rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 no-print`}>
+            {resumenContados.total > 0 && (
+              <div className={`${T.card} rounded-2xl p-3.5 border-2 border-amber-400/80 flex flex-wrap items-center justify-between gap-2 text-xs`}>
+                <span className={`font-bold ${T.main}`}>
+                  Contados en borrador: <strong>{resumenContados.total} producto(s)</strong> ({resumenContados.conDiferencia} con diferencia vs. sistema)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { if (confirm("¿Limpiar todos los valores escritos sin guardar?")) setConteos({}); }}
+                  className="text-xs font-bold text-rose-500 underline cursor-pointer"
+                >
+                  Limpiar borrador
+                </button>
+              </div>
+            )}
+
+            <div className={`${T.card} rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3`}>
               <input
                 type="text"
                 value={busqueda}
@@ -191,24 +528,37 @@
                 {filtrados.length === 0 ? (
                   <p className={`text-xs text-center py-8 ${T.sub}`}>No hay productos registrados en el catálogo.</p>
                 ) : (
-                  filtrados.map((p) => (
-                    <div key={p.id} className="py-3 flex items-center justify-between gap-3 text-xs">
-                      <div className="min-w-0">
-                        <span className={`font-extrabold block truncate ${T.main}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
-                        <span className={`text-[11px] ${T.sub}`}>{p.proveedor || "General"} • Stock Sistema: <strong>{Number(p.stockOnline ?? 0)}</strong></span>
+                  filtrados.map((p) => {
+                    const sist = Number(p.stockOnline ?? 0);
+                    const valStr = conteos[p.id] ?? "";
+                    const tieneVal = valStr !== "";
+                    const diff = tieneVal ? parseInt(valStr, 10) - sist : null;
+                    return (
+                      <div key={p.id} className="py-3 flex items-center justify-between gap-3 text-xs">
+                        <div className="min-w-0">
+                          <span className={`font-extrabold block truncate ${T.main}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
+                          <span className={`text-[11px] ${T.sub}`}>
+                            {p.proveedor || "General"} • Stock Sistema: <strong>{sist}</strong>
+                            {tieneVal && (
+                              <span className={`ml-2 font-extrabold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-sky-600" : "text-rose-500"}`}>
+                                • {diff === 0 ? "Cuadrado ✓" : `Dif: ${diff > 0 ? "+" : ""}${diff}`}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="Físico"
+                            value={valStr}
+                            onChange={(e) => actualizarConteoInput(p.id, e.target.value)}
+                            className={`w-24 rounded-xl px-3 py-2 text-xs font-extrabold text-center outline-none ${T.input} ${tieneVal ? "border-amber-500" : ""}`}
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="Físico"
-                          value={conteos[p.id] ?? ""}
-                          onChange={(e) => setConteos({ ...conteos, [p.id]: e.target.value })}
-                          className={`w-24 rounded-xl px-3 py-2 text-xs font-extrabold text-center ${T.input}`}
-                        />
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
