@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>NEXUS ERP • Área Privada de Supervisor y Gerencia</title>
+  <script>
+    // GUARDIA DE SEGURIDAD + BLOQUEO BFCACHE (AL VOLVER ATRÁS VUELVE A PEDIR CLAVE)
+    (function () {
+      var RUT_PGB = "769497226";
+      var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
+      var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
+      if (!rutInicial) {
+        window.location.replace("index.html");
+      } else if (rutInicial === RUT_PGB) {
+        window.location.replace("pgb-operacion.html");
+      }
+      window.addEventListener("pageshow", function (ev) {
+        var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
+        if (!rutActual) window.location.replace("index.html");
+        else if (ev.persisted) window.location.reload();
+      });
+      window.addEventListener("storage", function (ev) {
+        if (ev.key === "nexus_empresa_rut") {
+          var rutNuevo = limpiar(ev.newValue);
+          if (!rutNuevo) window.location.replace("index.html");
+          else if (rutNuevo !== rutInicial) window.location.reload();
+        }
+      });
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
+      authDomain: "pgb-bodegad.firebaseapp.com",
+      projectId: "pgb-bodegad",
+      storageBucket: "pgb-bodegad.firebasestorage.app",
+      messagingSenderId: "497839332750",
+      appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
+    };
+
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+
+    const TEMAS = {
+      claro_retail: { dark: false, page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_ejecutivo: { dark: false, page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", muted: "bg-slate-100 border border-slate-200", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
+      oscuro_obsidian: { dark: true, page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", muted: "bg-slate-950 border border-slate-800", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200 border border-slate-700", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      claro_esmeralda: { dark: false, page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-emerald-50/40 border border-emerald-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
+    };
+
+    const CANALES_COLOR = {
+      "Mercado Libre": { color: "#eab308", bg: "rgba(234, 179, 8, 0.22)" },
+      "Falabella": { color: "#10b981", bg: "rgba(16, 185, 129, 0.22)" },
+      "Lider": { color: "#2563eb", bg: "rgba(37, 99, 235, 0.22)" },
+      "Venta Directa": { color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.22)" }
+    };
+
+    const COMISIONES_DEFAULT = {
+      "Mercado Libre": 15,
+      "Falabella": 16,
+      "Lider": 14,
+      "Venta Directa": 0
+    };
+
+    const isoHoy = () => new Date().toISOString().slice(0, 10);
+    const isoHaceDias = (dias) => {
+      const d = new Date();
+      d.setDate(d.getDate() - dias);
+      return d.toISOString().slice(0, 10);
+    };
+
+    function SupervisorBiApp() {
+      const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
+      const [empresa, setEmpresa] = useState(null);
+      const [ordenes, setOrdenes] = useState([]);
+      const [compras, setCompras] = useState([]);
+      const [catalogo, setCatalogo] = useState([]);
+      const [auditoriaInv, setAuditoriaInv] = useState([]);
+
+      // Bloqueo por clave de supervisor (en memoria React: al salir se vuelve a bloquear)
+      const [desbloqueado, setDesbloqueado] = useState(false);
+      const [pinInput, setPinInput] = useState("");
+      const [pinError, setPinError] = useState("");
+
+      // Controles de Gráfica Comparativa
+      const [fechaDesde, setFechaDesde] = useState(() => isoHaceDias(30));
+      const [fechaHasta, setFechaHasta] = useState(() => isoHoy());
+      const [canalesActivos, setCanalesActivos] = useState(["Mercado Libre", "Falabella", "Lider", "Venta Directa"]);
+      const [tipoGrafica, setTipoGrafica] = useState("line"); // line | bar
+
+      // Configuración de comisiones y seguridad
+      const [comisionesForm, setComisionesForm] = useState(COMISIONES_DEFAULT);
+      const [nuevoPin, setNuevoPin] = useState("");
+      const [guardandoCfg, setGuardandoCfg] = useState(false);
+      const [tabSup, setTabSup] = useState("graficas"); // graficas | finanzas | auditoria | seguridad
+
+      const chartVentasRef = useRef(null);
+      const chartVentasInst = useRef(null);
+      const chartFinanzasRef = useRef(null);
+      const chartFinanzasInst = useRef(null);
+
+      useEffect(() => {
+        if (!rutActivo) {
+          window.location.replace("index.html");
+          return;
+        }
+        auth.signInAnonymously().catch(() => {});
+        const empRef = db.collection("saas_empresas").doc(rutActivo);
+
+        const u1 = empRef.onSnapshot((doc) => {
+          if (!doc.exists) {
+            window.location.replace("index.html");
+            return;
+          }
+          const data = { id: doc.id, ...doc.data() };
+          setEmpresa(data);
+          if (data.comisionesCanales) {
+            setComisionesForm({ ...COMISIONES_DEFAULT, ...data.comisionesCanales });
+          }
+        });
+
+        const u2 = empRef.collection("ecommerce_ordenes").onSnapshot((snap) => {
+          setOrdenes(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        });
+
+        const u3 = empRef.collection("compras_proveedores").onSnapshot((snap) => {
+          setCompras(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        });
+
+        const u4 = empRef.collection("catalogo").onSnapshot((snap) => {
+          setCatalogo(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        });
+
+        const u5 = empRef.collection("auditoria_inventario").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setAuditoriaInv(lista);
+        });
+
+        return () => { u1(); u2(); u3(); u4(); u5(); };
+      }, [rutActivo]);
+
+      const empRef = () => db.collection("saas_empresas").doc(rutActivo);
+      const pinReal = String(empresa?.pinSupervisor || "1234").trim();
+      const tienePinPersonalizado = Boolean(empresa?.pinSupervisor);
+
+      const validarAccesoSupervisor = (e) => {
+        e.preventDefault();
+        if (pinInput.trim() === pinReal) {
+          setDesbloqueado(true);
+          setPinError("");
+          setPinInput("");
+        } else {
+          setPinError("Clave de Supervisor incorrecta.");
+        }
+      };
+
+      const toggleCanal = (canal) => {
+        setCanalesActivos((prev) => {
+          if (prev.includes(canal)) {
+            if (prev.length === 1) return prev;
+            return prev.filter((c) => c !== canal);
+          }
+          return [...prev, canal];
+        });
+      };
+
+      const aplicarRangoRapido = (dias) => {
+        if (dias === 0) {
+          setFechaDesde(isoHoy());
+          setFechaHasta(isoHoy());
+        } else if (dias === -1) {
+          setFechaDesde("2020-01-01");
+          setFechaHasta(isoHoy());
+        } else {
+          setFechaDesde(isoHaceDias(dias));
+          setFechaHasta(isoHoy());
+        }
+      };
+
+      // ================= CÁLCULOS FINANCIEROS Y SERIES PARA GRÁFICAS =================
+      const mapaCostosNetos = useMemo(() => {
+        const porId = {};
+        const porNom = {};
+        catalogo.forEach((p) => {
+          const c = Number(p.ultimoCostoNeto || 0);
+          if (c > 0) {
+            porId[p.id] = c;
+            porNom[String(p.nombre || "").trim().toUpperCase()] = c;
+          }
+        });
+        return { porId, porNom };
+      }, [catalogo]);
+
+      const ordenesPeriodo = useMemo(() => {
+        return ordenes.filter((o) => {
+          if (o.anuladaPorNc61) return false;
+          const f = o.fechaIso || new Date(o.timestamp || Date.now()).toISOString().slice(0, 10);
+          if (fechaDesde && f < fechaDesde) return false;
+          if (fechaHasta && f > fechaHasta) return false;
+          return canalesActivos.includes(o.canal || "Venta Directa");
+        });
+      }, [ordenes, fechaDesde, fechaHasta, canalesActivos]);
+
+      const comprasPeriodo = useMemo(() => {
+        return compras.filter((c) => {
+          const f = c.fecha || new Date(c.timestamp || Date.now()).toISOString().slice(0, 10);
+          if (fechaDesde && f < fechaDesde) return false;
+          if (fechaHasta && f > fechaHasta) return false;
+          return true;
+        });
+      }, [compras, fechaDesde, fechaHasta]);
+
+      const resumenFinanciero = useMemo(() => {
+        const coms = empresa?.comisionesCanales ? { ...COMISIONES_DEFAULT, ...empresa.comisionesCanales } : COMISIONES_DEFAULT;
+        let ventasBrutas = 0;
+        let ventasNetas = 0;
+        let ivaDebito = 0;
+        let comisionesPagadas = 0;
+        let costoMercaderiaNeto = 0;
+
+        const porCanal = {};
+        ["Mercado Libre", "Falabella", "Lider", "Venta Directa"].forEach((c) => {
+          porCanal[c] = { bruto: 0, neto: 0, iva: 0, comision: 0, ordenes: 0, pctComision: Number(coms[c] ?? 0) };
+        });
+
+        ordenesPeriodo.forEach((o) => {
+          const canal = porCanal[o.canal] ? o.canal : "Venta Directa";
+          const bruto = Number(o.totalClp || 0);
+          const neto = Math.round(bruto / 1.19);
+          const iva = bruto - neto;
+          const pctCom = Number(coms[canal] ?? 0);
+          const comision = Math.round(bruto * (pctCom / 100));
+
+          const nomKey = String(o.productoNombre || "").trim().toUpperCase();
+          const costoUnit = mapaCostosNetos.porId[o.productoId] || mapaCostosNetos.porNom[nomKey] || 0;
+          const costoLinea = costoUnit * Number(o.cantidad || 1);
+
+          ventasBrutas += bruto;
+          ventasNetas += neto;
+          ivaDebito += iva;
+          comisionesPagadas += comision;
+          costoMercaderiaNeto += costoLinea;
+
+          porCanal[canal].bruto += bruto;
+          porCanal[canal].neto += neto;
+          porCanal[canal].iva += iva;
+          porCanal[canal].comision += comision;
+          porCanal[canal].ordenes += 1;
+        });
+
+        const ivaCredito = comprasPeriodo.reduce((acc, c) => {
+          const tot = Number(c.totalClp || 0);
+          const iv = c.ivaClp !== undefined ? Number(c.ivaClp) : tot - Math.round(tot / 1.19);
+          return acc + iv;
+        }, 0);
+
+        const comprasNetasPeriodo = comprasPeriodo.reduce((acc, c) => {
+          const tot = Number(c.totalClp || 0);
+          const net = c.netoClp !== undefined ? Number(c.netoClp) : Math.round(tot / 1.19);
+          return acc + net;
+        }, 0);
+
+        const gananciaNetaSinIva = ventasNetas - comisionesPagadas - costoMercaderiaNeto;
+        const saldoIvaF29 = ivaDebito - ivaCredito;
+
+        return {
+          ventasBrutas,
+          ventasNetas,
+          ivaDebito,
+          ivaCredito,
+          saldoIvaF29,
+          comisionesPagadas,
+          costoMercaderiaNeto,
+          comprasNetasPeriodo,
+          gananciaNetaSinIva,
+          porCanal
+        };
+      }, [ordenesPeriodo, comprasPeriodo, empresa, mapaCostosNetos]);
+
+      const T = TEMAS[empresa?.temaVisual || "claro_retail"] || TEMAS.claro_retail;
+
+      // ================= RENDER GRÁFICA 1: COMPARATIVA DE VENTAS POR PLATAFORMA =================
+      useEffect(() => {
+        if (!desbloqueado || tabSup !== "graficas" || !chartVentasRef.current || !window.Chart) return;
+        if (chartVentasInst.current) chartVentasInst.current.destroy();
+
+        const d1 = new Date(fechaDesde || isoHaceDias(30));
+        const d2 = new Date(fechaHasta || isoHoy());
+        const diffDias = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
+        const granularidad = diffDias <= 62 ? "dia" : diffDias <= 730 ? "mes" : "anio";
+
+        const bucketKey = (iso) => {
+          if (granularidad === "dia") return iso.slice(0, 10);
+          if (granularidad === "mes") return iso.slice(0, 7);
+          return iso.slice(0, 4);
+        };
+
+        const labelsSet = new Set();
+        ordenesPeriodo.forEach((o) => {
+          const f = o.fechaIso || new Date(o.timestamp || Date.now()).toISOString().slice(0, 10);
+          labelsSet.add(bucketKey(f));
+        });
+        const labels = Array.from(labelsSet).sort();
+        const labelsFinales = labels.length > 0 ? labels : [fechaHasta || isoHoy()];
+
+        const datasets = canalesActivos.map((canal) => {
+          const mapa = {};
+          ordenesPeriodo.forEach((o) => {
+            if ((o.canal || "Venta Directa") !== canal) return;
+            const f = o.fechaIso || new Date(o.timestamp || Date.now()).toISOString().slice(0, 10);
+            const k = bucketKey(f);
+            mapa[k] = (mapa[k] || 0) + Number(o.totalClp || 0);
+          });
+          const estilo = CANALES_COLOR[canal] || { color: "#64748b", bg: "rgba(100,116,139,0.2)" };
+          return {
+            label: canal,
+            data: labelsFinales.map((lbl) => mapa[lbl] || 0),
+            borderColor: estilo.color,
+            backgroundColor: tipoGrafica === "bar" ? estilo.color : estilo.bg,
+            borderWidth: 2.5,
+            tension: 0.3,
+            fill: tipoGrafica === "line" && canalesActivos.length === 1,
+            borderRadius: 6
+          };
+        });
+
+        const textColor = T.dark ? "#cbd5e1" : "#334155";
+        const gridColor = T.dark ? "rgba(148,163,184,0.12)" : "rgba(15,23,42,0.07)";
+
+        chartVentasInst.current = new Chart(chartVentasRef.current, {
+          type: tipoGrafica,
+          data: { labels: labelsFinales, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { labels: { color: textColor, font: { weight: "bold", size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `${ctx.dataset.label}: $${Number(ctx.raw || 0).toLocaleString("es-CL")} CLP`
+                }
+              }
+            },
+            scales: {
+              x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor } },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  color: textColor,
+                  font: { size: 10 },
+                  callback: (val) => "$" + Number(val).toLocaleString("es-CL")
+                },
+                grid: { color: gridColor }
+              }
+            }
+          }
+        });
+
+        return () => {
+          if (chartVentasInst.current) chartVentasInst.current.destroy();
+        };
+      }, [desbloqueado, tabSup, ordenesPeriodo, canalesActivos, tipoGrafica, fechaDesde, fechaHasta, T.dark]);
+
+      // ================= RENDER GRÁFICA 2: DESGLOSE FINANCIERO PRIVADO =================
+      useEffect(() => {
+        if (!desbloqueado || tabSup !== "finanzas" || !chartFinanzasRef.current || !window.Chart) return;
+        if (chartFinanzasInst.current) chartFinanzasInst.current.destroy();
+
+        const textColor = T.dark ? "#cbd5e1" : "#334155";
+        const { gananciaNetaSinIva, ivaDebito, comisionesPagadas, costoMercaderiaNeto } = resumenFinanciero;
+
+        chartFinanzasInst.current = new Chart(chartFinanzasRef.current, {
+          type: "doughnut",
+          data: {
+            labels: ["Ganancia Neta Real (sin IVA)", "IVA Débito (19%)", "Comisiones Marketplaces", "Costo Mercadería"],
+            datasets: [
+              {
+                data: [
+                  Math.max(0, gananciaNetaSinIva),
+                  Math.max(0, ivaDebito),
+                  Math.max(0, comisionesPagadas),
+                  Math.max(0, costoMercaderiaNeto)
+                ],
+                backgroundColor: ["#10b981", "#f59e0b", "#ef4444", "#6366f1"],
+                borderWidth: 0
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: "bottom", labels: { color: textColor, font: { weight: "bold", size: 11 }, padding: 14 } },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `${ctx.label}: $${Number(ctx.raw || 0).toLocaleString("es-CL")} CLP`
+                }
+              }
+            }
+          }
+        });
+
+        return () => {
+          if (chartFinanzasInst.current) chartFinanzasInst.current.destroy();
+        };
+      }, [desbloqueado, tabSup, resumenFinanciero, T.dark]);
+
+      const guardarSeguridadYComisiones = async (e) => {
+        e.preventDefault();
+        setGuardandoCfg(true);
+        try {
+          const payload = { comisionesCanales: comisionesForm };
+          if (nuevoPin.trim().length >= 4) {
+            payload.pinSupervisor = nuevoPin.trim();
+          }
+          await empRef().set(payload, { merge: true });
+          setNuevoPin("");
+          alert("Configuración de seguridad y comisiones guardada.");
+        } catch (err) {
+          alert(err.message);
+        }
+        setGuardandoCfg(false);
+      };
+
+      if (!empresa) {
+        return <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-xs font-bold">Cargando área de Supervisor...</div>;
+      }
+
+      // ================= PANTALLA DE BLOQUEO DE SUPERVISOR =================
+      if (!desbloqueado) {
+        return (
+          <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
+            <form onSubmit={validarAccesoSupervisor} className="bg-slate-900 border border-slate-800 rounded-3xl p-7 max-w-sm w-full space-y-5 shadow-2xl">
+              <div className="text-center space-y-1.5">
+                <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/40">
+                  ÁREA RESTRINGIDA • GERENCIA
+                </span>
+                <h1 className="text-xl font-extrabold text-white pt-1">Acceso Supervisor</h1>
+                <p className="text-xs text-slate-400">
+                  {empresa.nombre} • Ingresa tu clave de dueño para ver utilidades netas, IVA y comparativas.
+                </p>
+              </div>
+
+              {pinError && (
+                <div className="bg-rose-950 border border-rose-800 text-rose-200 text-xs font-bold p-3 rounded-xl text-center">
+                  {pinError}
+                </div>
+              )}
+
+              <div>
+                <input
+                  type="password"
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  placeholder="Clave de Supervisor"
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-2xl px-4 py-3.5 text-center text-base font-extrabold tracking-widest outline-none"
+                  autoFocus
+                  required
+                />
+                {!tienePinPersonalizado && (
+                  <p className="text-[11px] text-slate-500 text-center mt-2">
+                    Clave inicial predeterminada: <strong>1234</strong> (cámbiala dentro en Seguridad).
+                  </p>
+                )}
+              </div>
+
+              <button type="submit" className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold py-3.5 rounded-2xl text-xs uppercase tracking-wider cursor-pointer">
+                Desbloquear Panel Gerencial
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.location.replace("empresa-panel.html")}
+                className="w-full text-xs font-bold text-slate-400 hover:text-white py-1 cursor-pointer"
+              >
+                ← Volver a Operación Diaria
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+      return (
+        <div className={`min-h-screen pb-16 transition-colors ${T.page}`}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 space-y-4">
+            {/* CABECERA GERENCIAL */}
+            <div className={`${T.card} rounded-2xl p-4 sm:p-5 border-t-4 ${T.top} flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
+              <div className="flex items-center gap-3">
+                {empresa.logoBase64 && (
+                  <div className="w-16 h-11 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1 shrink-0">
+                    <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
+                  </div>
+                )}
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950">
+                    Modo Supervisor Desbloqueado
+                  </span>
+                  <h1 className={`text-lg sm:text-xl font-extrabold mt-0.5 ${T.main}`}>
+                    Gerencia, Gráficas & Utilidad Neta — {empresa.nombre}
+                  </h1>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setDesbloqueado(false)}
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer"
+                >
+                  Bloquear Pantalla
+                </button>
+                <button
+                  onClick={() => window.location.replace("empresa-panel.html")}
+                  className={`text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer ${T.sec}`}
+                >
+                  ← Volver al Panel
+                </button>
+              </div>
+            </div>
+
+            {/* BARRA DE RANGO DE FECHAS UNIVERSAL (1 DÍA HASTA 10 AÑOS) */}
+            <div className={`${T.card} rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`text-xs font-extrabold ${T.sub}`}>Periodo:</span>
+                {[
+                  { label: "Hoy", dias: 0 },
+                  { label: "7 Días", dias: 7 },
+                  { label: "30 Días", dias: 30 },
+                  { label: "1 Año", dias: 365 },
+                  { label: "Histórico (10 años)", dias: -1 }
+                ].map((p) => (
+                  <button
+                    key={p.label}
+                    onClick={() => aplicarRangoRapido(p.dias)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.sec}`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <label className={`font-bold ${T.sub}`}>Desde:</label>
+                <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className={`rounded-xl px-3 py-1.5 font-bold ${T.input}`} />
+                <label className={`font-bold ${T.sub}`}>Hasta:</label>
+                <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className={`rounded-xl px-3 py-1.5 font-bold ${T.input}`} />
+              </div>
+            </div>
+
+            {/* PESTAÑAS DE SUPERVISOR */}
+            <div className={`${T.card} rounded-2xl p-1.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5`}>
+              <button onClick={() => setTabSup("graficas")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tabSup === "graficas" ? T.btn : T.sec}`}>
+                1. Gráficas Comparativas
+              </button>
+              <button onClick={() => setTabSup("finanzas")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tabSup === "finanzas" ? T.btn : T.sec}`}>
+                2. Utilidad Neta, IVA y Comisiones
+              </button>
+              <button onClick={() => setTabSup("auditoria")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tabSup === "auditoria" ? T.btn : T.sec}`}>
+                3. Auditoría de Cambios ({auditoriaInv.length})
+              </button>
+              <button onClick={() => setTabSup("seguridad")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tabSup === "seguridad" ? T.btn : T.sec}`}>
+                4. Clave y % Comisiones
+              </button>
+            </div>
+
+            {/* ================= TAB 1: GRÁFICAS COMPARATIVAS POR PLATAFORMA ================= */}
+            {tabSup === "graficas" && (
+              <div className="space-y-4">
+                {/* SELECTOR DE PLATAFORMAS (1, 2, 3 O TODAS) */}
+                <div className={`${T.card} rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-xs font-extrabold ${T.sub}`}>Comparar plataformas:</span>
+                    {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
+                      const on = canalesActivos.includes(c);
+                      return (
+                        <button
+                          key={c}
+                          onClick={() => toggleCanal(c)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
+                            on ? T.btn : T.sec
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ background: CANALES_COLOR[c].color }}></span>
+                          {c}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setCanalesActivos(["Mercado Libre", "Falabella", "Lider", "Venta Directa"])}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold underline cursor-pointer ${T.sub}`}
+                    >
+                      Global (Todas)
+                    </button>
+                  </div>
+
+                  <div className="flex gap-1.5 shrink-0">
+                    <button onClick={() => setTipoGrafica("line")} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${tipoGrafica === "line" ? T.btn : T.sec}`}>
+                      Líneas
+                    </button>
+                    <button onClick={() => setTipoGrafica("bar")} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${tipoGrafica === "bar" ? T.btn : T.sec}`}>
+                      Barras
+                    </button>
+                  </div>
+                </div>
+
+                {/* CONTENEDOR DE GRÁFICA */}
+                <div className={`${T.card} rounded-2xl p-5`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h2 className={`text-sm font-extrabold ${T.main}`}>Evolución de Ventas Comparada ({ordenesPeriodo.length} órdenes)</h2>
+                      <p className={`text-xs ${T.sub}`}>Total seleccionado en periodo: <strong>${resumenFinanciero.ventasBrutas.toLocaleString("es-CL")} CLP</strong></p>
+                    </div>
+                  </div>
+                  <div className="h-[340px] w-full">
+                    <canvas ref={chartVentasRef}></canvas>
+                  </div>
+                </div>
+
+                {/* TARJETAS COMPARATIVAS POR PLATAFORMA */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
+                    const st = resumenFinanciero.porCanal[c];
+                    const share = resumenFinanciero.ventasBrutas > 0 ? ((st.bruto / resumenFinanciero.ventasBrutas) * 100).toFixed(1) : "0.0";
+                    return (
+                      <div key={c} className={`${T.card} rounded-2xl p-4 space-y-1.5`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs font-extrabold ${T.main}`}>{c}</span>
+                          <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: CANALES_COLOR[c].bg, color: CANALES_COLOR[c].color }}>
+                            {share}%
+                          </span>
+                        </div>
+                        <p className={`text-xl font-extrabold ${T.main}`}>${st.bruto.toLocaleString("es-CL")}</p>
+                        <p className={`text-[11px] ${T.sub}`}>
+                          {st.ordenes} ventas • Comisión ({st.pctComision}%): <strong>${st.comision.toLocaleString("es-CL")}</strong>
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ================= TAB 2: FINANZAS PRIVADAS (GANANCIA NETA, IVA, COMISIONES) ================= */}
+            {tabSup === "finanzas" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className={`${T.card} rounded-2xl p-4`}>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ventas Netas (Sin IVA)</span>
+                    <p className={`text-xl font-extrabold mt-1 ${T.main}`}>${resumenFinanciero.ventasNetas.toLocaleString("es-CL")}</p>
+                    <span className={`text-[11px] ${T.sub}`}>Bruto: ${resumenFinanciero.ventasBrutas.toLocaleString("es-CL")}</span>
+                  </div>
+                  <div className={`${T.card} rounded-2xl p-4`}>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Comisiones Marketplaces</span>
+                    <p className="text-xl font-extrabold text-rose-500 mt-1">-${resumenFinanciero.comisionesPagadas.toLocaleString("es-CL")}</p>
+                    <span className={`text-[11px] ${T.sub}`}>Según % por plataforma</span>
+                  </div>
+                  <div className={`${T.card} rounded-2xl p-4`}>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Balance IVA (F29 Est.)</span>
+                    <p className="text-xl font-extrabold text-amber-500 mt-1">${resumenFinanciero.saldoIvaF29.toLocaleString("es-CL")}</p>
+                    <span className={`text-[11px] ${T.sub}`}>Débito ${resumenFinanciero.ivaDebito.toLocaleString("es-CL")} − Crédito ${resumenFinanciero.ivaCredito.toLocaleString("es-CL")}</span>
+                  </div>
+                  <div className={`${T.card} rounded-2xl p-4`}>
+                    <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ganancia Neta Real (Sin IVA)</span>
+                    <p className="text-xl font-extrabold text-emerald-500 mt-1">${resumenFinanciero.gananciaNetaSinIva.toLocaleString("es-CL")}</p>
+                    <span className={`text-[11px] ${T.sub}`}>Descontando IVA, comisiones y costos</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                  <div className={`lg:col-span-5 ${T.card} rounded-2xl p-5`}>
+                    <h2 className={`text-sm font-extrabold mb-3 ${T.main}`}>Distribución Real de cada Peso Vendido</h2>
+                    <div className="h-[300px]">
+                      <canvas ref={chartFinanzasRef}></canvas>
+                    </div>
+                  </div>
+
+                  <div className={`lg:col-span-7 ${T.card} rounded-2xl p-5 space-y-3`}>
+                    <h2 className={`text-sm font-extrabold ${T.main}`}>Desglose Financiero por Plataforma</h2>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className={`${T.muted} uppercase text-[10px]`}>
+                          <tr>
+                            <th className="p-3">Plataforma</th>
+                            <th className="p-3 text-right">Venta Bruta</th>
+                            <th className="p-3 text-right">Neto (s/IVA)</th>
+                            <th className="p-3 text-right">IVA (19%)</th>
+                            <th className="p-3 text-right">Comisión (%)</th>
+                            <th className="p-3 text-right">Saldo Neto</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200/30">
+                          {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
+                            const st = resumenFinanciero.porCanal[c];
+                            const saldo = st.neto - st.comision;
+                            return (
+                              <tr key={c}>
+                                <td className={`p-3 font-extrabold ${T.main}`}>{c}</td>
+                                <td className="p-3 text-right">${st.bruto.toLocaleString("es-CL")}</td>
+                                <td className="p-3 text-right font-bold">${st.neto.toLocaleString("es-CL")}</td>
+                                <td className="p-3 text-right text-amber-500 font-bold">${st.iva.toLocaleString("es-CL")}</td>
+                                <td className="p-3 text-right text-rose-500 font-bold">
+                                  -${st.comision.toLocaleString("es-CL")} ({st.pctComision}%)
+                                </td>
+                                <td className="p-3 text-right text-emerald-500 font-extrabold">${saldo.toLocaleString("es-CL")}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ================= TAB 3: AUDITORÍA DE MODIFICACIONES DE INVENTARIO ================= */}
+            {tabSup === "auditoria" && (
+              <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                <div>
+                  <h2 className={`text-sm font-extrabold ${T.main}`}>Registro de Modificaciones Autorizadas por Supervisor ({auditoriaInv.length})</h2>
+                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre o SKU de un producto con clave de supervisor, queda registrado aquí.</p>
+                </div>
+                {auditoriaInv.length === 0 ? (
+                  <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no se han registrado modificaciones manuales de inventario.</p>
+                ) : (
+                  <div className="divide-y divide-slate-200/30">
+                    {auditoriaInv.map((a) => (
+                      <div key={a.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div>
+                          <span className={`font-extrabold ${T.main}`}>{a.producto}</span>
+                          <p className={T.sub}>{a.detalle}</p>
+                        </div>
+                        <span className={`text-[11px] font-bold shrink-0 ${T.sub}`}>{a.fecha}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ================= TAB 4: CLAVE DE SUPERVISOR Y COMISIONES POR PLATAFORMA ================= */}
+            {tabSup === "seguridad" && (
+              <form onSubmit={guardarSeguridadYComisiones} className={`${T.card} rounded-2xl p-6 space-y-5 max-w-2xl`}>
+                <div>
+                  <h2 className={`text-base font-extrabold ${T.main}`}>Seguridad de Supervisor y Comisiones por Canal</h2>
+                  <p className={`text-xs ${T.sub}`}>Define la clave privada que se exigirá para entrar a esta área y para autorizar cambios de inventario.</p>
+                </div>
+
+                <div className={`${T.muted} p-4 rounded-xl space-y-2`}>
+                  <label className={`text-xs font-extrabold block ${T.main}`}>Cambiar Clave de Supervisor (mínimo 4 caracteres)</label>
+                  <input
+                    type="password"
+                    value={nuevoPin}
+                    onChange={(e) => setNuevoPin(e.target.value)}
+                    placeholder="Dejar vacío para mantener la clave actual"
+                    className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
+                  />
+                </div>
+
+                <div className="space-y-2.5">
+                  <h3 className={`text-xs font-extrabold uppercase ${T.sub}`}>Porcentaje de Comisión por Venta en cada Plataforma (%)</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => (
+                      <div key={c} className={`${T.muted} p-3 rounded-xl flex items-center justify-between gap-2`}>
+                        <span className={`text-xs font-extrabold ${T.main}`}>{c}</span>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="50"
+                            value={comisionesForm[c]}
+                            onChange={(e) => setComisionesForm({ ...comisionesForm, [c]: Number(e.target.value) })}
+                            className={`w-20 rounded-lg px-2 py-1.5 text-xs font-extrabold text-center ${T.input}`}
+                          />
+                          <span className="text-xs font-bold">%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <button type="submit" disabled={guardandoCfg} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                  {guardandoCfg ? "Guardando..." : "Guardar Clave de Supervisor y Comisiones"}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<SupervisorBiApp />);
+  </script>
+</body>
+</html>
