@@ -107,6 +107,46 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
+    // VALIDADOR OFICIAL DE RUT CHILENO (ALGORITMO MÓDULO 11)
+    const validarRutChileno = (rut) => {
+      const limpio = limpiarRut(rut);
+      if (limpio.length < 7 || limpio.length > 9) return false;
+      const cuerpo = limpio.slice(0, -1);
+      const dv = limpio.slice(-1);
+      if (!/^\d+$/.test(cuerpo)) return false;
+      let suma = 0;
+      let multiplo = 2;
+      for (let i = cuerpo.length - 1; i >= 0; i--) {
+        suma += parseInt(cuerpo.charAt(i), 10) * multiplo;
+        multiplo = multiplo < 7 ? multiplo + 1 : 2;
+      }
+      const dvEsperado = 11 - (suma % 11);
+      const dvCalc = dvEsperado === 11 ? "0" : dvEsperado === 10 ? "K" : String(dvEsperado);
+      return dv === dvCalc;
+    };
+
+    // CALCULA PRÓXIMO HORARIO DE DESPACHO Y LÍMITE (-1 HORA)
+    const calcularProximoCorteDespacho = (horariosArr) => {
+      const lista = (Array.isArray(horariosArr) ? horariosArr : ["14:00"]).filter(Boolean).sort();
+      if (lista.length === 0) return { salida: "14:00", limite: "13:00" };
+      const ahora = new Date();
+      const minsAhora = ahora.getHours() * 60 + ahora.getMinutes();
+
+      let elegido = lista[0];
+      for (let i = 0; i < lista.length; i++) {
+        const [h, m] = lista[i].split(":").map(Number);
+        if (h * 60 + m > minsAhora) {
+          elegido = lista[i];
+          break;
+        }
+      }
+      const [eh, em] = elegido.split(":").map(Number);
+      const totalMinsLimite = Math.max(0, eh * 60 + em - 60);
+      const lh = String(Math.floor(totalMinsLimite / 60)).padStart(2, "0");
+      const lm = String(totalMinsLimite % 60).padStart(2, "0");
+      return { salida: elegido, limite: `${lh}:${lm}` };
+    };
+
     const TEMAS_DISPONIBLES = {
       claro_retail: {
         nombre: "Claro Retail & E-Commerce (Predeterminado)",
@@ -188,14 +228,14 @@
         pasos: [
           "1. Entra a tu portal de OpenFactura (Haulmer) o proveedor DTE autorizado por el SII.",
           "2. Ve a Configuración → Integraciones / API Keys.",
-          "3. Copia tu API Key de Producción. Los folios CAF (Boleta 39 y Factura 33) se asignan automáticamente en cada emisión."
+          "3. Copia tu API Key de Producción. Los folios CAF (Boleta 39, Factura 33 y NC 61) se asignan automáticamente."
         ]
       },
       meli: {
         titulo: "Dónde obtener Client ID y Secret en Mercado Libre",
         pasos: [
           "1. Ingresa a developers.mercadolibre.cl con la cuenta principal de la tienda.",
-          "2. Entra a 'Mis Aplicaciones' → 'Crear nueva aplicación' (permisos: Órdenes, Ítems y Facturación).",
+          "2. Entra a 'Mis Aplicaciones' → 'Crear nueva aplicación' (permisos: Órdenes, Mensajería, Ítems y Facturación).",
           "3. Copia el App ID (Client ID) y el Client Secret."
         ]
       },
@@ -307,6 +347,9 @@
               </div>
               <div><span><strong>Giro:</strong> Comercial</span></div>
               <div><span><strong>Dirección:</strong> {orden.direccionCliente || "Santiago"}</span></div>
+              {orden.refBoletaAnulada && (
+                <div className="text-[10px] font-bold">Ref: Reemplaza Boleta N° {orden.refBoletaAnulada} (Anulada vía NC 61 N° {orden.refNc61})</div>
+              )}
             </div>
 
             <div className="mt-5">
@@ -469,6 +512,7 @@
       const [ordenes, setOrdenes] = useState([]);
       const [cierresDiarios, setCierresDiarios] = useState([]);
       const [compras, setCompras] = useState([]);
+      const [cuarentena, setCuarentena] = useState([]);
 
       // Modal Nueva Venta
       const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
@@ -499,6 +543,21 @@
       const [notaCierreCaja, setNotaCierreCaja] = useState("");
       const [cerrandoDia, setCerrandoDia] = useState(false);
 
+      // Modal Devoluciones y Cuarentena
+      const [ordenDevolucionModal, setOrdenDevolucionModal] = useState(null);
+      const [estadoFisicoDevolucion, setEstadoFisicoDevolucion] = useState("intacto"); // intacto | revision
+      const [emitirNc61Devolucion, setEmitirNc61Devolucion] = useState(true);
+      const [notaDevolucion, setNotaDevolucion] = useState("");
+
+      // Modal Corrección de RUT / Refacturación (NC 61 -> Factura 33)
+      const [ordenRefacturarModal, setOrdenRefacturarModal] = useState(null);
+      const [nuevoRutCorregido, setNuevoRutCorregido] = useState("");
+
+      // Modal Edición de Producto con Clave de Supervisor
+      const [productoEditando, setProductoEditando] = useState(null);
+      const [editProdForm, setEditProdForm] = useState({ codigo: "", nombre: "", proveedor: "", stockOnline: 0, ultimoCostoNeto: 0, motivo: "" });
+      const [pinAutorizacionEdit, setPinAutorizacionEdit] = useState("");
+
       // Catálogo
       const [busquedaCat, setBusquedaCat] = useState("");
       const [importandoExcel, setImportandoExcel] = useState(false);
@@ -513,7 +572,7 @@
       const [excluidosPedido, setExcluidosPedido] = useState({});
       const [pedidoParaImprimir, setPedidoParaImprimir] = useState([]);
 
-      // Configuración
+      // Configuración (APIs, Personal, Seguridad & Despachos, Apariencia)
       const [subTabConfig, setSubTabConfig] = useState("apis");
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
@@ -534,8 +593,16 @@
         boleta39Actual: 1,
         boleta39Limite: 5000,
         factura33Actual: 1,
-        factura33Limite: 5000
+        factura33Limite: 5000,
+        nc61Actual: 1
       });
+      const [despachosConfig, setDespachosConfig] = useState({
+        cantidadHorarios: 2,
+        horarios: ["12:00", "16:30", "18:30"]
+      });
+      const [pinSupervisorActualInput, setPinSupervisorActualInput] = useState("");
+      const [pinSupervisorNuevoInput, setPinSupervisorNuevoInput] = useState("");
+
       const [ayudaApiModal, setAyudaApiModal] = useState(null);
       const [guardandoConfig, setGuardandoConfig] = useState(false);
 
@@ -566,6 +633,7 @@
             if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
             if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
             if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
+            if (data.despachosConfig) setDespachosConfig((prev) => ({ ...prev, ...data.despachosConfig }));
             if (data.modulosActivos?.m8_omnicanal) {
               setCanalNuevo((prev) => (prev === "Venta Directa" ? "Mercado Libre" : prev));
             }
@@ -588,8 +656,7 @@
         });
 
         const u4 = empRef.collection("compras_proveedores").onSnapshot((snap) => {
-          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          setCompras(lista);
+          setCompras(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
         });
 
         const u5 = empRef.collection("cierres_diarios").onSnapshot((snap) => {
@@ -598,10 +665,17 @@
           setCierresDiarios(lista);
         });
 
-        return () => { u1(); u2(); u3(); u4(); u5(); };
+        const u6 = empRef.collection("cuarentena_productos").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          lista.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setCuarentena(lista);
+        });
+
+        return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
       }, [rutActivo]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
+      const pinSupervisorVigente = String(empresa?.pinSupervisor || "1234").trim();
 
       const cerrarSesion = () => {
         localStorage.removeItem("nexus_empresa_rut");
@@ -624,13 +698,20 @@
       const usaColaLider = Boolean(mods.m11_colas_print);
       const usaLectorComprasXml = Boolean(mods.m17_compras_prov);
 
+      const horariosActivosDespacho = useMemo(() => {
+        const cant = Math.max(1, Math.min(3, Number(despachosConfig.cantidadHorarios || 2)));
+        return (despachosConfig.horarios || ["12:00", "16:30", "18:30"]).slice(0, cant);
+      }, [despachosConfig]);
+
+      const proximoCorte = useMemo(() => calcularProximoCorteDespacho(horariosActivosDespacho), [horariosActivosDespacho]);
+
       const areasHabilitadasPorSwitch = useMemo(() => {
         const lista = [];
         if (mods.m17_compras_prov || mods.m18_finanzas_bi) {
           lista.push({
             id: "compras",
-            titulo: "Recepción de Facturas SII / XML",
-            desc: "Carga stock automático desde proveedores",
+            titulo: "Cargar Factura (XML / Foto / Manual)",
+            desc: "Audita IVA 19%, costos y suma stock al catálogo",
             url: "compras-finanzas.html"
           });
         }
@@ -705,6 +786,7 @@
 
       const faltanApis = !estadoConexiones.sii || (usaOmnicanal && !estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
+      // ================= REGISTRO DE VENTA CON VALIDADOR DE RUT CHILENO (MÓDULO 11) =================
       const registrarOrdenOmnicanal = async (e) => {
         e.preventDefault();
         const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
@@ -714,10 +796,14 @@
           stockOnline: 0
         };
 
-        const rutLim = limpiarRut(rutCompradorNuevo);
-        const esFactura33 = rutLim.length >= 7;
-        const tipoDte = esFactura33 ? 33 : 39;
-        const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
+        const rutIngresado = rutCompradorNuevo.trim();
+        const pidioFactura = rutIngresado.length > 0;
+        const rutValido = pidioFactura ? validarRutChileno(rutIngresado) : false;
+        const esRutInvalido = pidioFactura && !rutValido;
+
+        const esFactura33 = pidioFactura && rutValido;
+        const tipoDte = esRutInvalido ? 0 : (esFactura33 ? 33 : 39);
+        const folioAsignado = esRutInvalido ? 0 : (esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual);
         const esLider = canalNuevo === "Lider";
         const esRealSii = Boolean(estadoConexiones.sii);
         const ahora = Date.now();
@@ -726,7 +812,13 @@
           canal: canalNuevo,
           ordenExterna: `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
           comprador: compradorNuevo.trim() || "Cliente Marketplace",
-          rutComprador: esFactura33 ? formatearRut(rutLim) : "",
+          rutComprador: pidioFactura ? (rutValido ? formatearRut(rutIngresado) : rutIngresado) : "",
+          estadoRut: esRutInvalido ? "invalido_esperando" : "ok",
+          mensajeRutEnviado: esRutInvalido
+            ? `Hola ${compradorNuevo.trim() || "cliente"}, el RUT ingresado (${rutIngresado}) no es válido en el SII. Por favor envíanos tu RUT correcto antes de las ${proximoCorte.limite} hrs (1h antes del despacho de las ${proximoCorte.salida} hrs) para emitir tu Factura; de lo contrario emitiremos Boleta para no retrasar tu envío.`
+            : "",
+          limiteDespachoHora: esRutInvalido ? proximoCorte.limite : "",
+          salidaDespachoHora: esRutInvalido ? proximoCorte.salida : "",
           direccionCliente: "Santiago",
           productoId: prodObj.id,
           codigoSku: prodObj.codigo || "S/C",
@@ -736,13 +828,14 @@
           vendedor: vendedorSeleccionado || "Canal Automático",
           tipoDte,
           folioSii: folioAsignado,
-          timbradoSii: true,
-          enviadoMarketplace: !esLider && canalNuevo !== "Venta Directa",
+          timbradoSii: !esRutInvalido,
+          enviadoMarketplace: !esRutInvalido && !esLider && canalNuevo !== "Venta Directa",
           esSimulacion: !esRealSii,
           colaImpresion: esLider ? "lider" : "general",
           etiquetaImpresa: false,
           diaCerrado: false,
-          despachado: false,
+          anuladaPorNc61: false,
+          devolucionInfo: null,
           fechaIso: new Date(ahora).toISOString().slice(0, 10),
           horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
           fecha: new Date(ahora).toLocaleString("es-CL"),
@@ -757,22 +850,274 @@
           batch.update(empRef().collection("catalogo").doc(prodObj.id), { stockOnline: nuevoStock });
         }
 
-        batch.set(
-          empRef(),
-          {
-            cafConfig: {
-              ...cafConfig,
-              factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
-              boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
-            }
-          },
-          { merge: true }
-        );
+        if (!esRutInvalido) {
+          batch.set(
+            empRef(),
+            {
+              cafConfig: {
+                ...cafConfig,
+                factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
+                boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
+              }
+            },
+            { merge: true }
+          );
+        }
 
         await batch.commit();
         setModalNuevaVenta(false);
         setCompradorNuevo("");
         setRutCompradorNuevo("");
+
+        if (esRutInvalido) {
+          alert(
+            `⚠️ RUT INVÁLIDO DETECTADO (${rutIngresado}).\n\n` +
+            `La orden quedó retenida esperando respuesta del cliente hasta las ${proximoCorte.limite} hrs (1h antes del despacho de las ${proximoCorte.salida} hrs).\n` +
+            `Puedes verla y gestionarla en la alerta superior o en Ventas.`
+          );
+        }
+      };
+
+      // ================= FLUJO 1: VENCE PLAZO (1H ANTES DESPACHO) -> EMITE BOLETA 39 =================
+      const emitirBoletaPorPlazoVencido = async (orden) => {
+        const folioBoleta = cafConfig.boleta39Actual;
+        const batch = db.batch();
+        batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
+          estadoRut: "boleta_por_plazo",
+          tipoDte: 39,
+          folioSii: folioBoleta,
+          timbradoSii: true,
+          enviadoMarketplace: orden.canal !== "Lider" && orden.canal !== "Venta Directa"
+        });
+        batch.set(empRef(), { cafConfig: { ...cafConfig, boleta39Actual: folioBoleta + 1 } }, { merge: true });
+        await batch.commit();
+        alert(`Boleta 39 N° ${folioBoleta} emitida automáticamente para despachar a tiempo. Si el cliente envía su RUT después, podrás anular con NC 61 y refacturar en 1 clic.`);
+      };
+
+      // ================= FLUJO 2: CLIENTE CORRIGE RUT -> EMITE FACTURA 33 (CON NC 61 SI YA ERA BOLETA) =================
+      const ejecutarCorreccionRutYRefactura = async (e) => {
+        e.preventDefault();
+        if (!ordenRefacturarModal) return;
+        if (!validarRutChileno(nuevoRutCorregido)) {
+          return alert("El RUT ingresado sigue siendo inválido según el algoritmo del SII (Módulo 11). Verifica el dígito verificador.");
+        }
+
+        const rutFormateado = formatearRut(nuevoRutCorregido);
+        const orden = ordenRefacturarModal;
+        const yaTeniaBoleta = orden.tipoDte === 39 && orden.timbradoSii;
+        const folioFactura = cafConfig.factura33Actual;
+        const folioNc61 = cafConfig.nc61Actual || 1;
+        const ahora = Date.now();
+
+        const batch = db.batch();
+
+        if (yaTeniaBoleta) {
+          // 1) Marca la Boleta 39 original como anulada por Nota de Crédito 61
+          batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
+            anuladaPorNc61: true,
+            folioNc61Anulacion: folioNc61,
+            estadoRut: "anulada_y_refacturada"
+          });
+          // 2) Emite la nueva Factura 33 con el RUT válido y referencia a la NC 61
+          batch.set(empRef().collection("ecommerce_ordenes").doc(), {
+            ...orden,
+            id: undefined,
+            rutComprador: rutFormateado,
+            estadoRut: "corregido_ok",
+            tipoDte: 33,
+            folioSii: folioFactura,
+            timbradoSii: true,
+            anuladaPorNc61: false,
+            refBoletaAnulada: orden.folioSii,
+            refNc61: folioNc61,
+            etiquetaImpresa: false,
+            diaCerrado: false,
+            enviadoMarketplace: orden.canal !== "Lider",
+            fechaIso: new Date(ahora).toISOString().slice(0, 10),
+            horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+            fecha: new Date(ahora).toLocaleString("es-CL"),
+            timestamp: ahora
+          });
+          batch.set(empRef(), {
+            cafConfig: {
+              ...cafConfig,
+              factura33Actual: folioFactura + 1,
+              nc61Actual: folioNc61 + 1
+            }
+          }, { merge: true });
+        } else {
+          // Estaba retenida esperando RUT: emite Factura 33 directa sin necesidad de NC 61
+          batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
+            rutComprador: rutFormateado,
+            estadoRut: "corregido_ok",
+            tipoDte: 33,
+            folioSii: folioFactura,
+            timbradoSii: true,
+            enviadoMarketplace: orden.canal !== "Lider"
+          });
+          batch.set(empRef(), {
+            cafConfig: { ...cafConfig, factura33Actual: folioFactura + 1 }
+          }, { merge: true });
+        }
+
+        await batch.commit();
+        setOrdenRefacturarModal(null);
+        setNuevoRutCorregido("");
+        alert(
+          yaTeniaBoleta
+            ? `✅ Cadena tributaria completada:\n1. Nota de Crédito 61 N° ${folioNc61} emitida anulando Boleta #${orden.folioSii}.\n2. Factura 33 N° ${folioFactura} emitida al RUT ${rutFormateado} y lista para enviar al cliente.`
+            : `✅ RUT validado (${rutFormateado}). Factura 33 N° ${folioFactura} emitida y lista para despacho.`
+        );
+      };
+
+      // ================= FLUJO DEVOLUCIONES Y CUARENTENA =================
+      const procesarDevolucionOrden = async (e) => {
+        e.preventDefault();
+        if (!ordenDevolucionModal) return;
+        const orden = ordenDevolucionModal;
+        const folioNc61 = cafConfig.nc61Actual || 1;
+        const ahora = Date.now();
+        const batch = db.batch();
+
+        batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
+          anuladaPorNc61: Boolean(emitirNc61Devolucion),
+          folioNc61Anulacion: emitirNc61Devolucion ? folioNc61 : null,
+          devolucionInfo: {
+            estadoFisico: estadoFisicoDevolucion,
+            nc61Emitida: Boolean(emitirNc61Devolucion),
+            folioNc61: emitirNc61Devolucion ? folioNc61 : null,
+            nota: notaDevolucion.trim(),
+            fecha: new Date(ahora).toLocaleString("es-CL")
+          }
+        });
+
+        if (emitirNc61Devolucion) {
+          batch.set(empRef(), { cafConfig: { ...cafConfig, nc61Actual: folioNc61 + 1 } }, { merge: true });
+        }
+
+        if (estadoFisicoDevolucion === "intacto") {
+          // Devuelve al stock vendible
+          const prod = catalogo.find((p) => p.id === orden.productoId) || catalogo.find((p) => p.nombre === orden.productoNombre);
+          if (prod) {
+            batch.update(empRef().collection("catalogo").doc(prod.id), {
+              stockOnline: (Number(prod.stockOnline) || 0) + Number(orden.cantidad || 1)
+            });
+          }
+        } else {
+          // Envía a Cuarentena / Revisión Técnica (NO vuelve a venta online por error)
+          batch.set(empRef().collection("cuarentena_productos").doc(), {
+            productoId: orden.productoId || "",
+            codigo: orden.codigoSku || "",
+            nombre: orden.productoNombre,
+            cantidad: Number(orden.cantidad || 1),
+            canalOrigen: orden.canal,
+            folioOrigen: orden.folioSii || "S/N",
+            nota: notaDevolucion.trim() || "Devuelto abierto / requiere revisión",
+            fecha: new Date(ahora).toLocaleString("es-CL"),
+            timestamp: ahora
+          });
+        }
+
+        await batch.commit();
+        setOrdenDevolucionModal(null);
+        setNotaDevolucion("");
+        alert(
+          estadoFisicoDevolucion === "intacto"
+            ? `✅ Devolución procesada: ${orden.cantidad}x ${orden.productoNombre} reingresado al stock vendible.`
+            : `⚠️ Devolución apartada en Cuarentena: ${orden.cantidad}x ${orden.productoNombre} quedó en Revisión Técnica para evitar vender un producto dañado.`
+        );
+      };
+
+      const resolverItemCuarentena = async (item, accion) => {
+        const pin = prompt("Ingresa la Clave de Supervisor para autorizar este movimiento de cuarentena:");
+        if (!pin || pin.trim() !== pinSupervisorVigente) {
+          if (pin !== null) alert("Clave de Supervisor incorrecta.");
+          return;
+        }
+        const batch = db.batch();
+        batch.delete(empRef().collection("cuarentena_productos").doc(item.id));
+
+        if (accion === "rehabilitar") {
+          const prod = catalogo.find((p) => p.id === item.productoId) || catalogo.find((p) => p.nombre === item.nombre);
+          if (prod) {
+            batch.update(empRef().collection("catalogo").doc(prod.id), {
+              stockOnline: (Number(prod.stockOnline) || 0) + Number(item.cantidad || 1)
+            });
+          }
+        }
+
+        batch.set(empRef().collection("auditoria_inventario").doc(), {
+          producto: item.nombre,
+          detalle: accion === "rehabilitar"
+            ? `Rehabilitado desde Cuarentena (+${item.cantidad} unds al stock vendible)`
+            : `Dado de baja desde Cuarentena (${item.cantidad} unds como merma/descarte)`,
+          fecha: new Date().toLocaleString("es-CL"),
+          timestamp: Date.now()
+        });
+
+        await batch.commit();
+      };
+
+      // ================= EDICIÓN PROTEGIDA DE PRODUCTOS CON CLAVE DE SUPERVISOR =================
+      const abrirEditorProducto = (prod) => {
+        setProductoEditando(prod);
+        setEditProdForm({
+          codigo: prod.codigo || "",
+          nombre: prod.nombre || "",
+          proveedor: prod.proveedor || "",
+          stockOnline: Number(prod.stockOnline ?? 0),
+          ultimoCostoNeto: Number(prod.ultimoCostoNeto ?? 0),
+          motivo: ""
+        });
+        setPinAutorizacionEdit("");
+      };
+
+      const guardarEdicionProductoAutorizada = async (e) => {
+        e.preventDefault();
+        if (!productoEditando) return;
+        if (pinAutorizacionEdit.trim() !== pinSupervisorVigente) {
+          return alert("Clave de Supervisor incorrecta. Modificación rechazada.");
+        }
+
+        const stockAntes = Number(productoEditando.stockOnline ?? 0);
+        const stockDespues = Math.max(0, Number(editProdForm.stockOnline));
+        const batch = db.batch();
+
+        batch.update(empRef().collection("catalogo").doc(productoEditando.id), {
+          codigo: editProdForm.codigo.trim().toUpperCase(),
+          nombre: editProdForm.nombre.trim().toUpperCase(),
+          proveedor: editProdForm.proveedor.trim().toUpperCase(),
+          stockOnline: stockDespues,
+          ultimoCostoNeto: Math.max(0, Number(editProdForm.ultimoCostoNeto || 0))
+        });
+
+        batch.set(empRef().collection("auditoria_inventario").doc(), {
+          producto: editProdForm.nombre.trim().toUpperCase(),
+          detalle: `Edición autorizada • Stock: ${stockAntes} → ${stockDespues} unds • SKU: ${editProdForm.codigo || "-"} ${editProdForm.motivo ? `• Motivo: ${editProdForm.motivo}` : ""}`,
+          fecha: new Date().toLocaleString("es-CL"),
+          timestamp: Date.now()
+        });
+
+        await batch.commit();
+        setProductoEditando(null);
+        setPinAutorizacionEdit("");
+      };
+
+      const eliminarProductoCatalogo = async (prod) => {
+        const pin = prompt(`Ingresa la Clave de Supervisor para eliminar "${prod.nombre}" del catálogo:`);
+        if (!pin || pin.trim() !== pinSupervisorVigente) {
+          if (pin !== null) alert("Clave de Supervisor incorrecta.");
+          return;
+        }
+        const batch = db.batch();
+        batch.delete(empRef().collection("catalogo").doc(prod.id));
+        batch.set(empRef().collection("auditoria_inventario").doc(), {
+          producto: prod.nombre,
+          detalle: `Producto eliminado del catálogo (tenía ${Number(prod.stockOnline ?? 0)} unds)`,
+          fecha: new Date().toLocaleString("es-CL"),
+          timestamp: Date.now()
+        });
+        await batch.commit();
       };
 
       const eliminarSimulacion = async (orden) => {
@@ -782,18 +1127,20 @@
         if (!confirm(`¿Eliminar simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
         const batch = db.batch();
         batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
-        const esFactura33 = orden.tipoDte === 33;
-        batch.set(
-          empRef(),
-          {
-            cafConfig: {
-              ...cafConfig,
-              factura33Actual: esFactura33 ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
-              boleta39Actual: !esFactura33 ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
-            }
-          },
-          { merge: true }
-        );
+        if (orden.timbradoSii) {
+          const esFactura33 = orden.tipoDte === 33;
+          batch.set(
+            empRef(),
+            {
+              cafConfig: {
+                ...cafConfig,
+                factura33Actual: esFactura33 ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
+                boleta39Actual: !esFactura33 ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
+              }
+            },
+            { merge: true }
+          );
+        }
         await batch.commit();
       };
 
@@ -803,7 +1150,7 @@
         const ventasPorNombre = {};
         let minTs = Date.now();
 
-        ordenes.forEach((o) => {
+        ordenes.filter((o) => !o.anuladaPorNc61).forEach((o) => {
           const ts = Number(o.timestamp || Date.now());
           if (ts < minTs) minTs = ts;
           const cant = Number(o.cantidad || 1);
@@ -919,9 +1266,13 @@
         alert("Pedido sugerido copiado al portapapeles. Ya puedes pegarlo en WhatsApp.");
       };
 
-      // ================= JORNADA ACTIVA VS ARCHIVO HISTÓRICO INFINITO =================
+      // ================= JORNADA ACTIVA, RUT INVÁLIDOS Y ARCHIVO HISTÓRICO INFINITO =================
+      const ordenesRutInvalidoPendientes = useMemo(() => {
+        return ordenes.filter((o) => o.estadoRut === "invalido_esperando");
+      }, [ordenes]);
+
       const ordenesJornadaActiva = useMemo(() => {
-        return ordenes.filter((o) => !o.diaCerrado).sort(ordenarPorFolioAsc);
+        return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii && !o.anuladaPorNc61).sort(ordenarPorFolioAsc);
       }, [ordenes]);
 
       const facturasPorImprimirHoy = useMemo(() => {
@@ -1087,7 +1438,7 @@
 
       const rankingProductosVendidos = useMemo(() => {
         const mapa = {};
-        ordenes.forEach((o) => {
+        ordenes.filter((o) => !o.anuladaPorNc61).forEach((o) => {
           const key = o.productoNombre || "Producto";
           if (!mapa[key]) mapa[key] = { nombre: key, unidades: 0, totalClp: 0 };
           mapa[key].unidades += Number(o.cantidad || 1);
@@ -1108,11 +1459,6 @@
         setManualSku("");
         setManualNombre("");
         setManualProveedor("");
-      };
-
-      const eliminarProductoCatalogo = async (prod) => {
-        if (!confirm(`¿Eliminar "${prod.nombre}" del catálogo?`)) return;
-        await empRef().collection("catalogo").doc(prod.id).delete();
       };
 
       const subirExcelCatalogo = async (e) => {
@@ -1170,6 +1516,27 @@
         try {
           await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
           alert("Conexiones API y datos del emisor guardados.");
+        } catch (err) {
+          alert(err.message);
+        }
+        setGuardandoConfig(false);
+      };
+
+      const guardarSeguridadYDespachos = async (e) => {
+        e.preventDefault();
+        if (pinSupervisorActualInput.trim() !== pinSupervisorVigente) {
+          return alert("Debes ingresar tu Clave de Supervisor actual para guardar cambios de seguridad y horarios.");
+        }
+        setGuardandoConfig(true);
+        try {
+          const payload = { despachosConfig };
+          if (pinSupervisorNuevoInput.trim().length >= 4) {
+            payload.pinSupervisor = pinSupervisorNuevoInput.trim();
+          }
+          await empRef().set(payload, { merge: true });
+          setPinSupervisorActualInput("");
+          setPinSupervisorNuevoInput("");
+          alert("Horarios de despacho y clave de supervisor guardados.");
         } catch (err) {
           alert(err.message);
         }
@@ -1243,6 +1610,169 @@
             </div>
           )}
 
+          {/* MODAL EDICIÓN DE PRODUCTO (PROTEGIDO CON CLAVE DE SUPERVISOR) */}
+          {productoEditando && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <form onSubmit={guardarEdicionProductoAutorizada} className={`${T.card} rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl`}>
+                <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded">
+                      Requiere Autorización Supervisor
+                    </span>
+                    <h2 className={`text-base font-extrabold mt-1 ${T.textMain}`}>Editar Producto e Inventario</h2>
+                  </div>
+                  <button type="button" onClick={() => setProductoEditando(null)} className={`text-xs font-bold px-2.5 py-1.5 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Código / SKU</label>
+                    <input type="text" value={editProdForm.codigo} onChange={(e) => setEditProdForm({ ...editProdForm, codigo: e.target.value })} placeholder="Ej: TEC-001" className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Proveedor (Opcional)</label>
+                    <input type="text" value={editProdForm.proveedor} onChange={(e) => setEditProdForm({ ...editProdForm, proveedor: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Nombre del Producto *</label>
+                    <input type="text" value={editProdForm.nombre} onChange={(e) => setEditProdForm({ ...editProdForm, nombre: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Stock Disponible *</label>
+                    <input type="number" min="0" value={editProdForm.stockOnline} onChange={(e) => setEditProdForm({ ...editProdForm, stockOnline: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-extrabold ${T.input}`} required />
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Costo Neto Unitario (CLP)</label>
+                    <input type="number" min="0" value={editProdForm.ultimoCostoNeto} onChange={(e) => setEditProdForm({ ...editProdForm, ultimoCostoNeto: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Motivo del ajuste (Auditoría)</label>
+                    <input type="text" value={editProdForm.motivo} onChange={(e) => setEditProdForm({ ...editProdForm, motivo: e.target.value })} placeholder="Ej: Conteo físico / asignación de código SKU" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                  </div>
+                </div>
+
+                <div className={`${T.cardMuted} p-3.5 rounded-2xl border-amber-400/70 space-y-1.5`}>
+                  <label className="text-[11px] font-extrabold text-amber-600 block">Clave de Supervisor para Autorizar *</label>
+                  <input
+                    type="password"
+                    value={pinAutorizacionEdit}
+                    onChange={(e) => setPinAutorizacionEdit(e.target.value)}
+                    placeholder="Ingresa tu clave de supervisor"
+                    className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-extrabold tracking-widest ${T.input}`}
+                    required
+                  />
+                </div>
+
+                <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                  Autorizar y Guardar Cambios en Catálogo
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* MODAL DEVOLUCIONES Y CUARENTENA */}
+          {ordenDevolucionModal && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <form onSubmit={procesarDevolucionOrden} className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
+                <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Gestión de Devolución</span>
+                    <h2 className={`text-base font-extrabold mt-1 ${T.textMain}`}>
+                      {ordenDevolucionModal.cantidad}x {ordenDevolucionModal.productoNombre}
+                    </h2>
+                    <p className={`text-[11px] ${T.textSub}`}>
+                      {ordenDevolucionModal.canal} • {ordenDevolucionModal.comprador}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setOrdenDevolucionModal(null)} className={`text-xs font-bold px-2.5 py-1.5 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
+                </div>
+
+                <div className="space-y-2">
+                  <label className={`text-xs font-extrabold block ${T.textMain}`}>¿En qué estado físico volvió el producto?</label>
+                  <div
+                    onClick={() => setEstadoFisicoDevolucion("intacto")}
+                    className={`p-3.5 rounded-xl border-2 cursor-pointer text-xs ${estadoFisicoDevolucion === "intacto" ? "border-emerald-600 bg-emerald-50/10" : "border-slate-200/40"}`}
+                  >
+                    <p className={`font-extrabold ${T.textMain}`}>Sellado / Intacto</p>
+                    <p className={`text-[11px] ${T.textSub}`}>Se reingresa automáticamente al stock vendible en todos los canales.</p>
+                  </div>
+                  <div
+                    onClick={() => setEstadoFisicoDevolucion("revision")}
+                    className={`p-3.5 rounded-xl border-2 cursor-pointer text-xs ${estadoFisicoDevolucion === "revision" ? "border-amber-500 bg-amber-50/10" : "border-slate-200/40"}`}
+                  >
+                    <p className={`font-extrabold ${T.textMain}`}>Abierto / Con Detalle (Cuarentena)</p>
+                    <p className={`text-[11px] ${T.textSub}`}>NO vuelve al stock online. Pasa a Revisión Técnica en Catálogo.</p>
+                  </div>
+                </div>
+
+                <label className={`${T.cardMuted} p-3 rounded-xl flex items-center gap-2.5 cursor-pointer text-xs`}>
+                  <input type="checkbox" checked={emitirNc61Devolucion} onChange={(e) => setEmitirNc61Devolucion(e.target.checked)} className="w-4 h-4" />
+                  <span className={`font-bold ${T.textMain}`}>Emitir Nota de Crédito Electrónica (Tipo 61) anulando el DTE</span>
+                </label>
+
+                <input
+                  type="text"
+                  value={notaDevolucion}
+                  onChange={(e) => setNotaDevolucion(e.target.value)}
+                  placeholder="Observación (Ej: Caja abierta, cliente desistió...)"
+                  className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold ${T.input}`}
+                />
+
+                <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                  Confirmar Devolución
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* MODAL CORRECCIÓN DE RUT Y REFACTURACIÓN (NC 61 -> FACTURA 33) */}
+          {ordenRefacturarModal && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <form onSubmit={ejecutarCorreccionRutYRefactura} className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
+                <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase bg-blue-600 text-white px-2.5 py-0.5 rounded">
+                      {ordenRefacturarModal.tipoDte === 39 ? "Anulación NC 61 → Factura 33" : "Corrección RUT → Factura 33"}
+                    </span>
+                    <h2 className={`text-base font-extrabold mt-1 ${T.textMain}`}>{ordenRefacturarModal.comprador}</h2>
+                  </div>
+                  <button type="button" onClick={() => setOrdenRefacturarModal(null)} className={`text-xs font-bold px-2.5 py-1.5 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
+                </div>
+
+                {ordenRefacturarModal.tipoDte === 39 ? (
+                  <p className={`text-xs leading-relaxed ${T.textSub}`}>
+                    Esta orden ya salió con <strong>Boleta 39 N° {ordenRefacturarModal.folioSii}</strong>. Al ingresar el RUT válido del cliente, el sistema emitirá automáticamente la <strong>Nota de Crédito (Tipo 61)</strong> anulando la boleta y generará la <strong>Factura Electrónica (Tipo 33)</strong> para enviársela.
+                  </p>
+                ) : (
+                  <p className={`text-xs leading-relaxed ${T.textSub}`}>
+                    El RUT original (<strong>{ordenRefacturarModal.rutComprador}</strong>) era inválido. Ingresa el RUT correcto enviado por el cliente para emitir su Factura 33 antes del despacho de las {ordenRefacturarModal.salidaDespachoHora || proximoCorte.salida} hrs.
+                  </p>
+                )}
+
+                <div>
+                  <label className={`text-xs font-bold block mb-1 ${T.textSub}`}>RUT Correcto del Cliente (Validado con Módulo 11) *</label>
+                  <input
+                    type="text"
+                    value={nuevoRutCorregido}
+                    onChange={(e) => setNuevoRutCorregido(e.target.value)}
+                    placeholder="Ej: 77.528.042-5"
+                    className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-extrabold ${T.input}`}
+                    required
+                  />
+                  {nuevoRutCorregido.trim().length > 0 && (
+                    <p className={`text-[11px] font-bold mt-1 ${validarRutChileno(nuevoRutCorregido) ? "text-emerald-500" : "text-rose-500"}`}>
+                      {validarRutChileno(nuevoRutCorregido) ? "✓ RUT válido ante el SII" : "✕ RUT inválido (verifica dígito verificador)"}
+                    </p>
+                  )}
+                </div>
+
+                <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                  {ordenRefacturarModal.tipoDte === 39 ? "Anular Boleta (NC 61) y Emitir Factura 33" : "Validar RUT y Emitir Factura 33"}
+                </button>
+              </form>
+            </div>
+          )}
+
           {/* MODAL EJECUTIVO DE CERRAR DÍA / CAJA */}
           {modalCierreCaja && (
             <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
@@ -1276,19 +1806,16 @@
                       </div>
                     </div>
 
-                    <div>
-                      <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Observación de cierre (Opcional)</label>
-                      <input
-                        type="text"
-                        value={notaCierreCaja}
-                        onChange={(e) => setNotaCierreCaja(e.target.value)}
-                        placeholder="Ej: Despachos completados, turno cerrado sin novedad..."
-                        className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none ${T.input}`}
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      value={notaCierreCaja}
+                      onChange={(e) => setNotaCierreCaja(e.target.value)}
+                      placeholder="Observación de cierre (Opcional)"
+                      className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none ${T.input}`}
+                    />
 
                     <p className={`text-[11px] leading-relaxed ${T.textSub}`}>
-                      Al confirmar, todas las facturas de hoy se archivarán para siempre en el <strong>Archivo Histórico</strong> y el contador quedará en <strong>0</strong> para mañana. Si entra una venta esta noche en automático, quedará asignada a la jornada siguiente.
+                      Al confirmar, todas las facturas de hoy se archivarán para siempre en el <strong>Archivo Histórico</strong> y el contador quedará en <strong>0</strong> para mañana.
                     </p>
 
                     <button
@@ -1541,6 +2068,13 @@
                   <div>
                     <label className={`text-xs font-bold block mb-1 ${T.textSub}`}>RUT (Con RUT = Factura 33)</label>
                     <input type="text" value={rutCompradorNuevo} onChange={(e) => setRutCompradorNuevo(e.target.value)} placeholder="Vacío = Boleta 39" className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold ${T.input}`} />
+                    {rutCompradorNuevo.trim().length > 0 && (
+                      <span className={`text-[10px] font-bold block mt-1 ${validarRutChileno(rutCompradorNuevo) ? "text-emerald-500" : "text-amber-500"}`}>
+                        {validarRutChileno(rutCompradorNuevo)
+                          ? "✓ RUT válido (emitirá Factura 33)"
+                          : `⚠️ RUT inválido: quedará retenida esperando cliente hasta ${proximoCorte.limite} hrs`}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1569,7 +2103,11 @@
                 </div>
 
                 <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                  Emitir {limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"} y Descontar Stock
+                  {rutCompradorNuevo.trim().length === 0
+                    ? "Emitir Boleta 39 y Descontar Stock"
+                    : validarRutChileno(rutCompradorNuevo)
+                      ? "Emitir Factura 33 y Descontar Stock"
+                      : "Registrar Orden y Solicitar Corrección de RUT"}
                 </button>
               </form>
             </div>
@@ -1585,9 +2123,9 @@
                   </div>
                 )}
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${T.tag}`}>RUT {empresa.rut}</span>
-                    <span className="text-[10px] font-bold text-emerald-600">Jornada Abierta</span>
+                    <span className="text-[10px] font-bold text-emerald-600">Próx. Despacho: {proximoCorte.salida} hrs</span>
                   </div>
                   <h1 className={`text-lg sm:text-xl font-extrabold mt-0.5 ${T.textMain}`}>{empresa.nombre}</h1>
                 </div>
@@ -1598,7 +2136,7 @@
                   <button
                     key={item.id}
                     onClick={() => setVista(item.id)}
-                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                    className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                       vista === item.id ? T.navActive : T.navIdle
                     }`}
                   >
@@ -1613,23 +2151,30 @@
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <div className={`${T.cardMuted} px-3 py-2 rounded-xl flex items-center gap-2`}>
+                <div className={`${T.cardMuted} px-2.5 py-2 rounded-xl flex items-center gap-2`}>
                   <span className={`text-[11px] font-bold ${T.textMain}`}>
-                    {pilotoAutomaticoActivo ? "Piloto Auto: ON" : "Manual"}
+                    {pilotoAutomaticoActivo ? "Auto: ON" : "Manual"}
                   </span>
                   <SwitchToggle checked={pilotoAutomaticoActivo} onChange={togglePilotoAutomatico} colorClass={T.sw} />
                 </div>
 
-                <button onClick={() => setModalNuevaVenta(true)} className={`text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer ${T.btn}`}>
-                  + Nueva Venta
+                <button onClick={() => setModalNuevaVenta(true)} className={`text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer ${T.btn}`}>
+                  + Venta
                 </button>
 
                 <button
                   onClick={() => setModalCierreCaja(true)}
-                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer"
-                  title="Cierra la caja del día y archiva las facturas en el historial infinito"
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer"
                 >
                   Cerrar Día ({ordenesJornadaActiva.length})
+                </button>
+
+                <button
+                  onClick={() => navegarAislado("supervisor-bi.html")}
+                  className="bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/40 text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer"
+                  title="Área restringida con clave: Gráficas comparativas, Utilidad Neta e IVA"
+                >
+                  Supervisor
                 </button>
 
                 <button onClick={cerrarSesion} className={`text-xs font-bold px-3 py-2.5 rounded-xl cursor-pointer ${T.btnSec}`}>
@@ -1637,6 +2182,46 @@
                 </button>
               </div>
             </div>
+
+            {/* ALERTA GLOBAL DE ÓRDENES CON RUT INVÁLIDO ESPERANDO CLIENTE */}
+            {ordenesRutInvalidoPendientes.length > 0 && (
+              <div className={`${T.card} rounded-2xl p-4 border-2 border-amber-500 space-y-2.5`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold uppercase text-amber-600">
+                    ⚠️ Atención: {ordenesRutInvalidoPendientes.length} Orden(es) con RUT Inválido Esperando Respuesta del Cliente
+                  </span>
+                  <span className={`text-[11px] font-bold ${T.textSub}`}>
+                    Regla activa: si no responde 1h antes del despacho, emite Boleta 39 automática.
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {ordenesRutInvalidoPendientes.map((o) => (
+                    <div key={o.id} className={`${T.cardMuted} p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs`}>
+                      <div>
+                        <p className={`font-extrabold ${T.textMain}`}>
+                          {o.comprador} ({o.canal}) • RUT ingresado: <span className="text-rose-500">{o.rutComprador}</span> • Límite: <strong>{o.limiteDespachoHora} hrs</strong>
+                        </p>
+                        <p className={`text-[11px] italic mt-0.5 ${T.textSub}`}>Mensaje enviado: "{o.mensajeRutEnviado}"</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 shrink-0">
+                        <button
+                          onClick={() => { setOrdenRefacturarModal(o); setNuevoRutCorregido(""); }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${T.btn}`}
+                        >
+                          Ingresar RUT Corregido
+                        </button>
+                        <button
+                          onClick={() => emitirBoletaPorPlazoVencido(o)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 text-slate-950 cursor-pointer"
+                        >
+                          Emitir Boleta 39 (Plazo)
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* ================= VISTA 1: INICIO ================= */}
             {vista === "inicio" && (
@@ -1684,7 +2269,6 @@
                       </div>
                     )}
 
-                    {/* CONSEJERO ECONÓMICO EN INICIO */}
                     <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
                       <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${T.tag}`}>
                         Consejero Económico
@@ -1697,20 +2281,6 @@
                         Generar Pedido Sugerido
                       </button>
                     </div>
-
-                    {sugeridosCatalogo.length > 0 && (
-                      <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
-                        <span className={`text-xs font-extrabold uppercase block ${T.textMain}`}>
-                          Sugerido de Catálogo ({sugeridosCatalogo.length} nuevos)
-                        </span>
-                        <p className={`text-xs ${T.textSub}`}>
-                          Detectamos productos en tus facturas que aún no están en tu catálogo maestro.
-                        </p>
-                        <button onClick={() => setVista("catalogo")} className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                          Revisar Sugeridos
-                        </button>
-                      </div>
-                    )}
 
                     {areasHabilitadasPorSwitch.length > 0 && (
                       <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
@@ -1746,7 +2316,7 @@
                       {ordenesJornadaActiva.length === 0 ? (
                         <div className={`${T.cardMuted} rounded-xl p-8 text-center space-y-1`}>
                           <p className={`text-xs font-bold ${T.textMain}`}>Jornada limpia (0 facturas emitidas aún)</p>
-                          <p className={`text-[11px] ${T.textSub}`}>Presiona "+ Nueva Venta" o espera órdenes automáticas para emitir Boleta 39 o Factura 33.</p>
+                          <p className={`text-[11px] ${T.textSub}`}>Presiona "+ Venta" o activa el Piloto Automático para emitir Boleta 39 o Factura 33.</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-200/40">
@@ -1777,7 +2347,7 @@
               </div>
             )}
 
-            {/* ================= VISTA 2: VENTAS ================= */}
+            {/* ================= VISTA 2: VENTAS (CON DEVOLUCIÓN Y REFACTURACIÓN NC 61 -> F33) ================= */}
             {vista === "ventas" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-8 space-y-4">
@@ -1809,33 +2379,59 @@
                     ) : (
                       <div className="divide-y divide-slate-200/40">
                         {ordenesVentasFiltradas.map((o) => (
-                          <div key={o.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                          <div key={o.id} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${o.anuladaPorNc61 ? "opacity-60" : ""}`}>
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className={`font-extrabold ${T.textMain}`}>{o.comprador}</span>
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${T.tag}`}>{o.canal}</span>
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
-                                  {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
-                                </span>
-                                {o.diaCerrado ? (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700">Día Cerrado ({o.fechaCierreDia})</span>
-                                ) : o.etiquetaImpresa ? (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Impresa Hoy</span>
+                                {o.timbradoSii ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
+                                    {o.tipoDte === 33 ? `Factura 33 #${o.folioSii}` : `Boleta 39 #${o.folioSii}`}
+                                  </span>
                                 ) : (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Por Imprimir</span>
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-400 text-slate-950">RUT Inválido</span>
+                                )}
+                                {o.anuladaPorNc61 && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-600 text-white">
+                                    Anulada NC 61 #{o.folioNc61Anulacion}
+                                  </span>
+                                )}
+                                {o.devolucionInfo && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-600 text-white">
+                                    Devuelto ({o.devolucionInfo.estadoFisico === "intacto" ? "Stock" : "Cuarentena"})
+                                  </span>
                                 )}
                               </div>
                               <p className={`mt-1 ${T.textSub}`}>
                                 {o.cantidad}x {o.productoNombre} • Total: <strong>${Number(o.totalClp || 0).toLocaleString("es-CL")}</strong> • {o.fecha}
                               </p>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <button onClick={() => setDteVisualizando(o)} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.btn}`}>
-                                Ver PDF
-                              </button>
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              {o.timbradoSii && (
+                                <button onClick={() => setDteVisualizando(o)} className={`px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.btn}`}>
+                                  PDF
+                                </button>
+                              )}
+                              {!o.anuladaPorNc61 && o.tipoDte === 39 && (
+                                <button
+                                  onClick={() => { setOrdenRefacturarModal(o); setNuevoRutCorregido(""); }}
+                                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}
+                                  title="Anular Boleta con NC 61 y emitir Factura 33"
+                                >
+                                  Pasar a Factura
+                                </button>
+                              )}
+                              {!o.devolucionInfo && o.timbradoSii && !o.anuladaPorNc61 && (
+                                <button
+                                  onClick={() => { setOrdenDevolucionModal(o); setEstadoFisicoDevolucion("intacto"); setEmitirNc61Devolucion(true); }}
+                                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-600 border border-amber-500/40 cursor-pointer"
+                                >
+                                  Devolución
+                                </button>
+                              )}
                               {o.esSimulacion !== false && !o.diaCerrado && (
-                                <button onClick={() => eliminarSimulacion(o)} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 text-white cursor-pointer">
-                                  Eliminar
+                                <button onClick={() => eliminarSimulacion(o)} className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-rose-600 text-white cursor-pointer">
+                                  ✕
                                 </button>
                               )}
                             </div>
@@ -2016,7 +2612,7 @@
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
                         <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas Impresas en la Jornada Actual ({facturasYaImpresasHoy.length})</h2>
-                        <p className={`text-xs ${T.textSub}`}>Ya fueron impresas hoy y salieron de la cola de lotes. Al terminar tu jornada presiona "Cerrar Día / Caja" para archivarlas.</p>
+                        <p className={`text-xs ${T.textSub}`}>Ya fueron impresas hoy y salieron de la cola de lotes. Al terminar tu jornada presiona "Cerrar Día / Caja".</p>
                       </div>
                       <button
                         onClick={() => setModalCierreCaja(true)}
@@ -2093,7 +2689,7 @@
                       <div>
                         <h2 className={`text-base font-extrabold ${T.textMain}`}>Archivo Histórico Infinito de Facturas y Boletas</h2>
                         <p className={`text-xs ${T.textSub}`}>
-                          Almacena para siempre todos los días cerrados, ordenados por <strong>número de folio (700, 701, 702...)</strong>. Filtra por folio o rango de fechas (Desde / Hasta) para revisar o imprimir en PDF.
+                          Almacena para siempre todos los días cerrados, ordenados por <strong>número de folio (700, 701, 702...)</strong>.
                         </p>
                       </div>
 
@@ -2110,40 +2706,17 @@
                         </div>
                         <div>
                           <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Fecha Desde</label>
-                          <input
-                            type="date"
-                            value={fechaDesdeArchivo}
-                            onChange={(e) => setFechaDesdeArchivo(e.target.value)}
-                            className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
-                          />
+                          <input type="date" value={fechaDesdeArchivo} onChange={(e) => setFechaDesdeArchivo(e.target.value)} className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none ${T.input}`} />
                         </div>
                         <div>
                           <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Fecha Hasta</label>
-                          <input
-                            type="date"
-                            value={fechaHastaArchivo}
-                            onChange={(e) => setFechaHastaArchivo(e.target.value)}
-                            className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
-                          />
+                          <input type="date" value={fechaHastaArchivo} onChange={(e) => setFechaHastaArchivo(e.target.value)} className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none ${T.input}`} />
                         </div>
                       </div>
-
-                      {(busquedaArchivo || fechaDesdeArchivo || fechaHastaArchivo) && (
-                        <div className="flex items-center justify-between text-xs">
-                          <span className={T.textSub}>Mostrando {archivoHistoricoFiltrado.length} documento(s) en orden numérico de folio</span>
-                          <button
-                            onClick={() => { setBusquedaArchivo(""); setFechaDesdeArchivo(""); setFechaHastaArchivo(""); setSeleccionArchivoIds([]); }}
-                            className="font-bold underline cursor-pointer"
-                          >
-                            Limpiar Filtros
-                          </button>
-                        </div>
-                      )}
 
                       {archivoHistoricoFiltrado.length === 0 ? (
                         <div className={`${T.cardMuted} rounded-xl p-8 text-center space-y-1`}>
                           <p className={`text-xs font-bold ${T.textMain}`}>No hay facturas archivadas en ese rango o búsqueda</p>
-                          <p className={`text-[11px] ${T.textSub}`}>Cuando presiones "Cerrar Día / Caja" al finalizar una jornada, todas las facturas del día se guardarán aquí para siempre.</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-200/40 max-h-[480px] overflow-y-auto">
@@ -2166,16 +2739,11 @@
                                       <span className={`text-[11px] font-semibold ${T.textSub}`}>Fecha: {o.fechaIso || o.fechaCierreDia}</span>
                                     </div>
                                     <p className={`text-xs truncate mt-0.5 ${T.textSub}`}>
-                                      {o.comprador} {o.rutComprador ? `(${o.rutComprador})` : ""} — {o.cantidad}x {o.productoNombre} • <strong>${Number(o.totalClp || 0).toLocaleString("es-CL")}</strong>
+                                      {o.comprador} — {o.cantidad}x {o.productoNombre} • <strong>${Number(o.totalClp || 0).toLocaleString("es-CL")}</strong>
                                     </p>
                                   </div>
                                 </div>
-
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); setDteVisualizando(o); }}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 cursor-pointer ${T.btnSec}`}
-                                >
+                                <button type="button" onClick={(e) => { e.stopPropagation(); setDteVisualizando(o); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 cursor-pointer ${T.btnSec}`}>
                                   Ver / PDF
                                 </button>
                               </div>
@@ -2190,11 +2758,7 @@
                         <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Bitácora de Cierres de Caja ({cierresDiarios.length})</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                           {cierresDiarios.slice(0, 12).map((c) => (
-                            <div
-                              key={c.id}
-                              onClick={() => { setFechaDesdeArchivo(c.fechaCierreDia); setFechaHastaArchivo(c.fechaCierreDia); }}
-                              className={`${T.cardMuted} p-3 rounded-xl text-xs cursor-pointer`}
-                            >
+                            <div key={c.id} onClick={() => { setFechaDesdeArchivo(c.fechaCierreDia); setFechaHastaArchivo(c.fechaCierreDia); }} className={`${T.cardMuted} p-3 rounded-xl text-xs cursor-pointer`}>
                               <p className={`font-extrabold ${T.textMain}`}>Cierre {c.fechaCierreDia}</p>
                               <p className={`text-[11px] ${T.textSub}`}>{c.cantidadDocumentos} docs • Folios #{c.folioDesde} al #{c.folioHasta}</p>
                               <p className={`text-xs font-extrabold mt-1 ${T.textMain}`}>${Number(c.totalClp || 0).toLocaleString("es-CL")}</p>
@@ -2208,7 +2772,7 @@
               </div>
             )}
 
-            {/* ================= VISTA 4: CATÁLOGO ================= */}
+            {/* ================= VISTA 4: CATÁLOGO (EDICIÓN PROTEGIDA + CUARENTENA) ================= */}
             {vista === "catalogo" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-8 space-y-4">
@@ -2239,7 +2803,7 @@
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
                         <h2 className={`text-base font-extrabold ${T.textMain}`}>Catálogo Maestro ({catalogo.length})</h2>
-                        <p className={`text-xs ${T.textSub}`}>Carga productos por Excel o manualmente (inician con stock 0 hasta importar inventario o factura SII).</p>
+                        <p className={`text-xs ${T.textSub}`}>Modificar stock, nombre o SKU exige <strong>Clave de Supervisor</strong> para proteger tu inventario.</p>
                       </div>
                       <div className="flex flex-wrap gap-2 shrink-0">
                         <button
@@ -2281,13 +2845,24 @@
                             <div key={p.id} className="py-3 flex items-center justify-between gap-2 text-xs">
                               <div className="min-w-0">
                                 <span className={`font-bold block truncate ${T.textMain}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
-                                {p.proveedor && <span className={`text-[11px] ${T.textSub}`}>{p.proveedor}</span>}
+                                <span className={`text-[11px] ${T.textSub}`}>
+                                  {p.proveedor || "Sin proveedor"} {p.ultimoCostoNeto > 0 ? `• Costo Neto: $${Number(p.ultimoCostoNeto).toLocaleString("es-CL")}` : ""}
+                                </span>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <span className={`font-extrabold px-2.5 py-1 rounded-lg ${T.tag}`}>{st} unds</span>
-                                <button onClick={() => empRef().collection("catalogo").doc(p.id).update({ stockOnline: Math.max(0, st - 1) })} className={`px-2 py-1 rounded-lg font-bold cursor-pointer ${T.btnSec}`}>-1</button>
-                                <button onClick={() => empRef().collection("catalogo").doc(p.id).update({ stockOnline: st + 1 })} className={`px-2 py-1 rounded-lg font-bold cursor-pointer ${T.btn}`}>+1</button>
-                                <button onClick={() => eliminarProductoCatalogo(p)} className="px-2 py-1 rounded-lg font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 cursor-pointer" title="Eliminar producto">
+                                <button
+                                  onClick={() => abrirEditorProducto(p)}
+                                  className={`px-3 py-1 rounded-lg font-bold cursor-pointer ${T.btnSec}`}
+                                  title="Editar nombre, SKU o stock (requiere Clave Supervisor)"
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  onClick={() => eliminarProductoCatalogo(p)}
+                                  className="px-2 py-1 rounded-lg font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 cursor-pointer"
+                                  title="Eliminar producto (requiere Clave Supervisor)"
+                                >
                                   ✕
                                 </button>
                               </div>
@@ -2300,16 +2875,29 @@
                 </div>
 
                 <div className="lg:col-span-4 space-y-4">
+                  {/* PANEL DE CUARENTENA / REVISIÓN TÉCNICA */}
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                    <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.textSub}`}>Ranking Más Vendidos</h3>
-                    {rankingProductosVendidos.length === 0 ? (
-                      <p className={`text-xs ${T.textSub}`}>Aún no hay ventas registradas.</p>
+                    <div className="flex items-center justify-between">
+                      <h3 className={`text-xs font-extrabold uppercase tracking-wider text-amber-500`}>
+                        Cuarentena / Devoluciones ({cuarentena.length})
+                      </h3>
+                    </div>
+                    {cuarentena.length === 0 ? (
+                      <p className={`text-xs ${T.textSub}`}>Sin productos en revisión técnica.</p>
                     ) : (
-                      <div className="space-y-2">
-                        {rankingProductosVendidos.slice(0, 8).map((r, i) => (
-                          <div key={i} className={`${T.cardMuted} p-3 rounded-xl flex items-center justify-between text-xs`}>
-                            <span className={`font-bold truncate pr-2 ${T.textMain}`}>{i + 1}. {r.nombre}</span>
-                            <span className={`font-extrabold shrink-0 ${T.textMain}`}>{r.unidades} unds</span>
+                      <div className="space-y-2.5">
+                        {cuarentena.map((q) => (
+                          <div key={q.id} className={`${T.cardMuted} p-3 rounded-xl text-xs space-y-1.5`}>
+                            <p className={`font-extrabold ${T.textMain}`}>{q.cantidad}x {q.nombre}</p>
+                            <p className={`text-[11px] ${T.textSub}`}>{q.canalOrigen} • {q.nota}</p>
+                            <div className="flex gap-1.5 pt-1">
+                              <button onClick={() => resolverItemCuarentena(q, "rehabilitar")} className="flex-1 bg-emerald-600 text-white font-bold py-1.5 rounded-lg text-[11px] cursor-pointer">
+                                Reingresar Stock
+                              </button>
+                              <button onClick={() => resolverItemCuarentena(q, "descartar")} className="px-2.5 bg-rose-600 text-white font-bold py-1.5 rounded-lg text-[11px] cursor-pointer">
+                                Descartar
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -2318,10 +2906,10 @@
 
                   {usaLectorComprasXml && (
                     <div className={`${T.card} rounded-2xl p-5 space-y-2.5`}>
-                      <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>Cargar Stock desde Factura XML</h3>
-                      <p className={`text-xs ${T.textSub}`}>Sube el archivo XML del proveedor para sumar stock al catálogo automáticamente.</p>
+                      <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>Cargar Stock desde Factura (XML o Foto)</h3>
+                      <p className={`text-xs ${T.textSub}`}>Sube un archivo XML del proveedor o ingresa manualmente desde una foto cuadrando el 19% de IVA.</p>
                       <button onClick={() => navegarAislado("compras-finanzas.html")} className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                        Abrir Lector XML SII →
+                        Abrir Carga de Facturas →
                       </button>
                     </div>
                   )}
@@ -2334,13 +2922,16 @@
               <div className="space-y-4">
                 <div className={`${T.card} rounded-2xl p-3 flex flex-wrap gap-2`}>
                   <button onClick={() => setSubTabConfig("apis")} className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabConfig === "apis" ? T.btn : T.btnSec}`}>
-                    Centro de Conexiones API & SII
+                    Conexiones API & SII
+                  </button>
+                  <button onClick={() => setSubTabConfig("seguridad")} className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabConfig === "seguridad" ? T.btn : T.btnSec}`}>
+                    Seguridad y Horarios Despacho
                   </button>
                   <button onClick={() => setSubTabConfig("personal")} className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabConfig === "personal" ? T.btn : T.btnSec}`}>
-                    Equipo y Personal ({equipo.length})
+                    Equipo ({equipo.length})
                   </button>
                   <button onClick={() => setSubTabConfig("apariencia")} className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabConfig === "apariencia" ? T.btn : T.btnSec}`}>
-                    Apariencia y Orden de Botones
+                    Apariencia y Botones
                   </button>
                 </div>
 
@@ -2421,6 +3012,79 @@
                   </form>
                 )}
 
+                {subTabConfig === "seguridad" && (
+                  <form onSubmit={guardarSeguridadYDespachos} className={`${T.card} rounded-2xl p-6 space-y-5 max-w-2xl`}>
+                    <div>
+                      <h2 className={`text-base font-extrabold ${T.textMain}`}>Seguridad de Supervisor y Horarios de Salida a Despacho</h2>
+                      <p className={`text-xs ${T.textSub}`}>
+                        Define cuántos despachos diarios salen (1, 2 o 3). Si un cliente ingresa mal su RUT, el sistema espera hasta 1 hora antes del próximo corte y luego emite Boleta 39 automáticamente.
+                      </p>
+                    </div>
+
+                    <div className={`${T.cardMuted} p-4 rounded-xl space-y-3`}>
+                      <label className={`text-xs font-extrabold block ${T.textMain}`}>Cantidad de Horarios de Despacho al Día</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[1, 2, 3].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => setDespachosConfig({ ...despachosConfig, cantidadHorarios: n })}
+                            className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${Number(despachosConfig.cantidadHorarios) === n ? T.btn : T.btnSec}`}
+                          >
+                            {n} {n === 1 ? "Horario" : "Horarios"}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        {Array.from({ length: Number(despachosConfig.cantidadHorarios || 2) }).map((_, idx) => (
+                          <div key={idx}>
+                            <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Salida Despacho #{idx + 1}</label>
+                            <input
+                              type="time"
+                              value={(despachosConfig.horarios || [])[idx] || "14:00"}
+                              onChange={(e) => {
+                                const copia = [...(despachosConfig.horarios || ["12:00", "16:30", "18:30"])];
+                                copia[idx] = e.target.value;
+                                setDespachosConfig({ ...despachosConfig, horarios: copia });
+                              }}
+                              className={`w-full rounded-xl px-3 py-2 text-xs font-extrabold ${T.input}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`${T.cardMuted} p-4 rounded-xl space-y-3`}>
+                      <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>Clave Privada de Supervisor</h3>
+                      <p className={`text-[11px] ${T.textSub}`}>
+                        Se exige para entrar al área de Supervisor (gráficas, utilidades e IVA) y para editar stock/productos. {!empresa.pinSupervisor && <strong>(Clave inicial actual: 1234)</strong>}
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input
+                          type="password"
+                          value={pinSupervisorActualInput}
+                          onChange={(e) => setPinSupervisorActualInput(e.target.value)}
+                          placeholder="Clave actual (requerida para guardar) *"
+                          className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
+                          required
+                        />
+                        <input
+                          type="password"
+                          value={pinSupervisorNuevoInput}
+                          onChange={(e) => setPinSupervisorNuevoInput(e.target.value)}
+                          placeholder="Nueva clave (opcional, mín 4 dígitos)"
+                          className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
+                        />
+                      </div>
+                    </div>
+
+                    <button type="submit" disabled={guardandoConfig} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                      {guardandoConfig ? "Guardando..." : "Guardar Horarios de Despacho y Seguridad"}
+                    </button>
+                  </form>
+                )}
+
                 {subTabConfig === "personal" && (
                   <div className={`${T.card} rounded-2xl p-6 space-y-4`}>
                     <div>
@@ -2441,12 +3105,7 @@
                             <p className={`text-sm font-extrabold ${T.textMain}`}>{m.nombre}</p>
                             <span className={`text-[11px] ${T.textSub}`}>{m.rol}</span>
                           </div>
-                          <button
-                            onClick={async () => {
-                              await empRef().update({ equipo: equipo.filter((x) => x.id !== m.id) });
-                            }}
-                            className="text-xs font-bold text-rose-500 cursor-pointer"
-                          >
+                          <button onClick={async () => { await empRef().update({ equipo: equipo.filter((x) => x.id !== m.id) }); }} className="text-xs font-bold text-rose-500 cursor-pointer">
                             Quitar
                           </button>
                         </div>
@@ -2460,7 +3119,7 @@
                     <div className={`${T.card} rounded-2xl p-6 space-y-4`}>
                       <div>
                         <h2 className={`text-base font-extrabold ${T.textMain}`}>Tema Visual de tu Plataforma</h2>
-                        <p className={`text-xs ${T.textSub}`}>Elige entre modo claro, ejecutivo, operaciones o modo oscuro. Se guarda exclusivamente para tu empresa.</p>
+                        <p className={`text-xs ${T.textSub}`}>Elige entre modo claro, ejecutivo, operaciones o modo oscuro.</p>
                       </div>
                       <div className="space-y-2.5">
                         {Object.entries(TEMAS_DISPONIBLES).map(([id, info]) => {
@@ -2496,22 +3155,8 @@
                           <div key={item.id} className={`${T.cardMuted} p-3.5 rounded-xl flex items-center justify-between`}>
                             <span className={`text-xs font-extrabold ${T.textMain}`}>{idx + 1}. {item.label}</span>
                             <div className="flex gap-1.5">
-                              <button
-                                type="button"
-                                disabled={idx === 0}
-                                onClick={() => moverOrdenMenu(idx, -1)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer disabled:opacity-30 ${T.btnSec}`}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                disabled={idx === menuOrdenado.length - 1}
-                                onClick={() => moverOrdenMenu(idx, 1)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer disabled:opacity-30 ${T.btnSec}`}
-                              >
-                                ↓
-                              </button>
+                              <button type="button" disabled={idx === 0} onClick={() => moverOrdenMenu(idx, -1)} className={`px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer disabled:opacity-30 ${T.btnSec}`}>↑</button>
+                              <button type="button" disabled={idx === menuOrdenado.length - 1} onClick={() => moverOrdenMenu(idx, 1)} className={`px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer disabled:opacity-30 ${T.btnSec}`}>↓</button>
                             </div>
                           </div>
                         ))}
