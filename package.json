@@ -1,0 +1,15 @@
+{
+  "name": "nexus-erp-vercel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NEXUS ERP Multi-Tenant Backend (SII Universal + Marketplaces Chile)",
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "fast-xml-parser": "^4.4.1",
+    "firebase-admin": "^12.5.0"
+  }
+}
