@@ -188,9 +188,19 @@
       return dv === dvCalc;
     };
 
+    const CAF_DEFAULT = {
+      boleta39Actual: 1,
+      boleta39Limite: 5000,
+      factura33Actual: 1,
+      factura33Limite: 5000,
+      nc61Actual: 1
+    };
+
     // CALCULA PRÓXIMO HORARIO DE DESPACHO DONDE AÚN QUEDE MARGEN ANTES DE LA HORA LÍMITE (-1H)
     const calcularProximoCorteDespacho = (horariosArr, ahoraTs = Date.now()) => {
-      const lista = (Array.isArray(horariosArr) ? horariosArr : ["14:00"]).filter(Boolean).sort();
+      const lista = (Array.isArray(horariosArr) ? horariosArr : ["14:00"])
+        .filter((x) => /^\d{2}:\d{2}$/.test(String(x || "")))
+        .sort();
       if (lista.length === 0) return { salida: "14:00", limite: "13:00", esManana: false, limiteTs: ahoraTs + 3600000 };
 
       const horaActualStr = horaCortaChile(ahoraTs);
@@ -690,19 +700,14 @@
         direccion: "MERCED 838 A INT OF 117",
         comuna: "Santiago"
       });
-      const [cafConfig, setCafConfig] = useState({
-        boleta39Actual: 1,
-        boleta39Limite: 5000,
-        factura33Actual: 1,
-        factura33Limite: 5000,
-        nc61Actual: 1
-      });
+      const [cafConfig, setCafConfig] = useState(CAF_DEFAULT);
       const [despachosConfig, setDespachosConfig] = useState({
         cantidadHorarios: 2,
         horarios: ["12:00", "16:30", "18:30"]
       });
       const [pinSupervisorActualInput, setPinSupervisorActualInput] = useState("");
       const [pinSupervisorNuevoInput, setPinSupervisorNuevoInput] = useState("");
+      const [pinSupervisorConfirmInput, setPinSupervisorConfirmInput] = useState("");
 
       const [ayudaApiModal, setAyudaApiModal] = useState(null);
       const [guardandoConfig, setGuardandoConfig] = useState(false);
@@ -730,17 +735,6 @@
         const timer = setInterval(() => setAhoraTick(Date.now()), 30000);
         return () => clearInterval(timer);
       }, []);
-
-      // Limpieza automática de cola de impresión tras cerrar el diálogo de imprimir
-      useEffect(() => {
-        const handleAfterPrint = () => {
-          if (!confirmarImpresionLote) {
-            setModoImpresion(null);
-          }
-        };
-        window.addEventListener("afterprint", handleAfterPrint);
-        return () => window.removeEventListener("afterprint", handleAfterPrint);
-      }, [confirmarImpresionLote]);
 
       useEffect(() => {
         if (!rutActivo) {
@@ -842,7 +836,8 @@
       };
 
       const navegarAislado = (destinoUrl) => {
-        if (!destinoUrl || destinoUrl === "pgb-operacion.html" || destinoUrl === "pgb-backup.html") {
+        const PERMITIDAS = ["compras-finanzas.html", "supervisor-bi.html"];
+        if (!PERMITIDAS.includes(destinoUrl)) {
           window.location.replace("index.html");
           return;
         }
@@ -855,6 +850,11 @@
       const usaColaLider = Boolean(mods.m11_colas_print);
       const usaLectorComprasXml = Boolean(mods.m17_compras_prov);
 
+      // Siempre usa los datos del emisor confirmados en Firestore al imprimir DTEs
+      const datosEmisorImpresion = useMemo(() => {
+        return empresa?.datosEmisor ? { ...datosEmisor, ...empresa.datosEmisor } : datosEmisor;
+      }, [empresa?.datosEmisor, datosEmisor]);
+
       const horariosActivosDespacho = useMemo(() => {
         const fuente = empresa?.despachosConfig || despachosConfig;
         const cant = Math.max(1, Math.min(3, Number(fuente.cantidadHorarios || 2)));
@@ -863,6 +863,7 @@
 
       const proximoCorte = useMemo(() => calcularProximoCorteDespacho(horariosActivosDespacho, ahoraTick), [horariosActivosDespacho, ahoraTick]);
 
+      // Solo muestra accesos multi-tenant reales y auditados (cero fugas a PGB ni enlaces 404)
       const areasHabilitadasPorSwitch = useMemo(() => {
         const lista = [];
         if (mods.m17_compras_prov || mods.m18_finanzas_bi) {
@@ -870,31 +871,23 @@
             id: "compras",
             titulo: "Cargar Factura (XML / Foto / Manual)",
             desc: "Audita IVA 19%, costos y suma stock al catálogo",
-            url: "compras-finanzas.html"
+            accion: () => navegarAislado("compras-finanzas.html")
           });
         }
-        if (mods.m5_inv_general || mods.m6_conteo_ciclico || mods.m7_auditoria_inv) {
+        if (mods.m18_finanzas_bi) {
           lista.push({
-            id: "inventario",
-            titulo: "Toma de Inventario Físico",
-            desc: "Conteo por proveedor y planillas PDF",
-            url: "pgb-inventario.html"
+            id: "supervisor",
+            titulo: "Panel Gerencial & Utilidad Neta (Supervisor)",
+            desc: "Gráficas comparativas por canal, Balance IVA F29 y auditoría",
+            accion: () => navegarAislado("supervisor-bi.html")
           });
         }
-        if (mods.m12_ruta_inc || mods.m13_retornos_merma || mods.m14_analitica_err) {
+        if (mods.m3_catalogo || mods.m5_inv_general || mods.m6_conteo_ciclico || mods.m7_auditoria_inv) {
           lista.push({
-            id: "logistica",
-            titulo: "Logística, Rutas y Trazabilidad",
-            desc: "Control de despacho y movimientos",
-            url: "logistica-rutas.html"
-          });
-        }
-        if (mods.m15_pos_ventas || mods.m16_caja_cobros) {
-          lista.push({
-            id: "pos",
-            titulo: "Punto de Venta (POS) y Caja",
-            desc: "Ventas de mesón y cuentas por cobrar",
-            url: "ventas-pos.html"
+            id: "inventario_interno",
+            titulo: "Control de Catálogo, Stock y Cuarentena",
+            desc: "Existencias online, edición supervisada y devoluciones",
+            accion: () => setVista("catalogo")
           });
         }
         return lista;
@@ -960,89 +953,108 @@
         setVendedorSeleccionado("");
       };
 
-      // ================= REGISTRO DE VENTA CON BLOQUEO ANTI-DOBLE CLIC + VALIDADOR RUT + STOCK ATÓMICO =================
+      // ================= REGISTRO DE VENTA ATÓMICO (RUNTRANSACTION: FOLIO + STOCK + COSTO INMUTABLE) =================
       const registrarOrdenOmnicanal = async (e) => {
         e.preventDefault();
         await ejecutarConBloqueo(async () => {
-          const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
+          const prodLocal = catalogo.find((p) => p.id === skuSeleccionado) || {
             id: "manual",
             codigo: "SKU-001",
             nombre: skuSeleccionado || "Venta",
-            stockOnline: 0
+            stockOnline: 0,
+            ultimoCostoNeto: 0
           };
 
           const rutIngresado = rutCompradorNuevo.trim();
           const pidioFactura = rutIngresado.length > 0;
           const rutValido = pidioFactura ? validarRutChileno(rutIngresado) : false;
           const esRutInvalido = pidioFactura && !rutValido;
-
           const esFactura33 = pidioFactura && rutValido;
-          const tipoDte = esRutInvalido ? 0 : (esFactura33 ? 33 : 39);
-          const folioAsignado = esRutInvalido ? 0 : (esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual);
           const esLider = canalNuevo === "Lider";
           const esRealSii = Boolean(estadoConexiones.sii);
+          const cantFinal = Math.max(1, Number(cantidadNueva));
+          const totalFinal = Math.max(1, Number(totalNuevo));
           const ahora = Date.now();
           const corteActual = calcularProximoCorteDespacho(horariosActivosDespacho, ahora);
 
-          const nuevaOrden = {
-            canal: canalNuevo,
-            ordenExterna: `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
-            comprador: compradorNuevo.trim() || "Cliente Marketplace",
-            rutComprador: pidioFactura ? (rutValido ? formatearRut(rutIngresado) : rutIngresado) : "",
-            estadoRut: esRutInvalido ? "invalido_esperando" : "ok",
-            mensajeRutEnviado: esRutInvalido
-              ? `Hola ${compradorNuevo.trim() || "cliente"}, el RUT ingresado (${rutIngresado}) no es válido en el SII. Por favor envíanos tu RUT correcto antes de las ${corteActual.limite} hrs (1h antes del despacho de las ${corteActual.salida} hrs) para emitir tu Factura; de lo contrario emitiremos Boleta para no retrasar tu envío.`
-              : "",
-            limiteDespachoHora: esRutInvalido ? corteActual.limite : "",
-            limiteDespachoTs: esRutInvalido ? corteActual.limiteTs : 0,
-            salidaDespachoHora: esRutInvalido ? corteActual.salida : "",
-            direccionCliente: "Santiago",
-            productoId: prodObj.id,
-            codigoSku: prodObj.codigo || "S/C",
-            productoNombre: prodObj.nombre,
-            cantidad: Math.max(1, Number(cantidadNueva)),
-            totalClp: Math.max(1, Number(totalNuevo)),
-            vendedor: vendedorSeleccionado || "Canal Automático",
-            tipoDte,
-            folioSii: folioAsignado,
-            timbradoSii: !esRutInvalido,
-            enviadoMarketplace: !esRutInvalido && !esLider && canalNuevo !== "Venta Directa",
-            esSimulacion: !esRealSii,
-            colaImpresion: esLider ? "lider" : "general",
-            etiquetaImpresa: false,
-            diaCerrado: false,
-            anuladaPorNc61: false,
-            devolucionInfo: null,
-            fechaIso: fechaIsoChile(ahora),
-            horaCorta: horaCortaChile(ahora),
-            fecha: fechaLegibleChile(ahora),
-            timestamp: ahora
-          };
+          const empDocRef = empRef();
+          const prodDocRef = prodLocal.id && prodLocal.id !== "manual"
+            ? empDocRef.collection("catalogo").doc(prodLocal.id)
+            : null;
+          const nuevaOrdenRef = empDocRef.collection("ecommerce_ordenes").doc();
 
-          const batch = db.batch();
-          batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaOrden);
+          await db.runTransaction(async (tx) => {
+            const empSnap = await tx.get(empDocRef);
+            const prodSnap = prodDocRef ? await tx.get(prodDocRef) : null;
 
-          if (prodObj.id && prodObj.id !== "manual") {
-            batch.update(empRef().collection("catalogo").doc(prodObj.id), {
-              stockOnline: FieldValue.increment(-Math.max(1, Number(cantidadNueva)))
-            });
-          }
+            const cafActual = { ...CAF_DEFAULT, ...(empSnap.data()?.cafConfig || {}) };
+            const tipoDte = esRutInvalido ? 0 : (esFactura33 ? 33 : 39);
+            const folioAsignado = esRutInvalido ? 0 : (esFactura33 ? Number(cafActual.factura33Actual) : Number(cafActual.boleta39Actual));
 
-          if (!esRutInvalido) {
-            batch.set(
-              empRef(),
-              {
-                cafConfig: {
-                  ...cafConfig,
-                  factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
-                  boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
-                }
-              },
-              { merge: true }
-            );
-          }
+            const prodData = prodSnap && prodSnap.exists ? prodSnap.data() : prodLocal;
+            const costoSnapshotNeto = Math.max(0, Number(prodData?.ultimoCostoNeto || 0));
 
-          await batch.commit();
+            const nuevaOrden = {
+              canal: canalNuevo,
+              ordenExterna: `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
+              comprador: compradorNuevo.trim() || "Cliente Marketplace",
+              rutComprador: pidioFactura ? (rutValido ? formatearRut(rutIngresado) : rutIngresado) : "",
+              estadoRut: esRutInvalido ? "invalido_esperando" : "ok",
+              mensajeRutEnviado: esRutInvalido
+                ? `Hola ${compradorNuevo.trim() || "cliente"}, el RUT ingresado (${rutIngresado}) no es válido en el SII. Por favor envíanos tu RUT correcto antes de las ${corteActual.limite} hrs (1h antes del despacho de las ${corteActual.salida} hrs) para emitir tu Factura; de lo contrario emitiremos Boleta para no retrasar tu envío.`
+                : "",
+              limiteDespachoHora: esRutInvalido ? corteActual.limite : "",
+              limiteDespachoTs: esRutInvalido ? corteActual.limiteTs : 0,
+              salidaDespachoHora: esRutInvalido ? corteActual.salida : "",
+              direccionCliente: "Santiago",
+              productoId: prodLocal.id,
+              codigoSku: prodData?.codigo || prodLocal.codigo || "S/C",
+              productoNombre: prodData?.nombre || prodLocal.nombre,
+              costoUnitarioNeto: costoSnapshotNeto,
+              cantidad: cantFinal,
+              totalClp: totalFinal,
+              vendedor: vendedorSeleccionado || "Canal Automático",
+              tipoDte,
+              folioSii: folioAsignado,
+              timbradoSii: !esRutInvalido,
+              enviadoMarketplace: !esRutInvalido && !esLider && canalNuevo !== "Venta Directa",
+              esSimulacion: !esRealSii,
+              colaImpresion: esLider ? "lider" : "general",
+              etiquetaImpresa: false,
+              fechaImpresion: "",
+              fechaImpresionTs: 0,
+              diaCerrado: false,
+              anuladaPorNc61: false,
+              devolucionInfo: null,
+              fechaIso: fechaIsoChile(ahora),
+              horaCorta: horaCortaChile(ahora),
+              fecha: fechaLegibleChile(ahora),
+              timestamp: ahora
+            };
+
+            tx.set(nuevaOrdenRef, nuevaOrden);
+
+            if (prodDocRef && prodSnap && prodSnap.exists) {
+              tx.update(prodDocRef, {
+                stockOnline: FieldValue.increment(-cantFinal)
+              });
+            }
+
+            if (!esRutInvalido) {
+              tx.set(
+                empDocRef,
+                {
+                  cafConfig: {
+                    ...cafActual,
+                    factura33Actual: esFactura33 ? Number(cafActual.factura33Actual) + 1 : Number(cafActual.factura33Actual),
+                    boleta39Actual: !esFactura33 ? Number(cafActual.boleta39Actual) + 1 : Number(cafActual.boleta39Actual)
+                  }
+                },
+                { merge: true }
+              );
+            }
+          });
+
           cerrarYLimpiarModalVenta();
 
           if (esRutInvalido) {
@@ -1054,25 +1066,40 @@
         });
       };
 
-      // ================= FLUJO 1: VENCE PLAZO (1H ANTES DESPACHO) -> EMITE BOLETA 39 =================
+      // ================= FLUJO 1: VENCE PLAZO (1H ANTES DESPACHO) -> BOLETA 39 ATÓMICA =================
       const emitirBoletaPorPlazoVencido = async (orden) => {
         await ejecutarConBloqueo(async () => {
-          const folioBoleta = cafConfig.boleta39Actual;
-          const batch = db.batch();
-          batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
-            estadoRut: "boleta_por_plazo",
-            tipoDte: 39,
-            folioSii: folioBoleta,
-            timbradoSii: true,
-            enviadoMarketplace: orden.canal !== "Lider" && orden.canal !== "Venta Directa"
+          const empDocRef = empRef();
+          const ordDocRef = empDocRef.collection("ecommerce_ordenes").doc(orden.id);
+
+          const folioEmitido = await db.runTransaction(async (tx) => {
+            const empSnap = await tx.get(empDocRef);
+            const ordSnap = await tx.get(ordDocRef);
+            if (!ordSnap.exists) throw new Error("La orden ya no existe.");
+            const ordData = ordSnap.data();
+            if (ordData.timbradoSii || ordData.estadoRut !== "invalido_esperando") {
+              throw new Error("Esta orden ya fue emitida o procesada desde otro dispositivo.");
+            }
+
+            const cafActual = { ...CAF_DEFAULT, ...(empSnap.data()?.cafConfig || {}) };
+            const folioBoleta = Number(cafActual.boleta39Actual);
+
+            tx.update(ordDocRef, {
+              estadoRut: "boleta_por_plazo",
+              tipoDte: 39,
+              folioSii: folioBoleta,
+              timbradoSii: true,
+              enviadoMarketplace: ordData.canal !== "Lider" && ordData.canal !== "Venta Directa"
+            });
+            tx.set(empDocRef, { cafConfig: { ...cafActual, boleta39Actual: folioBoleta + 1 } }, { merge: true });
+            return folioBoleta;
           });
-          batch.set(empRef(), { cafConfig: { ...cafConfig, boleta39Actual: folioBoleta + 1 } }, { merge: true });
-          await batch.commit();
-          alert(`Boleta 39 N° ${folioBoleta} emitida para despachar a tiempo. Si el cliente responde después con su RUT, podrás anular con NC 61 y emitir Factura 33 en 1 clic.`);
+
+          alert(`Boleta 39 N° ${folioEmitido} emitida para despachar a tiempo. Si el cliente responde después con su RUT, podrás anular con NC 61 y emitir Factura 33 en 1 clic.`);
         });
       };
 
-      // ================= FLUJO 2: CLIENTE CORRIGE RUT -> NC 61 + FACTURA 33 (EXIGE PIN SI EMITE NC 61) =================
+      // ================= FLUJO 2: CLIENTE CORRIGE RUT -> NC 61 + FACTURA 33 ATÓMICA =================
       const ejecutarCorreccionRutYRefactura = async (e) => {
         e.preventDefault();
         if (!ordenRefacturarModal) return;
@@ -1080,8 +1107,8 @@
           return alert("El RUT ingresado sigue siendo inválido según el algoritmo del SII (Módulo 11).");
         }
 
-        const yaTeniaBoleta = ordenRefacturarModal.tipoDte === 39 && ordenRefacturarModal.timbradoSii;
-        if (yaTeniaBoleta) {
+        const yaTeniaBoletaEsperado = ordenRefacturarModal.tipoDte === 39 && ordenRefacturarModal.timbradoSii;
+        if (yaTeniaBoletaEsperado) {
           const okPin = await verificarClaveSupervisor(pinRefactura, empresa);
           if (!okPin) {
             return alert("Clave de Supervisor incorrecta. Anular con Nota de Crédito 61 requiere autorización.");
@@ -1090,85 +1117,108 @@
 
         await ejecutarConBloqueo(async () => {
           const rutFormateado = formatearRut(nuevoRutCorregido);
-          const { id: ordenIdOriginal, ...ordenSinId } = ordenRefacturarModal;
-          const folioFactura = cafConfig.factura33Actual;
-          const folioNc61 = cafConfig.nc61Actual || 1;
+          const empDocRef = empRef();
+          const ordDocRef = empDocRef.collection("ecommerce_ordenes").doc(ordenRefacturarModal.id);
           const ahora = Date.now();
           const fechaLegible = fechaLegibleChile(ahora);
 
-          const batch = db.batch();
+          const resultado = await db.runTransaction(async (tx) => {
+            const empSnap = await tx.get(empDocRef);
+            const ordSnap = await tx.get(ordDocRef);
+            if (!ordSnap.exists) throw new Error("La orden original ya no existe.");
 
-          if (yaTeniaBoleta) {
-            batch.update(empRef().collection("ecommerce_ordenes").doc(ordenIdOriginal), {
-              anuladaPorNc61: true,
-              folioNc61Anulacion: folioNc61,
-              estadoRut: "anulada_y_refacturada"
-            });
+            const ordData = ordSnap.data();
+            if (ordData.anuladaPorNc61 || ordData.devolucionInfo) {
+              throw new Error("Esta orden ya fue anulada o devuelta previamente.");
+            }
 
-            const nuevaFacturaObj = {
-              ...ordenSinId,
-              rutComprador: rutFormateado,
-              estadoRut: "corregido_ok",
-              tipoDte: 33,
-              folioSii: folioFactura,
-              timbradoSii: true,
-              anuladaPorNc61: false,
-              folioNc61Anulacion: null,
-              refBoletaAnulada: ordenSinId.folioSii || 0,
-              refNc61: folioNc61,
-              etiquetaImpresa: false,
-              diaCerrado: false,
-              fechaCierreDia: "",
-              cierreId: "",
-              enviadoMarketplace: ordenSinId.canal !== "Lider" && ordenSinId.canal !== "Venta Directa",
-              fechaIso: fechaIsoChile(ahora),
-              horaCorta: horaCortaChile(ahora),
-              fecha: fechaLegible,
-              timestamp: ahora
-            };
+            const cafActual = { ...CAF_DEFAULT, ...(empSnap.data()?.cafConfig || {}) };
+            const yaTeniaBoleta = ordData.tipoDte === 39 && Boolean(ordData.timbradoSii);
+            const folioFactura = Number(cafActual.factura33Actual);
+            const folioNc61 = Number(cafActual.nc61Actual || 1);
 
-            batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaFacturaObj);
-            batch.set(empRef(), {
-              cafConfig: {
-                ...cafConfig,
-                factura33Actual: folioFactura + 1,
-                nc61Actual: folioNc61 + 1
+            if (yaTeniaBoleta) {
+              tx.update(ordDocRef, {
+                anuladaPorNc61: true,
+                folioNc61Anulacion: folioNc61,
+                estadoRut: "anulada_y_refacturada"
+              });
+
+              const nuevaFacturaObj = {
+                ...ordData,
+                rutComprador: rutFormateado,
+                estadoRut: "corregido_ok",
+                tipoDte: 33,
+                folioSii: folioFactura,
+                timbradoSii: true,
+                anuladaPorNc61: false,
+                folioNc61Anulacion: null,
+                devolucionInfo: null,
+                refBoletaAnulada: ordData.folioSii || 0,
+                refOrdenOrigenId: ordSnap.id,
+                refNc61: folioNc61,
+                etiquetaImpresa: false,
+                fechaImpresion: "",
+                fechaImpresionTs: 0,
+                diaCerrado: false,
+                fechaCierreDia: "",
+                cierreId: "",
+                enviadoMarketplace: ordData.canal !== "Lider" && ordData.canal !== "Venta Directa",
+                fechaIso: fechaIsoChile(ahora),
+                horaCorta: horaCortaChile(ahora),
+                fecha: fechaLegible,
+                timestamp: ahora
+              };
+
+              tx.set(empDocRef.collection("ecommerce_ordenes").doc(), nuevaFacturaObj);
+              tx.set(empDocRef, {
+                cafConfig: {
+                  ...cafActual,
+                  factura33Actual: folioFactura + 1,
+                  nc61Actual: folioNc61 + 1
+                }
+              }, { merge: true });
+
+              tx.set(empDocRef.collection("auditoria_inventario").doc(), {
+                producto: `REFACTURACIÓN NC 61 #${folioNc61} → FACTURA #${folioFactura}`,
+                detalle: `Boleta #${ordData.folioSii} anulada y refacturada a ${ordData.comprador} (${rutFormateado})`,
+                fecha: fechaLegible,
+                timestamp: ahora
+              });
+
+              return { yaTeniaBoleta: true, folioFactura, folioNc61, folioBoletaAnt: ordData.folioSii };
+            } else {
+              if (ordData.estadoRut !== "invalido_esperando") {
+                throw new Error("Esta orden ya fue emitida desde otro dispositivo.");
               }
-            }, { merge: true });
+              tx.update(ordDocRef, {
+                rutComprador: rutFormateado,
+                estadoRut: "corregido_ok",
+                tipoDte: 33,
+                folioSii: folioFactura,
+                timbradoSii: true,
+                enviadoMarketplace: ordData.canal !== "Lider" && ordData.canal !== "Venta Directa"
+              });
+              tx.set(empDocRef, {
+                cafConfig: { ...cafActual, factura33Actual: folioFactura + 1 }
+              }, { merge: true });
 
-            batch.set(empRef().collection("auditoria_inventario").doc(), {
-              producto: `REFACTURACIÓN NC 61 #${folioNc61} → FACTURA #${folioFactura}`,
-              detalle: `Boleta #${ordenSinId.folioSii} anulada y refacturada a ${ordenSinId.comprador} (${rutFormateado})`,
-              fecha: fechaLegible,
-              timestamp: ahora
-            });
-          } else {
-            batch.update(empRef().collection("ecommerce_ordenes").doc(ordenIdOriginal), {
-              rutComprador: rutFormateado,
-              estadoRut: "corregido_ok",
-              tipoDte: 33,
-              folioSii: folioFactura,
-              timbradoSii: true,
-              enviadoMarketplace: ordenSinId.canal !== "Lider" && ordenSinId.canal !== "Venta Directa"
-            });
-            batch.set(empRef(), {
-              cafConfig: { ...cafConfig, factura33Actual: folioFactura + 1 }
-            }, { merge: true });
-          }
+              return { yaTeniaBoleta: false, folioFactura };
+            }
+          });
 
-          await batch.commit();
           setOrdenRefacturarModal(null);
           setNuevoRutCorregido("");
           setPinRefactura("");
           alert(
-            yaTeniaBoleta
-              ? `Cadena tributaria completada:\n1. Nota de Crédito 61 N° ${folioNc61} emitida anulando Boleta #${ordenSinId.folioSii}.\n2. Factura 33 N° ${folioFactura} emitida al RUT ${rutFormateado}.`
-              : `RUT validado (${rutFormateado}). Factura 33 N° ${folioFactura} emitida y lista para despacho.`
+            resultado.yaTeniaBoleta
+              ? `Cadena tributaria completada:\n1. Nota de Crédito 61 N° ${resultado.folioNc61} emitida anulando Boleta #${resultado.folioBoletaAnt}.\n2. Factura 33 N° ${resultado.folioFactura} emitida al RUT ${rutFormateado}.`
+              : `RUT validado (${rutFormateado}). Factura 33 N° ${resultado.folioFactura} emitida y lista para despacho.`
           );
         });
       };
 
-      // ================= FLUJO DEVOLUCIONES Y CUARENTENA (EXIGE CLAVE SUPERVISOR + ANTI-DOBLE CLIC) =================
+      // ================= FLUJO DEVOLUCIONES Y CUARENTENA ATÓMICO (RUNTRANSACTION + PIN SUPERVISOR) =================
       const procesarDevolucionOrden = async (e) => {
         e.preventDefault();
         if (!ordenDevolucionModal) return;
@@ -1180,56 +1230,73 @@
 
         await ejecutarConBloqueo(async () => {
           const orden = ordenDevolucionModal;
-          const folioNc61 = cafConfig.nc61Actual || 1;
+          const empDocRef = empRef();
+          const ordDocRef = empDocRef.collection("ecommerce_ordenes").doc(orden.id);
+          const prodMatch = catalogo.find((p) => p.id === orden.productoId) || catalogo.find((p) => p.nombre === orden.productoNombre);
+          const prodDocRef = prodMatch ? empDocRef.collection("catalogo").doc(prodMatch.id) : null;
           const ahora = Date.now();
           const fechaLegible = fechaLegibleChile(ahora);
-          const batch = db.batch();
 
-          batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
-            anuladaPorNc61: Boolean(emitirNc61Devolucion),
-            folioNc61Anulacion: emitirNc61Devolucion ? folioNc61 : null,
-            devolucionInfo: {
-              estadoFisico: estadoFisicoDevolucion,
-              nc61Emitida: Boolean(emitirNc61Devolucion),
-              folioNc61: emitirNc61Devolucion ? folioNc61 : null,
-              nota: notaDevolucion.trim(),
-              fecha: fechaLegible
+          await db.runTransaction(async (tx) => {
+            const empSnap = await tx.get(empDocRef);
+            const ordSnap = await tx.get(ordDocRef);
+            const prodSnap = (estadoFisicoDevolucion === "intacto" && prodDocRef) ? await tx.get(prodDocRef) : null;
+
+            if (!ordSnap.exists) throw new Error("La orden ya no existe.");
+            const ordData = ordSnap.data();
+            if (ordData.devolucionInfo || ordData.anuladaPorNc61) {
+              throw new Error("Esta orden ya registró una devolución o anulación previa.");
             }
-          });
 
-          if (emitirNc61Devolucion) {
-            batch.set(empRef(), { cafConfig: { ...cafConfig, nc61Actual: folioNc61 + 1 } }, { merge: true });
-          }
+            const cafActual = { ...CAF_DEFAULT, ...(empSnap.data()?.cafConfig || {}) };
+            const folioNc61 = Number(cafActual.nc61Actual || 1);
+            const cantDev = Math.max(1, Number(ordData.cantidad || 1));
 
-          if (estadoFisicoDevolucion === "intacto") {
-            const prod = catalogo.find((p) => p.id === orden.productoId) || catalogo.find((p) => p.nombre === orden.productoNombre);
-            if (prod) {
-              batch.update(empRef().collection("catalogo").doc(prod.id), {
-                stockOnline: FieldValue.increment(Math.max(1, Number(orden.cantidad || 1)))
+            tx.update(ordDocRef, {
+              anuladaPorNc61: Boolean(emitirNc61Devolucion),
+              folioNc61Anulacion: emitirNc61Devolucion ? folioNc61 : null,
+              devolucionInfo: {
+                estadoFisico: estadoFisicoDevolucion,
+                nc61Emitida: Boolean(emitirNc61Devolucion),
+                folioNc61: emitirNc61Devolucion ? folioNc61 : null,
+                nota: notaDevolucion.trim(),
+                fecha: fechaLegible
+              }
+            });
+
+            if (emitirNc61Devolucion) {
+              tx.set(empDocRef, { cafConfig: { ...cafActual, nc61Actual: folioNc61 + 1 } }, { merge: true });
+            }
+
+            if (estadoFisicoDevolucion === "intacto") {
+              if (prodDocRef && prodSnap && prodSnap.exists) {
+                tx.update(prodDocRef, {
+                  stockOnline: FieldValue.increment(cantDev)
+                });
+              }
+            } else {
+              tx.set(empDocRef.collection("cuarentena_productos").doc(), {
+                ordenOrigenId: ordSnap.id,
+                productoId: ordData.productoId || "",
+                codigo: ordData.codigoSku || "",
+                nombre: ordData.productoNombre,
+                cantidad: cantDev,
+                canalOrigen: ordData.canal,
+                folioOrigen: ordData.folioSii || "S/N",
+                nota: notaDevolucion.trim() || "Devuelto abierto / requiere revisión",
+                fecha: fechaLegible,
+                timestamp: ahora
               });
             }
-          } else {
-            batch.set(empRef().collection("cuarentena_productos").doc(), {
-              productoId: orden.productoId || "",
-              codigo: orden.codigoSku || "",
-              nombre: orden.productoNombre,
-              cantidad: Math.max(1, Number(orden.cantidad || 1)),
-              canalOrigen: orden.canal,
-              folioOrigen: orden.folioSii || "S/N",
-              nota: notaDevolucion.trim() || "Devuelto abierto / requiere revisión",
+
+            tx.set(empDocRef.collection("auditoria_inventario").doc(), {
+              producto: ordData.productoNombre,
+              detalle: `Devolución autorizada (${cantDev}x • ${estadoFisicoDevolucion === "intacto" ? "Reingreso a stock" : "A Cuarentena"})${emitirNc61Devolucion ? ` • NC 61 #${folioNc61}` : ""} • Orden ${ordData.canal}`,
               fecha: fechaLegible,
               timestamp: ahora
             });
-          }
-
-          batch.set(empRef().collection("auditoria_inventario").doc(), {
-            producto: orden.productoNombre,
-            detalle: `Devolución autorizada (${orden.cantidad}x • ${estadoFisicoDevolucion === "intacto" ? "Reingreso a stock" : "A Cuarentena"})${emitirNc61Devolucion ? ` • NC 61 #${folioNc61}` : ""} • Orden ${orden.canal}`,
-            fecha: fechaLegible,
-            timestamp: ahora
           });
 
-          await batch.commit();
           setOrdenDevolucionModal(null);
           setNotaDevolucion("");
           setPinDevolucion("");
@@ -1246,28 +1313,33 @@
           accion === "rehabilitar" ? "Rehabilitar desde Cuarentena" : "Descartar Producto de Cuarentena",
           `${item.cantidad}x ${item.nombre} — Requiere Clave de Supervisor.`,
           async () => {
-            const batch = db.batch();
-            batch.delete(empRef().collection("cuarentena_productos").doc(item.id));
+            const empDocRef = empRef();
+            const cuarDocRef = empDocRef.collection("cuarentena_productos").doc(item.id);
+            const prodMatch = catalogo.find((p) => p.id === item.productoId) || catalogo.find((p) => p.nombre === item.nombre);
+            const prodDocRef = prodMatch ? empDocRef.collection("catalogo").doc(prodMatch.id) : null;
 
-            if (accion === "rehabilitar") {
-              const prod = catalogo.find((p) => p.id === item.productoId) || catalogo.find((p) => p.nombre === item.nombre);
-              if (prod) {
-                batch.update(empRef().collection("catalogo").doc(prod.id), {
+            await db.runTransaction(async (tx) => {
+              const cuarSnap = await tx.get(cuarDocRef);
+              const prodSnap = (accion === "rehabilitar" && prodDocRef) ? await tx.get(prodDocRef) : null;
+              if (!cuarSnap.exists) throw new Error("Este ítem de cuarentena ya fue resuelto.");
+
+              tx.delete(cuarDocRef);
+
+              if (accion === "rehabilitar" && prodDocRef && prodSnap && prodSnap.exists) {
+                tx.update(prodDocRef, {
                   stockOnline: FieldValue.increment(Math.max(1, Number(item.cantidad || 1)))
                 });
               }
-            }
 
-            batch.set(empRef().collection("auditoria_inventario").doc(), {
-              producto: item.nombre,
-              detalle: accion === "rehabilitar"
-                ? `Rehabilitado desde Cuarentena (+${item.cantidad} unds al stock vendible)`
-                : `Dado de baja desde Cuarentena (${item.cantidad} unds como merma/descarte)`,
-              fecha: fechaLegibleChile(),
-              timestamp: Date.now()
+              tx.set(empDocRef.collection("auditoria_inventario").doc(), {
+                producto: item.nombre,
+                detalle: accion === "rehabilitar"
+                  ? `Rehabilitado desde Cuarentena (+${item.cantidad} unds al stock vendible)`
+                  : `Dado de baja desde Cuarentena (${item.cantidad} unds como merma/descarte)`,
+                fecha: fechaLegibleChile(),
+                timestamp: Date.now()
+              });
             });
-
-            await batch.commit();
           }
         );
       };
@@ -1294,22 +1366,36 @@
           return alert("Clave de Supervisor incorrecta. Modificación rechazada.");
         }
 
+        const codNorm = editProdForm.codigo.trim().toUpperCase();
+        const nomNorm = editProdForm.nombre.trim().toUpperCase();
+        if (!nomNorm) return alert("El nombre del producto no puede quedar vacío.");
+
+        const dup = catalogo.find(
+          (p) =>
+            p.id !== productoEditando.id &&
+            (String(p.nombre || "").trim().toUpperCase() === nomNorm ||
+              (codNorm && String(p.codigo || "").trim().toUpperCase() === codNorm))
+        );
+        if (dup) {
+          return alert(`Ya existe otro producto con ese mismo nombre o código SKU: "${dup.nombre}" (${dup.codigo || "sin SKU"}).`);
+        }
+
         await ejecutarConBloqueo(async () => {
           const stockAntes = Number(productoEditando.stockOnline ?? 0);
           const stockDespues = Math.max(0, Number(editProdForm.stockOnline));
           const batch = db.batch();
 
           batch.update(empRef().collection("catalogo").doc(productoEditando.id), {
-            codigo: editProdForm.codigo.trim().toUpperCase(),
-            nombre: editProdForm.nombre.trim().toUpperCase(),
+            codigo: codNorm,
+            nombre: nomNorm,
             proveedor: editProdForm.proveedor.trim().toUpperCase(),
             stockOnline: stockDespues,
             ultimoCostoNeto: Math.max(0, Number(editProdForm.ultimoCostoNeto || 0))
           });
 
           batch.set(empRef().collection("auditoria_inventario").doc(), {
-            producto: editProdForm.nombre.trim().toUpperCase(),
-            detalle: `Edición autorizada • Stock: ${stockAntes} → ${stockDespues} unds • SKU: ${editProdForm.codigo || "-"} ${editProdForm.motivo ? `• Motivo: ${editProdForm.motivo}` : ""}`,
+            producto: nomNorm,
+            detalle: `Edición autorizada • Stock: ${stockAntes} → ${stockDespues} unds • SKU: ${codNorm || "-"} ${editProdForm.motivo ? `• Motivo: ${editProdForm.motivo}` : ""}`,
             fecha: fechaLegibleChile(),
             timestamp: Date.now()
           });
@@ -1338,53 +1424,88 @@
         );
       };
 
-      // ELIMINAR SIMULACIÓN: RESTAURA STOCK Y SOLO RETROCEDE FOLIO SI ERA EXACTAMENTE EL ÚLTIMO CORRELATIVO
+      // ELIMINAR SIMULACIÓN ATÓMICO: PROTEGE CADENAS DE REFACTURA, LIMPIA CUARENTENA, RESTAURA STOCK Y FOLIO SEGURO
       const eliminarSimulacion = (orden) => {
         if (orden.esSimulacion === false) {
           return alert("Documento real emitido al SII: no se puede eliminar por normativa tributaria.");
         }
+        if (orden.estadoRut === "anulada_y_refacturada") {
+          const hijaActiva = ordenes.some(
+            (o) => o.id !== orden.id && (o.refOrdenOrigenId === orden.id || (o.refBoletaAnulada && o.refBoletaAnulada === orden.folioSii))
+          );
+          if (hijaActiva) {
+            return alert("Esta boleta fue reemplazada por una Factura 33. Elimina primero la Factura 33 de reemplazo antes de eliminar esta simulación.");
+          }
+        }
+
         pedirAutorizacionSupervisor(
           "Eliminar Simulación",
           `Eliminar ${orden.tipoDte === 33 ? "Factura 33" : orden.tipoDte === 39 ? "Boleta 39" : "Orden"} #${orden.folioSii || "S/N"} de ${orden.comprador} y restaurar stock.`,
           async () => {
-            const batch = db.batch();
-            batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
+            const empDocRef = empRef();
+            const ordDocRef = empDocRef.collection("ecommerce_ordenes").doc(orden.id);
+            const prodDocRef = orden.productoId && orden.productoId !== "manual"
+              ? empDocRef.collection("catalogo").doc(orden.productoId)
+              : null;
 
-            const debeRestaurarStock =
-              !orden.refBoletaAnulada &&
-              orden.devolucionInfo?.estadoFisico !== "intacto" &&
-              orden.productoId &&
-              orden.productoId !== "manual" &&
-              catalogo.some((p) => p.id === orden.productoId);
+            const cuarRelacionados = cuarentena.filter(
+              (q) =>
+                q.ordenOrigenId === orden.id ||
+                (!q.ordenOrigenId && String(q.folioOrigen || "") === String(orden.folioSii || "") && q.nombre === orden.productoNombre)
+            );
 
-            if (debeRestaurarStock) {
-              batch.update(empRef().collection("catalogo").doc(orden.productoId), {
-                stockOnline: FieldValue.increment(Math.max(1, Number(orden.cantidad || 1)))
-              });
-            }
+            await db.runTransaction(async (tx) => {
+              const empSnap = await tx.get(empDocRef);
+              const ordSnap = await tx.get(ordDocRef);
+              const prodSnap = prodDocRef ? await tx.get(prodDocRef) : null;
 
-            // Solo retrocede el correlativo CAF si se elimina el ÚLTIMO folio emitido (nunca duplica folios intermedios)
-            if (orden.timbradoSii) {
-              const folioElim = Number(orden.folioSii || 0);
-              const esFactura33 = orden.tipoDte === 33;
-              const esUltimoFactura = esFactura33 && folioElim > 0 && folioElim === Number(cafConfig.factura33Actual) - 1;
-              const esUltimoBoleta = !esFactura33 && folioElim > 0 && folioElim === Number(cafConfig.boleta39Actual) - 1;
-
-              if (esUltimoFactura || esUltimoBoleta) {
-                batch.set(
-                  empRef(),
-                  {
-                    cafConfig: {
-                      ...cafConfig,
-                      factura33Actual: esUltimoFactura ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
-                      boleta39Actual: esUltimoBoleta ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
-                    }
-                  },
-                  { merge: true }
-                );
+              if (!ordSnap.exists) return;
+              const ordData = ordSnap.data();
+              if (ordData.esSimulacion === false || ordData.diaCerrado) {
+                throw new Error("Este documento ya no se puede eliminar.");
               }
-            }
-            await batch.commit();
+
+              tx.delete(ordDocRef);
+
+              cuarRelacionados.forEach((q) => {
+                tx.delete(empDocRef.collection("cuarentena_productos").doc(q.id));
+              });
+
+              const debeRestaurarStock =
+                !ordData.refBoletaAnulada &&
+                ordData.devolucionInfo?.estadoFisico !== "intacto" &&
+                prodDocRef &&
+                prodSnap &&
+                prodSnap.exists;
+
+              if (debeRestaurarStock) {
+                tx.update(prodDocRef, {
+                  stockOnline: FieldValue.increment(Math.max(1, Number(ordData.cantidad || 1)))
+                });
+              }
+
+              if (ordData.timbradoSii) {
+                const cafActual = { ...CAF_DEFAULT, ...(empSnap.data()?.cafConfig || {}) };
+                const folioElim = Number(ordData.folioSii || 0);
+                const esFactura33 = ordData.tipoDte === 33;
+                const esUltimoFactura = esFactura33 && folioElim > 0 && folioElim === Number(cafActual.factura33Actual) - 1;
+                const esUltimoBoleta = !esFactura33 && folioElim > 0 && folioElim === Number(cafActual.boleta39Actual) - 1;
+
+                if (esUltimoFactura || esUltimoBoleta) {
+                  tx.set(
+                    empDocRef,
+                    {
+                      cafConfig: {
+                        ...cafActual,
+                        factura33Actual: esUltimoFactura ? Math.max(1, Number(cafActual.factura33Actual) - 1) : Number(cafActual.factura33Actual),
+                        boleta39Actual: esUltimoBoleta ? Math.max(1, Number(cafActual.boleta39Actual) - 1) : Number(cafActual.boleta39Actual)
+                      }
+                    },
+                    { merge: true }
+                  );
+                }
+              }
+            });
           }
         );
       };
@@ -1522,6 +1643,11 @@
         return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii && !o.anuladaPorNc61).sort(ordenarPorFolioAsc);
       }, [ordenes]);
 
+      // Las 8 más recientes emitidas para mostrar en el panel de Inicio
+      const ultimasOrdenesInicio = useMemo(() => {
+        return ordenesJornadaActiva.slice(-8).reverse();
+      }, [ordenesJornadaActiva]);
+
       const ordenesParaArchivarAlCierre = useMemo(() => {
         return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii).sort(ordenarPorFolioAsc);
       }, [ordenes]);
@@ -1623,7 +1749,7 @@
         setCerrandoDia(false);
       };
 
-      // ================= IMPRESIÓN EN LOTE SEGURA (BLOQUES DE 450 + ANTI-DOBLE CLIC) =================
+      // ================= IMPRESIÓN EN LOTE SEGURA (BLOQUES DE 450 + MÓVIL COMPATIBLE) =================
       const generarEImprimirLoteHoy = () => {
         if (seleccionLoteIds.length === 0) return;
         const seleccionados = facturasPorImprimirHoy
@@ -1711,11 +1837,20 @@
       }, [catalogo, compras, ordenes]);
 
       const incorporarSugeridoAlCatalogo = async (item) => {
+        const nomNorm = String(item.nombre || "").trim().toUpperCase();
+        const skuNorm = String(item.codigo || "").trim().toUpperCase();
+        const yaExiste = catalogo.some(
+          (p) =>
+            String(p.nombre || "").trim().toUpperCase() === nomNorm ||
+            (skuNorm && String(p.codigo || "").trim().toUpperCase() === skuNorm)
+        );
+        if (yaExiste) return alert("Este producto o código SKU ya existe en el catálogo.");
+
         await ejecutarConBloqueo(async () => {
           await empRef().collection("catalogo").add({
-            codigo: item.codigo || "",
-            nombre: item.nombre,
-            proveedor: item.proveedor || "",
+            codigo: skuNorm,
+            nombre: nomNorm,
+            proveedor: String(item.proveedor || "").trim().toUpperCase(),
             stockOnline: 0
           });
         });
@@ -1734,11 +1869,23 @@
 
       const agregarProductoManual = async (e) => {
         e.preventDefault();
-        if (!manualNombre.trim()) return;
+        const nomNorm = manualNombre.trim().toUpperCase();
+        const skuNorm = manualSku.trim().toUpperCase();
+        if (!nomNorm) return;
+
+        const duplicado = catalogo.find(
+          (p) =>
+            String(p.nombre || "").trim().toUpperCase() === nomNorm ||
+            (skuNorm && String(p.codigo || "").trim().toUpperCase() === skuNorm)
+        );
+        if (duplicado) {
+          return alert(`Ya existe un producto con ese nombre o SKU en tu catálogo: "${duplicado.nombre}" (${duplicado.codigo || "sin SKU"}).`);
+        }
+
         await ejecutarConBloqueo(async () => {
           await empRef().collection("catalogo").add({
-            codigo: manualSku.trim().toUpperCase(),
-            nombre: manualNombre.trim().toUpperCase(),
+            codigo: skuNorm,
+            nombre: nomNorm,
             proveedor: manualProveedor.trim().toUpperCase(),
             stockOnline: 0
           });
@@ -1832,30 +1979,64 @@
         );
       };
 
-      // VALIDA EXPLÍCITAMENTE QUE LA NUEVA CLAVE TENGA AL MENOS 4 CARACTERES (NO LA IGNORA EN SILENCIO)
+      // VALIDA CLAVE NUEVA + CONFIRMACIÓN + HORARIOS DE DESPACHO DEDUPLICADOS Y ORDENADOS
       const guardarSeguridadYDespachos = async (e) => {
         e.preventDefault();
         if (guardandoConfig) return;
 
         const nuevaClaveLimpia = pinSupervisorNuevoInput.trim();
-        if (nuevaClaveLimpia.length > 0 && nuevaClaveLimpia.length < 4) {
-          return alert("La nueva Clave de Supervisor debe tener al menos 4 caracteres.");
+        const confirmClaveLimpia = pinSupervisorConfirmInput.trim();
+
+        if (nuevaClaveLimpia.length > 0) {
+          if (nuevaClaveLimpia.length < 4) {
+            return alert("La nueva Clave de Supervisor debe tener al menos 4 caracteres.");
+          }
+          if (nuevaClaveLimpia !== confirmClaveLimpia) {
+            return alert("La nueva Clave de Supervisor y su confirmación no coinciden.");
+          }
+        } else if (confirmClaveLimpia.length > 0) {
+          return alert("Escribe la nueva clave en ambos campos o deja ambos vacíos para mantener la actual.");
         }
+
+        const cantHor = Math.max(1, Math.min(3, Number(despachosConfig.cantidadHorarios || 2)));
+        const horariosUnicos = Array.from(
+          new Set(
+            (despachosConfig.horarios || ["12:00", "16:30", "18:30"])
+              .slice(0, cantHor)
+              .filter((h) => /^\d{2}:\d{2}$/.test(String(h || "")))
+          )
+        ).sort();
+
+        if (horariosUnicos.length === 0) {
+          return alert("Debes definir al menos un horario de despacho válido (HH:MM).");
+        }
+
+        const despachosNormalizados = {
+          cantidadHorarios: horariosUnicos.length,
+          horarios: [
+            horariosUnicos[0] || "12:00",
+            horariosUnicos[1] || "16:30",
+            horariosUnicos[2] || "18:30"
+          ]
+        };
 
         const ok = await verificarClaveSupervisor(pinSupervisorActualInput, empresa);
         if (!ok) {
           return alert("Debes ingresar tu Clave de Supervisor actual para guardar cambios de seguridad y horarios.");
         }
+
         setGuardandoConfig(true);
         try {
-          const payload = { despachosConfig };
+          const payload = { despachosConfig: despachosNormalizados };
           if (nuevaClaveLimpia.length >= 4) {
             payload.pinSupervisorHash = await sha256Hex(nuevaClaveLimpia);
             payload.pinSupervisor = FieldValue.delete();
           }
           await empRef().set(payload, { merge: true });
+          setDespachosConfig(despachosNormalizados);
           setPinSupervisorActualInput("");
           setPinSupervisorNuevoInput("");
+          setPinSupervisorConfirmInput("");
           alert(
             nuevaClaveLimpia.length >= 4
               ? "Horarios de despacho y nueva Clave de Supervisor cifrada (SHA-256) guardados correctamente."
@@ -1906,6 +2087,11 @@
       const totalVendidoHoyClp = ordenesJornadaActiva.reduce((acc, o) => acc + Number(o.totalClp || 0), 0);
       const totalUnidadesPedir = analisisEconomicoInventario.listaCompraConsolidada.reduce((a, b) => a + b.pedir, 0);
 
+      const prodSeleccionadoVenta = catalogo.find((p) => p.id === skuSeleccionado) || null;
+      const stockInsuficienteVenta = Boolean(
+        prodSeleccionadoVenta && Number(prodSeleccionadoVenta.stockOnline ?? 0) < Math.max(1, Number(cantidadNueva || 1))
+      );
+
       const ordenesVentasFiltradas = ordenes.filter((o) => {
         if (filtroCanalVenta !== "TODOS" && o.canal !== filtroCanalVenta) return false;
         const q = busquedaVenta.trim().toLowerCase();
@@ -1932,17 +2118,17 @@
 
       return (
         <div className={`min-h-screen pb-24 lg:pb-10 transition-colors ${T.pageBg}`}>
-          {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN */}
+          {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN (SIEMPRE CON DATOS EMISOR GUARDADOS) */}
           {modoImpresion === "dte" && dteVisualizando && (
             <div className="print-only bg-white p-2">
-              <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+              <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisorImpresion} />
             </div>
           )}
 
           {modoImpresion === "lote" && loteParaImprimir.length > 0 && (
             <div className="print-only bg-white">
               {loteParaImprimir.map((docItem) => (
-                <HojaDocumentoOficialSii key={docItem.id} orden={docItem} empresa={empresa} datosEmisor={datosEmisor} />
+                <HojaDocumentoOficialSii key={docItem.id} orden={docItem} empresa={empresa} datosEmisor={datosEmisorImpresion} />
               ))}
             </div>
           )}
@@ -2241,6 +2427,17 @@
                   <button type="button" onClick={() => { setModalCierreCaja(false); setPinCierreCaja(""); }} className={`text-xs font-bold px-2.5 py-1.5 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
                 </div>
 
+                {ordenesRutInvalidoPendientes.length > 0 && (
+                  <div className="bg-amber-500/15 border border-amber-500/50 rounded-xl p-3 text-xs space-y-1">
+                    <span className="font-extrabold text-amber-600 block">
+                      ⚠️ Hay {ordenesRutInvalidoPendientes.length} orden(es) retenida(s) por RUT inválido
+                    </span>
+                    <p className={T.sub}>
+                      Esas órdenes aún no están timbradas y seguirán abiertas hasta corregir el RUT o emitir Boleta 39.
+                    </p>
+                  </div>
+                )}
+
                 {resumenCierreActual.docs === 0 ? (
                   <p className={`text-xs py-4 text-center ${T.textSub}`}>No hay documentos emitidos en la jornada actual para cerrar.</p>
                 ) : (
@@ -2441,13 +2638,16 @@
                   </button>
                 </div>
                 <div className="max-h-[70vh] overflow-y-auto py-1">
-                  <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
+                  <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisorImpresion} />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => {
+                      setConfirmarImpresionLote(false);
+                      setLoteParaImprimir([]);
+                      setPedidoParaImprimir([]);
                       setModoImpresion("dte");
-                      setTimeout(() => window.print(), 150);
+                      setTimeout(() => window.print(), 180);
                     }}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}
                   >
@@ -2565,6 +2765,11 @@
                     ) : (
                       <input type="text" value={skuSeleccionado} onChange={(e) => setSkuSeleccionado(e.target.value)} placeholder="Ej: Ventilador" className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold ${T.input}`} required />
                     )}
+                    {stockInsuficienteVenta && (
+                      <p className="text-[11px] font-bold text-amber-600 bg-amber-500/15 border border-amber-500/40 px-3 py-1.5 rounded-xl mt-2">
+                        ⚠️ Stock insuficiente en catálogo (Disponible: {Number(prodSeleccionadoVenta.stockOnline ?? 0)} unds). Si confirmas, el stock quedará en negativo.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className={`text-xs font-bold block mb-1 ${T.textSub}`}>Cantidad *</label>
@@ -2656,7 +2861,7 @@
                   onClick={() => { setPinCierreCaja(""); setModalCierreCaja(true); }}
                   className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-2.5 py-2.5 rounded-xl cursor-pointer text-center truncate"
                 >
-                  Cerrar ({ordenesJornadaActiva.length})
+                  Cerrar ({ordenesParaArchivarAlCierre.length})
                 </button>
 
                 <button
@@ -2788,7 +2993,7 @@
                           {areasHabilitadasPorSwitch.map((area) => (
                             <button
                               key={area.id}
-                              onClick={() => navegarAislado(area.url)}
+                              onClick={area.accion}
                               className={`w-full p-3.5 rounded-xl text-left flex items-center justify-between cursor-pointer ${T.cardMuted}`}
                             >
                               <div>
@@ -2806,20 +3011,20 @@
                   <div className="lg:col-span-7">
                     <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                       <div className="flex items-center justify-between">
-                        <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas Emitidas en la Jornada Actual (Orden de Folio)</h2>
+                        <h2 className={`text-sm font-extrabold ${T.textMain}`}>Últimas Facturas y Boletas Emitidas Hoy</h2>
                         <button onClick={() => setVista("facturas")} className="text-xs font-bold underline cursor-pointer">
                           Gestionar lotes ({ordenesJornadaActiva.length})
                         </button>
                       </div>
 
-                      {ordenesJornadaActiva.length === 0 ? (
+                      {ultimasOrdenesInicio.length === 0 ? (
                         <div className={`${T.cardMuted} rounded-xl p-8 text-center space-y-1`}>
                           <p className={`text-xs font-bold ${T.textMain}`}>Jornada limpia (0 facturas emitidas aún)</p>
                           <p className={`text-[11px] ${T.textSub}`}>Presiona "+ Venta" o activa el Piloto Automático para emitir Boleta 39 o Factura 33.</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-200/40">
-                          {ordenesJornadaActiva.slice(0, 8).map((o) => (
+                          {ultimasOrdenesInicio.map((o) => (
                             <div key={o.id} className="py-3 flex items-center justify-between gap-3 text-xs">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -3068,7 +3273,7 @@
                         disabled={ordenesParaArchivarAlCierre.length === 0}
                         className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
                       >
-                        Cerrar Día / Caja ({ordenesJornadaActiva.length})
+                        Cerrar Día / Caja ({ordenesParaArchivarAlCierre.length})
                       </button>
                     </div>
 
@@ -3118,7 +3323,7 @@
                         disabled={ordenesParaArchivarAlCierre.length === 0}
                         className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
                       >
-                        Cerrar Día / Caja ({ordenesJornadaActiva.length})
+                        Cerrar Día / Caja ({ordenesParaArchivarAlCierre.length})
                       </button>
                     </div>
                     {facturasYaImpresasHoy.length === 0 ? (
@@ -3569,22 +3774,34 @@
                       <p className={`text-[11px] ${T.textSub}`}>
                         Se guarda cifrada (SHA-256) y se exige en el área de Supervisor y en toda modificación crítica. {!tienePinPersonalizado && <strong>(Clave inicial actual: 1234)</strong>}
                       </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-2.5">
                         <input
                           type="password"
                           value={pinSupervisorActualInput}
                           onChange={(e) => setPinSupervisorActualInput(e.target.value)}
                           placeholder="Clave actual (requerida para guardar) *"
-                          className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
+                          className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
                           required
                         />
-                        <input
-                          type="password"
-                          value={pinSupervisorNuevoInput}
-                          onChange={(e) => setPinSupervisorNuevoInput(e.target.value)}
-                          placeholder="Nueva clave (opcional, mín 4 caracteres)"
-                          className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
-                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <input
+                            type="password"
+                            value={pinSupervisorNuevoInput}
+                            onChange={(e) => setPinSupervisorNuevoInput(e.target.value)}
+                            placeholder="Nueva clave (opcional, mín 4 caracteres)"
+                            className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
+                          />
+                          <input
+                            type="password"
+                            value={pinSupervisorConfirmInput}
+                            onChange={(e) => setPinSupervisorConfirmInput(e.target.value)}
+                            placeholder="Confirmar nueva clave"
+                            className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
+                          />
+                        </div>
+                        {pinSupervisorNuevoInput.trim().length > 0 && pinSupervisorConfirmInput.trim().length > 0 && pinSupervisorNuevoInput.trim() !== pinSupervisorConfirmInput.trim() && (
+                          <p className="text-[11px] font-bold text-rose-500">Las nuevas claves no coinciden.</p>
+                        )}
                       </div>
                     </div>
 
