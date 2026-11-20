@@ -97,6 +97,7 @@
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
+    const FieldValue = firebase.firestore.FieldValue;
 
     const RUT_PGB = "769497226";
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
@@ -107,7 +108,69 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
-    // VALIDADOR OFICIAL DE RUT CHILENO (ALGORITMO MÓDULO 11)
+    // FECHA Y HORA LOCAL OFICIAL DE CHILE (EVITA DESFASE UTC DESPUÉS DE LAS 21:00)
+    const fechaIsoChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date(ts));
+      } catch (e) {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+
+    const horaCortaChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        }).format(new Date(ts));
+      } catch (e) {
+        return new Date(ts).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+      }
+    };
+
+    const fechaLegibleChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          dateStyle: "short",
+          timeStyle: "short"
+        }).format(new Date(ts));
+      } catch (e) {
+        return new Date(ts).toLocaleString("es-CL");
+      }
+    };
+
+    // CIFRADO SHA-256 PARA CLAVE DE SUPERVISOR
+    const sha256Hex = async (texto) => {
+      const str = String(texto || "").trim();
+      if (window.crypto && window.crypto.subtle) {
+        const data = new TextEncoder().encode(str);
+        const hashBuf = await window.crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      return str;
+    };
+
+    const verificarClaveSupervisor = async (pinIngresado, empObj) => {
+      const limpio = String(pinIngresado || "").trim();
+      if (!limpio) return false;
+      if (empObj?.pinSupervisorHash) {
+        const h = await sha256Hex(limpio);
+        return h === empObj.pinSupervisorHash;
+      }
+      const fallback = String(empObj?.pinSupervisor || "1234").trim();
+      return limpio === fallback;
+    };
+
+    // VALIDADOR OFICIAL DE RUT CHILENO (MÓDULO 11)
     const validarRutChileno = (rut) => {
       const limpio = limpiarRut(rut);
       if (limpio.length < 7 || limpio.length > 9) return false;
@@ -125,26 +188,47 @@
       return dv === dvCalc;
     };
 
-    // CALCULA PRÓXIMO HORARIO DE DESPACHO Y LÍMITE (-1 HORA)
-    const calcularProximoCorteDespacho = (horariosArr) => {
+    // CALCULA PRÓXIMO HORARIO DE DESPACHO DONDE AÚN QUEDE MARGEN ANTES DE LA HORA LÍMITE (-1H)
+    const calcularProximoCorteDespacho = (horariosArr, ahoraTs = Date.now()) => {
       const lista = (Array.isArray(horariosArr) ? horariosArr : ["14:00"]).filter(Boolean).sort();
-      if (lista.length === 0) return { salida: "14:00", limite: "13:00" };
-      const ahora = new Date();
-      const minsAhora = ahora.getHours() * 60 + ahora.getMinutes();
+      if (lista.length === 0) return { salida: "14:00", limite: "13:00", esManana: false, limiteTs: ahoraTs + 3600000 };
 
-      let elegido = lista[0];
+      const horaActualStr = horaCortaChile(ahoraTs);
+      const [ah, am] = horaActualStr.split(":").map(Number);
+      const minsAhora = (ah || 0) * 60 + (am || 0);
+
+      let elegido = null;
+      let esManana = false;
+
+      // Busca el primer despacho cuyo límite (-60 min) sea estrictamente futuro hoy
       for (let i = 0; i < lista.length; i++) {
         const [h, m] = lista[i].split(":").map(Number);
-        if (h * 60 + m > minsAhora) {
+        const minsLimite = h * 60 + m - 60;
+        if (minsLimite > minsAhora) {
           elegido = lista[i];
           break;
         }
       }
+
+      if (!elegido) {
+        elegido = lista[0];
+        esManana = true;
+      }
+
       const [eh, em] = elegido.split(":").map(Number);
       const totalMinsLimite = Math.max(0, eh * 60 + em - 60);
       const lh = String(Math.floor(totalMinsLimite / 60)).padStart(2, "0");
       const lm = String(totalMinsLimite % 60).padStart(2, "0");
-      return { salida: elegido, limite: `${lh}:${lm}` };
+
+      const minsHastaLimite = esManana ? (24 * 60 - minsAhora) + totalMinsLimite : (totalMinsLimite - minsAhora);
+      const limiteTs = ahoraTs + Math.max(1, minsHastaLimite) * 60000;
+
+      return {
+        salida: esManana ? `Mañana ${elegido}` : elegido,
+        limite: esManana ? `Mañana ${lh}:${lm}` : `${lh}:${lm}`,
+        esManana,
+        limiteTs
+      };
     };
 
     const TEMAS_DISPONIBLES = {
@@ -260,11 +344,11 @@
     const ROLES = ["Jefatura / Admin", "Vendedor / Comercial", "Bodega / Armador", "Chofer / Despacho"];
 
     const VISTAS_DEFAULT = [
-      { id: "inicio", label: "Inicio" },
-      { id: "ventas", label: "Ventas" },
-      { id: "facturas", label: "Facturas" },
-      { id: "catalogo", label: "Catálogo" },
-      { id: "config", label: "Configuración" }
+      { id: "inicio", label: "Inicio", shortLabel: "Inicio" },
+      { id: "ventas", label: "Ventas", shortLabel: "Ventas" },
+      { id: "facturas", label: "Facturas", shortLabel: "Facturas" },
+      { id: "catalogo", label: "Catálogo", shortLabel: "Catálogo" },
+      { id: "config", label: "Configuración", shortLabel: "Ajustes" }
     ];
 
     const ordenarPorFolioAsc = (a, b) => {
@@ -312,7 +396,7 @@
       const iva = total - neto;
       const cant = Math.max(1, Number(orden.cantidad || 1));
       const precioUnitNeto = Math.round(neto / cant);
-      const fechaIso = orden.fechaIso || new Date(orden.timestamp || Date.now()).toISOString().slice(0, 10);
+      const fechaIso = orden.fechaIso || fechaIsoChile(orden.timestamp || Date.now());
 
       if (esFactura) {
         return (
@@ -450,7 +534,7 @@
 
     const HojaPedidoSugeridoPdf = ({ items, empresa, filtroProveedor }) => {
       if (!items || items.length === 0) return null;
-      const fechaHoy = new Date().toLocaleDateString("es-CL");
+      const fechaHoy = fechaIsoChile();
       const totalUnidades = items.reduce((a, b) => a + Number(b.pedir || 0), 0);
 
       return (
@@ -507,12 +591,18 @@
       const [rutActivo] = useState(() => limpiarRut(localStorage.getItem("nexus_empresa_rut") || ""));
       const [empresa, setEmpresa] = useState(null);
       const [vista, setVista] = useState("inicio");
+      const [ahoraTick, setAhoraTick] = useState(() => Date.now());
 
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
       const [cierresDiarios, setCierresDiarios] = useState([]);
       const [compras, setCompras] = useState([]);
       const [cuarentena, setCuarentena] = useState([]);
+
+      // Modal Unificado de Autorización de Supervisor
+      const [modalPinReq, setModalPinReq] = useState(null); // { titulo, descripcion, onConfirm }
+      const [pinModalInput, setPinModalInput] = useState("");
+      const [pinModalError, setPinModalError] = useState("");
 
       // Modal Nueva Venta
       const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
@@ -530,6 +620,7 @@
       const [subTabFacturas, setSubTabFacturas] = useState("por_imprimir");
       const [seleccionLoteIds, setSeleccionLoteIds] = useState([]);
       const [loteParaImprimir, setLoteParaImprimir] = useState([]);
+      const [confirmarImpresionLote, setConfirmarImpresionLote] = useState(false);
       const [dteVisualizando, setDteVisualizando] = useState(null);
 
       // Archivo Histórico Infinito
@@ -541,11 +632,12 @@
       // Modal Cerrar Día / Caja
       const [modalCierreCaja, setModalCierreCaja] = useState(false);
       const [notaCierreCaja, setNotaCierreCaja] = useState("");
+      const [pinCierreCaja, setPinCierreCaja] = useState("");
       const [cerrandoDia, setCerrandoDia] = useState(false);
 
       // Modal Devoluciones y Cuarentena
       const [ordenDevolucionModal, setOrdenDevolucionModal] = useState(null);
-      const [estadoFisicoDevolucion, setEstadoFisicoDevolucion] = useState("intacto"); // intacto | revision
+      const [estadoFisicoDevolucion, setEstadoFisicoDevolucion] = useState("intacto");
       const [emitirNc61Devolucion, setEmitirNc61Devolucion] = useState(true);
       const [notaDevolucion, setNotaDevolucion] = useState("");
 
@@ -572,7 +664,7 @@
       const [excluidosPedido, setExcluidosPedido] = useState({});
       const [pedidoParaImprimir, setPedidoParaImprimir] = useState([]);
 
-      // Configuración (APIs, Personal, Seguridad & Despachos, Apariencia)
+      // Configuración
       const [subTabConfig, setSubTabConfig] = useState("apis");
       const [apisForm, setApisForm] = useState({
         meliClientId: "",
@@ -608,6 +700,12 @@
 
       const [nuevoColabNombre, setNuevoColabNombre] = useState("");
       const [nuevoColabRol, setNuevoColabRol] = useState(ROLES[1]);
+
+      // Reloj vivo cada 30 segundos para los cortes de despacho
+      useEffect(() => {
+        const timer = setInterval(() => setAhoraTick(Date.now()), 30000);
+        return () => clearInterval(timer);
+      }, []);
 
       useEffect(() => {
         if (!rutActivo) {
@@ -675,7 +773,28 @@
       }, [rutActivo]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
-      const pinSupervisorVigente = String(empresa?.pinSupervisor || "1234").trim();
+
+      // Helper para solicitar Clave de Supervisor con Modal elegante
+      const pedirAutorizacionSupervisor = (titulo, descripcion, onConfirm) => {
+        setPinModalInput("");
+        setPinModalError("");
+        setModalPinReq({ titulo, descripcion, onConfirm });
+      };
+
+      const confirmarModalPin = async (e) => {
+        e.preventDefault();
+        if (!modalPinReq) return;
+        const ok = await verificarClaveSupervisor(pinModalInput, empresa);
+        if (!ok) {
+          setPinModalError("Clave de Supervisor incorrecta.");
+          return;
+        }
+        const cb = modalPinReq.onConfirm;
+        setModalPinReq(null);
+        setPinModalInput("");
+        setPinModalError("");
+        await cb();
+      };
 
       const cerrarSesion = () => {
         localStorage.removeItem("nexus_empresa_rut");
@@ -703,7 +822,7 @@
         return (despachosConfig.horarios || ["12:00", "16:30", "18:30"]).slice(0, cant);
       }, [despachosConfig]);
 
-      const proximoCorte = useMemo(() => calcularProximoCorteDespacho(horariosActivosDespacho), [horariosActivosDespacho]);
+      const proximoCorte = useMemo(() => calcularProximoCorteDespacho(horariosActivosDespacho, ahoraTick), [horariosActivosDespacho, ahoraTick]);
 
       const areasHabilitadasPorSwitch = useMemo(() => {
         const lista = [];
@@ -768,10 +887,16 @@
       };
 
       const pilotoAutomaticoActivo = Boolean(apisForm.siiModoAutomatico);
-      const togglePilotoAutomatico = async () => {
-        const actualizado = { ...apisForm, siiModoAutomatico: !pilotoAutomaticoActivo };
-        setApisForm(actualizado);
-        await empRef().set({ apis: actualizado }, { merge: true });
+      const togglePilotoAutomatico = () => {
+        pedirAutorizacionSupervisor(
+          pilotoAutomaticoActivo ? "Desactivar Piloto Automático" : "Activar Piloto Automático",
+          "Cambiar el modo de emisión tributaria requiere autorización del Supervisor.",
+          async () => {
+            const actualizado = { ...apisForm, siiModoAutomatico: !pilotoAutomaticoActivo };
+            setApisForm(actualizado);
+            await empRef().set({ apis: actualizado }, { merge: true });
+          }
+        );
       };
 
       const estadoConexiones = useMemo(() => {
@@ -786,7 +911,17 @@
 
       const faltanApis = !estadoConexiones.sii || (usaOmnicanal && !estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
-      // ================= REGISTRO DE VENTA CON VALIDADOR DE RUT CHILENO (MÓDULO 11) =================
+      const cerrarYLimpiarModalVenta = () => {
+        setModalNuevaVenta(false);
+        setCompradorNuevo("");
+        setRutCompradorNuevo("");
+        setSkuSeleccionado("");
+        setCantidadNueva(1);
+        setTotalNuevo(19990);
+        setVendedorSeleccionado("");
+      };
+
+      // ================= REGISTRO DE VENTA CON VALIDADOR DE RUT + STOCK ATÓMICO + HORA CHILE =================
       const registrarOrdenOmnicanal = async (e) => {
         e.preventDefault();
         const prodObj = catalogo.find((p) => p.id === skuSeleccionado) || {
@@ -807,6 +942,7 @@
         const esLider = canalNuevo === "Lider";
         const esRealSii = Boolean(estadoConexiones.sii);
         const ahora = Date.now();
+        const corteActual = calcularProximoCorteDespacho(horariosActivosDespacho, ahora);
 
         const nuevaOrden = {
           canal: canalNuevo,
@@ -815,16 +951,17 @@
           rutComprador: pidioFactura ? (rutValido ? formatearRut(rutIngresado) : rutIngresado) : "",
           estadoRut: esRutInvalido ? "invalido_esperando" : "ok",
           mensajeRutEnviado: esRutInvalido
-            ? `Hola ${compradorNuevo.trim() || "cliente"}, el RUT ingresado (${rutIngresado}) no es válido en el SII. Por favor envíanos tu RUT correcto antes de las ${proximoCorte.limite} hrs (1h antes del despacho de las ${proximoCorte.salida} hrs) para emitir tu Factura; de lo contrario emitiremos Boleta para no retrasar tu envío.`
+            ? `Hola ${compradorNuevo.trim() || "cliente"}, el RUT ingresado (${rutIngresado}) no es válido en el SII. Por favor envíanos tu RUT correcto antes de las ${corteActual.limite} hrs (1h antes del despacho de las ${corteActual.salida} hrs) para emitir tu Factura; de lo contrario emitiremos Boleta para no retrasar tu envío.`
             : "",
-          limiteDespachoHora: esRutInvalido ? proximoCorte.limite : "",
-          salidaDespachoHora: esRutInvalido ? proximoCorte.salida : "",
+          limiteDespachoHora: esRutInvalido ? corteActual.limite : "",
+          limiteDespachoTs: esRutInvalido ? corteActual.limiteTs : 0,
+          salidaDespachoHora: esRutInvalido ? corteActual.salida : "",
           direccionCliente: "Santiago",
           productoId: prodObj.id,
           codigoSku: prodObj.codigo || "S/C",
           productoNombre: prodObj.nombre,
-          cantidad: Number(cantidadNueva),
-          totalClp: Number(totalNuevo),
+          cantidad: Math.max(1, Number(cantidadNueva)),
+          totalClp: Math.max(1, Number(totalNuevo)),
           vendedor: vendedorSeleccionado || "Canal Automático",
           tipoDte,
           folioSii: folioAsignado,
@@ -836,9 +973,9 @@
           diaCerrado: false,
           anuladaPorNc61: false,
           devolucionInfo: null,
-          fechaIso: new Date(ahora).toISOString().slice(0, 10),
-          horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
-          fecha: new Date(ahora).toLocaleString("es-CL"),
+          fechaIso: fechaIsoChile(ahora),
+          horaCorta: horaCortaChile(ahora),
+          fecha: fechaLegibleChile(ahora),
           timestamp: ahora
         };
 
@@ -846,8 +983,9 @@
         batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaOrden);
 
         if (prodObj.id && prodObj.id !== "manual") {
-          const nuevoStock = Math.max(0, (Number(prodObj.stockOnline) || 0) - Number(cantidadNueva));
-          batch.update(empRef().collection("catalogo").doc(prodObj.id), { stockOnline: nuevoStock });
+          batch.update(empRef().collection("catalogo").doc(prodObj.id), {
+            stockOnline: FieldValue.increment(-Math.max(1, Number(cantidadNueva)))
+          });
         }
 
         if (!esRutInvalido) {
@@ -865,15 +1003,12 @@
         }
 
         await batch.commit();
-        setModalNuevaVenta(false);
-        setCompradorNuevo("");
-        setRutCompradorNuevo("");
+        cerrarYLimpiarModalVenta();
 
         if (esRutInvalido) {
           alert(
-            `⚠️ RUT INVÁLIDO DETECTADO (${rutIngresado}).\n\n` +
-            `La orden quedó retenida esperando respuesta del cliente hasta las ${proximoCorte.limite} hrs (1h antes del despacho de las ${proximoCorte.salida} hrs).\n` +
-            `Puedes verla y gestionarla en la alerta superior o en Ventas.`
+            `RUT INVÁLIDO DETECTADO (${rutIngresado}).\n\n` +
+            `La orden quedó retenida esperando respuesta del cliente hasta las ${corteActual.limite} hrs (1h antes del despacho de las ${corteActual.salida} hrs).`
           );
         }
       };
@@ -891,20 +1026,20 @@
         });
         batch.set(empRef(), { cafConfig: { ...cafConfig, boleta39Actual: folioBoleta + 1 } }, { merge: true });
         await batch.commit();
-        alert(`Boleta 39 N° ${folioBoleta} emitida automáticamente para despachar a tiempo. Si el cliente envía su RUT después, podrás anular con NC 61 y refacturar en 1 clic.`);
+        alert(`Boleta 39 N° ${folioBoleta} emitida para despachar a tiempo. Si el cliente responde después con su RUT, podrás anular con NC 61 y emitir Factura 33 en 1 clic.`);
       };
 
-      // ================= FLUJO 2: CLIENTE CORRIGE RUT -> EMITE FACTURA 33 (CON NC 61 SI YA ERA BOLETA) =================
+      // ================= FLUJO 2: CLIENTE CORRIGE RUT -> NC 61 + FACTURA 33 (SIN CAMPO UNDEFINED) =================
       const ejecutarCorreccionRutYRefactura = async (e) => {
         e.preventDefault();
         if (!ordenRefacturarModal) return;
         if (!validarRutChileno(nuevoRutCorregido)) {
-          return alert("El RUT ingresado sigue siendo inválido según el algoritmo del SII (Módulo 11). Verifica el dígito verificador.");
+          return alert("El RUT ingresado sigue siendo inválido según el algoritmo del SII (Módulo 11).");
         }
 
         const rutFormateado = formatearRut(nuevoRutCorregido);
-        const orden = ordenRefacturarModal;
-        const yaTeniaBoleta = orden.tipoDte === 39 && orden.timbradoSii;
+        const { id: ordenIdOriginal, ...ordenSinId } = ordenRefacturarModal;
+        const yaTeniaBoleta = ordenSinId.tipoDte === 39 && ordenSinId.timbradoSii;
         const folioFactura = cafConfig.factura33Actual;
         const folioNc61 = cafConfig.nc61Actual || 1;
         const ahora = Date.now();
@@ -912,32 +1047,35 @@
         const batch = db.batch();
 
         if (yaTeniaBoleta) {
-          // 1) Marca la Boleta 39 original como anulada por Nota de Crédito 61
-          batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
+          batch.update(empRef().collection("ecommerce_ordenes").doc(ordenIdOriginal), {
             anuladaPorNc61: true,
             folioNc61Anulacion: folioNc61,
             estadoRut: "anulada_y_refacturada"
           });
-          // 2) Emite la nueva Factura 33 con el RUT válido y referencia a la NC 61
-          batch.set(empRef().collection("ecommerce_ordenes").doc(), {
-            ...orden,
-            id: undefined,
+
+          const nuevaFacturaObj = {
+            ...ordenSinId,
             rutComprador: rutFormateado,
             estadoRut: "corregido_ok",
             tipoDte: 33,
             folioSii: folioFactura,
             timbradoSii: true,
             anuladaPorNc61: false,
-            refBoletaAnulada: orden.folioSii,
+            folioNc61Anulacion: null,
+            refBoletaAnulada: ordenSinId.folioSii || 0,
             refNc61: folioNc61,
             etiquetaImpresa: false,
             diaCerrado: false,
-            enviadoMarketplace: orden.canal !== "Lider",
-            fechaIso: new Date(ahora).toISOString().slice(0, 10),
-            horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
-            fecha: new Date(ahora).toLocaleString("es-CL"),
+            fechaCierreDia: "",
+            cierreId: "",
+            enviadoMarketplace: ordenSinId.canal !== "Lider" && ordenSinId.canal !== "Venta Directa",
+            fechaIso: fechaIsoChile(ahora),
+            horaCorta: horaCortaChile(ahora),
+            fecha: fechaLegibleChile(ahora),
             timestamp: ahora
-          });
+          };
+
+          batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaFacturaObj);
           batch.set(empRef(), {
             cafConfig: {
               ...cafConfig,
@@ -946,14 +1084,13 @@
             }
           }, { merge: true });
         } else {
-          // Estaba retenida esperando RUT: emite Factura 33 directa sin necesidad de NC 61
-          batch.update(empRef().collection("ecommerce_ordenes").doc(orden.id), {
+          batch.update(empRef().collection("ecommerce_ordenes").doc(ordenIdOriginal), {
             rutComprador: rutFormateado,
             estadoRut: "corregido_ok",
             tipoDte: 33,
             folioSii: folioFactura,
             timbradoSii: true,
-            enviadoMarketplace: orden.canal !== "Lider"
+            enviadoMarketplace: ordenSinId.canal !== "Lider" && ordenSinId.canal !== "Venta Directa"
           });
           batch.set(empRef(), {
             cafConfig: { ...cafConfig, factura33Actual: folioFactura + 1 }
@@ -965,12 +1102,12 @@
         setNuevoRutCorregido("");
         alert(
           yaTeniaBoleta
-            ? `✅ Cadena tributaria completada:\n1. Nota de Crédito 61 N° ${folioNc61} emitida anulando Boleta #${orden.folioSii}.\n2. Factura 33 N° ${folioFactura} emitida al RUT ${rutFormateado} y lista para enviar al cliente.`
-            : `✅ RUT validado (${rutFormateado}). Factura 33 N° ${folioFactura} emitida y lista para despacho.`
+            ? `Cadena tributaria completada:\n1. Nota de Crédito 61 N° ${folioNc61} emitida anulando Boleta #${ordenSinId.folioSii}.\n2. Factura 33 N° ${folioFactura} emitida al RUT ${rutFormateado}.`
+            : `RUT validado (${rutFormateado}). Factura 33 N° ${folioFactura} emitida y lista para despacho.`
         );
       };
 
-      // ================= FLUJO DEVOLUCIONES Y CUARENTENA =================
+      // ================= FLUJO DEVOLUCIONES Y CUARENTENA (INCREMENTO ATÓMICO) =================
       const procesarDevolucionOrden = async (e) => {
         e.preventDefault();
         if (!ordenDevolucionModal) return;
@@ -987,7 +1124,7 @@
             nc61Emitida: Boolean(emitirNc61Devolucion),
             folioNc61: emitirNc61Devolucion ? folioNc61 : null,
             nota: notaDevolucion.trim(),
-            fecha: new Date(ahora).toLocaleString("es-CL")
+            fecha: fechaLegibleChile(ahora)
           }
         });
 
@@ -996,24 +1133,22 @@
         }
 
         if (estadoFisicoDevolucion === "intacto") {
-          // Devuelve al stock vendible
           const prod = catalogo.find((p) => p.id === orden.productoId) || catalogo.find((p) => p.nombre === orden.productoNombre);
           if (prod) {
             batch.update(empRef().collection("catalogo").doc(prod.id), {
-              stockOnline: (Number(prod.stockOnline) || 0) + Number(orden.cantidad || 1)
+              stockOnline: FieldValue.increment(Math.max(1, Number(orden.cantidad || 1)))
             });
           }
         } else {
-          // Envía a Cuarentena / Revisión Técnica (NO vuelve a venta online por error)
           batch.set(empRef().collection("cuarentena_productos").doc(), {
             productoId: orden.productoId || "",
             codigo: orden.codigoSku || "",
             nombre: orden.productoNombre,
-            cantidad: Number(orden.cantidad || 1),
+            cantidad: Math.max(1, Number(orden.cantidad || 1)),
             canalOrigen: orden.canal,
             folioOrigen: orden.folioSii || "S/N",
             nota: notaDevolucion.trim() || "Devuelto abierto / requiere revisión",
-            fecha: new Date(ahora).toLocaleString("es-CL"),
+            fecha: fechaLegibleChile(ahora),
             timestamp: ahora
           });
         }
@@ -1023,39 +1158,40 @@
         setNotaDevolucion("");
         alert(
           estadoFisicoDevolucion === "intacto"
-            ? `✅ Devolución procesada: ${orden.cantidad}x ${orden.productoNombre} reingresado al stock vendible.`
-            : `⚠️ Devolución apartada en Cuarentena: ${orden.cantidad}x ${orden.productoNombre} quedó en Revisión Técnica para evitar vender un producto dañado.`
+            ? `Devolución procesada: ${orden.cantidad}x ${orden.productoNombre} reingresado al stock vendible.`
+            : `Devolución apartada en Cuarentena: ${orden.cantidad}x ${orden.productoNombre} quedó en Revisión Técnica.`
         );
       };
 
-      const resolverItemCuarentena = async (item, accion) => {
-        const pin = prompt("Ingresa la Clave de Supervisor para autorizar este movimiento de cuarentena:");
-        if (!pin || pin.trim() !== pinSupervisorVigente) {
-          if (pin !== null) alert("Clave de Supervisor incorrecta.");
-          return;
-        }
-        const batch = db.batch();
-        batch.delete(empRef().collection("cuarentena_productos").doc(item.id));
+      const resolverItemCuarentena = (item, accion) => {
+        pedirAutorizacionSupervisor(
+          accion === "rehabilitar" ? "Rehabilitar desde Cuarentena" : "Descartar Producto de Cuarentena",
+          `${item.cantidad}x ${item.nombre} — Requiere Clave de Supervisor.`,
+          async () => {
+            const batch = db.batch();
+            batch.delete(empRef().collection("cuarentena_productos").doc(item.id));
 
-        if (accion === "rehabilitar") {
-          const prod = catalogo.find((p) => p.id === item.productoId) || catalogo.find((p) => p.nombre === item.nombre);
-          if (prod) {
-            batch.update(empRef().collection("catalogo").doc(prod.id), {
-              stockOnline: (Number(prod.stockOnline) || 0) + Number(item.cantidad || 1)
+            if (accion === "rehabilitar") {
+              const prod = catalogo.find((p) => p.id === item.productoId) || catalogo.find((p) => p.nombre === item.nombre);
+              if (prod) {
+                batch.update(empRef().collection("catalogo").doc(prod.id), {
+                  stockOnline: FieldValue.increment(Math.max(1, Number(item.cantidad || 1)))
+                });
+              }
+            }
+
+            batch.set(empRef().collection("auditoria_inventario").doc(), {
+              producto: item.nombre,
+              detalle: accion === "rehabilitar"
+                ? `Rehabilitado desde Cuarentena (+${item.cantidad} unds al stock vendible)`
+                : `Dado de baja desde Cuarentena (${item.cantidad} unds como merma/descarte)`,
+              fecha: fechaLegibleChile(),
+              timestamp: Date.now()
             });
+
+            await batch.commit();
           }
-        }
-
-        batch.set(empRef().collection("auditoria_inventario").doc(), {
-          producto: item.nombre,
-          detalle: accion === "rehabilitar"
-            ? `Rehabilitado desde Cuarentena (+${item.cantidad} unds al stock vendible)`
-            : `Dado de baja desde Cuarentena (${item.cantidad} unds como merma/descarte)`,
-          fecha: new Date().toLocaleString("es-CL"),
-          timestamp: Date.now()
-        });
-
-        await batch.commit();
+        );
       };
 
       // ================= EDICIÓN PROTEGIDA DE PRODUCTOS CON CLAVE DE SUPERVISOR =================
@@ -1075,7 +1211,8 @@
       const guardarEdicionProductoAutorizada = async (e) => {
         e.preventDefault();
         if (!productoEditando) return;
-        if (pinAutorizacionEdit.trim() !== pinSupervisorVigente) {
+        const ok = await verificarClaveSupervisor(pinAutorizacionEdit, empresa);
+        if (!ok) {
           return alert("Clave de Supervisor incorrecta. Modificación rechazada.");
         }
 
@@ -1094,7 +1231,7 @@
         batch.set(empRef().collection("auditoria_inventario").doc(), {
           producto: editProdForm.nombre.trim().toUpperCase(),
           detalle: `Edición autorizada • Stock: ${stockAntes} → ${stockDespues} unds • SKU: ${editProdForm.codigo || "-"} ${editProdForm.motivo ? `• Motivo: ${editProdForm.motivo}` : ""}`,
-          fecha: new Date().toLocaleString("es-CL"),
+          fecha: fechaLegibleChile(),
           timestamp: Date.now()
         });
 
@@ -1103,45 +1240,51 @@
         setPinAutorizacionEdit("");
       };
 
-      const eliminarProductoCatalogo = async (prod) => {
-        const pin = prompt(`Ingresa la Clave de Supervisor para eliminar "${prod.nombre}" del catálogo:`);
-        if (!pin || pin.trim() !== pinSupervisorVigente) {
-          if (pin !== null) alert("Clave de Supervisor incorrecta.");
-          return;
-        }
-        const batch = db.batch();
-        batch.delete(empRef().collection("catalogo").doc(prod.id));
-        batch.set(empRef().collection("auditoria_inventario").doc(), {
-          producto: prod.nombre,
-          detalle: `Producto eliminado del catálogo (tenía ${Number(prod.stockOnline ?? 0)} unds)`,
-          fecha: new Date().toLocaleString("es-CL"),
-          timestamp: Date.now()
-        });
-        await batch.commit();
+      const eliminarProductoCatalogo = (prod) => {
+        pedirAutorizacionSupervisor(
+          "Eliminar Producto del Catálogo",
+          `Vas a eliminar "${prod.nombre}" (Stock actual: ${Number(prod.stockOnline ?? 0)} unds).`,
+          async () => {
+            const batch = db.batch();
+            batch.delete(empRef().collection("catalogo").doc(prod.id));
+            batch.set(empRef().collection("auditoria_inventario").doc(), {
+              producto: prod.nombre,
+              detalle: `Producto eliminado del catálogo (tenía ${Number(prod.stockOnline ?? 0)} unds)`,
+              fecha: fechaLegibleChile(),
+              timestamp: Date.now()
+            });
+            await batch.commit();
+          }
+        );
       };
 
-      const eliminarSimulacion = async (orden) => {
+      const eliminarSimulacion = (orden) => {
         if (orden.esSimulacion === false) {
           return alert("Documento real emitido al SII: no se puede eliminar por normativa tributaria.");
         }
-        if (!confirm(`¿Eliminar simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
-        const batch = db.batch();
-        batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
-        if (orden.timbradoSii) {
-          const esFactura33 = orden.tipoDte === 33;
-          batch.set(
-            empRef(),
-            {
-              cafConfig: {
-                ...cafConfig,
-                factura33Actual: esFactura33 ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
-                boleta39Actual: !esFactura33 ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
-              }
-            },
-            { merge: true }
-          );
-        }
-        await batch.commit();
+        pedirAutorizacionSupervisor(
+          "Eliminar Simulación",
+          `Eliminar ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii} de ${orden.comprador}.`,
+          async () => {
+            const batch = db.batch();
+            batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
+            if (orden.timbradoSii) {
+              const esFactura33 = orden.tipoDte === 33;
+              batch.set(
+                empRef(),
+                {
+                  cafConfig: {
+                    ...cafConfig,
+                    factura33Actual: esFactura33 ? Math.max(1, cafConfig.factura33Actual - 1) : cafConfig.factura33Actual,
+                    boleta39Actual: !esFactura33 ? Math.max(1, cafConfig.boleta39Actual - 1) : cafConfig.boleta39Actual
+                  }
+                },
+                { merge: true }
+              );
+            }
+            await batch.commit();
+          }
+        );
       };
 
       // ================= CONSEJERO ECONÓMICO & PEDIDO SUGERIDO GENERAL =================
@@ -1150,7 +1293,7 @@
         const ventasPorNombre = {};
         let minTs = Date.now();
 
-        ordenes.filter((o) => !o.anuladaPorNc61).forEach((o) => {
+        ordenes.filter((o) => o.timbradoSii && !o.anuladaPorNc61 && !o.devolucionInfo).forEach((o) => {
           const ts = Number(o.timestamp || Date.now());
           if (ts < minTs) minTs = ts;
           const cant = Number(o.cantidad || 1);
@@ -1184,8 +1327,8 @@
           const ritmoSemanal = vendidos > 0 ? Math.max(vendidos, Math.ceil((vendidos / diasTranscurridos) * 7)) : 0;
           const coberturaObjetivo = ritmoSemanal * 2;
 
-          if (vendidos > 0 && (stockActual === 0 || stockActual < ritmoSemanal)) {
-            const baseSugerida = Math.max(4, coberturaObjetivo - stockActual);
+          if (vendidos > 0 && (stockActual <= 0 || stockActual < ritmoSemanal)) {
+            const baseSugerida = Math.max(4, coberturaObjetivo - Math.max(0, stockActual));
             const pedirFinal = cantidadesEditadasPedido[p.id] !== undefined ? Math.max(0, Number(cantidadesEditadasPedido[p.id])) : baseSugerida;
             urgentes.push({
               id: p.id,
@@ -1196,7 +1339,7 @@
               vendidos,
               ingresos,
               pedir: pedirFinal,
-              diagnostico: stockActual === 0
+              diagnostico: stockActual <= 0
                 ? `Quiebre total con ${vendidos} unds vendidas. Reposición inmediata para no frenar ingresos.`
                 : `Alta rotación (${vendidos} vendidas) y solo quedan ${stockActual} unds. Cubrir 14 días.`
             });
@@ -1249,8 +1392,7 @@
         setPedidoParaImprimir(analisisEconomicoInventario.listaCompraConsolidada);
         setTimeout(() => {
           window.print();
-          setPedidoParaImprimir([]);
-        }, 300);
+        }, 250);
       };
 
       const copiarPedidoWhatsApp = () => {
@@ -1259,7 +1401,7 @@
         const lineas = items.map((it, idx) => `${idx + 1}. ${it.codigo ? `[${it.codigo}] ` : ""}${it.nombre} — *${it.pedir} unds*`);
         const texto =
           `*PEDIDO DE REPOSICIÓN — ${empresa?.nombre || "EMPRESA"}*\n` +
-          `Fecha: ${new Date().toLocaleDateString("es-CL")}\n\n` +
+          `Fecha: ${fechaIsoChile()}\n\n` +
           lineas.join("\n") +
           `\n\nTotal ítems: ${items.length} | Total unidades: ${items.reduce((a, b) => a + b.pedir, 0)}`;
         navigator.clipboard?.writeText(texto);
@@ -1273,6 +1415,11 @@
 
       const ordenesJornadaActiva = useMemo(() => {
         return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii && !o.anuladaPorNc61).sort(ordenarPorFolioAsc);
+      }, [ordenes]);
+
+      // Incluye anuladas del día para que también se archiven al cerrar caja (sin dejar huérfanas)
+      const ordenesParaArchivarAlCierre = useMemo(() => {
+        return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii).sort(ordenarPorFolioAsc);
       }, [ordenes]);
 
       const facturasPorImprimirHoy = useMemo(() => {
@@ -1291,10 +1438,11 @@
         const total = ordenesJornadaActiva.reduce((acc, o) => acc + Number(o.totalClp || 0), 0);
         const boletas = ordenesJornadaActiva.filter((o) => o.tipoDte !== 33).length;
         const facturas = ordenesJornadaActiva.filter((o) => o.tipoDte === 33).length;
-        const folioDesde = ordenesJornadaActiva[0]?.folioSii || "-";
-        const folioHasta = ordenesJornadaActiva[ordenesJornadaActiva.length - 1]?.folioSii || "-";
-        return { total, boletas, facturas, folioDesde, folioHasta, docs: ordenesJornadaActiva.length };
-      }, [ordenesJornadaActiva]);
+        const anuladas = ordenesParaArchivarAlCierre.filter((o) => o.anuladaPorNc61).length;
+        const folioDesde = ordenesParaArchivarAlCierre[0]?.folioSii || "-";
+        const folioHasta = ordenesParaArchivarAlCierre[ordenesParaArchivarAlCierre.length - 1]?.folioSii || "-";
+        return { total, boletas, facturas, anuladas, folioDesde, folioHasta, docs: ordenesParaArchivarAlCierre.length };
+      }, [ordenesJornadaActiva, ordenesParaArchivarAlCierre]);
 
       const archivoHistoricoFiltrado = useMemo(() => {
         const q = busquedaArchivo.trim().toLowerCase();
@@ -1317,13 +1465,17 @@
           .sort(ordenarPorFolioAsc);
       }, [ordenes, busquedaArchivo, fechaDesdeArchivo, fechaHastaArchivo]);
 
-      const confirmarCierreDeDiaCaja = async () => {
-        if (ordenesJornadaActiva.length === 0) return;
+      const confirmarCierreDeDiaCaja = async (e) => {
+        e.preventDefault();
+        if (ordenesParaArchivarAlCierre.length === 0) return;
+        const ok = await verificarClaveSupervisor(pinCierreCaja, empresa);
+        if (!ok) return alert("Clave de Supervisor incorrecta para cerrar la caja del día.");
+
         setCerrandoDia(true);
         try {
           const ahora = Date.now();
-          const fechaIsoHoy = new Date(ahora).toISOString().slice(0, 10);
-          const fechaLegible = new Date(ahora).toLocaleString("es-CL");
+          const fechaIsoHoy = fechaIsoChile(ahora);
+          const fechaLegible = fechaLegibleChile(ahora);
           const cierreDocRef = empRef().collection("cierres_diarios").doc();
 
           const batch = db.batch();
@@ -1333,6 +1485,7 @@
             cantidadDocumentos: resumenCierreActual.docs,
             boletasCount: resumenCierreActual.boletas,
             facturasCount: resumenCierreActual.facturas,
+            anuladasCount: resumenCierreActual.anuladas,
             folioDesde: resumenCierreActual.folioDesde,
             folioHasta: resumenCierreActual.folioHasta,
             totalClp: resumenCierreActual.total,
@@ -1340,7 +1493,7 @@
             timestamp: ahora
           });
 
-          ordenesJornadaActiva.forEach((o) => {
+          ordenesParaArchivarAlCierre.forEach((o) => {
             batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
               diaCerrado: true,
               fechaCierreDia: fechaIsoHoy,
@@ -1352,6 +1505,7 @@
           await batch.commit();
           setSeleccionLoteIds([]);
           setNotaCierreCaja("");
+          setPinCierreCaja("");
           setModalCierreCaja(false);
         } catch (err) {
           alert("Error al cerrar día: " + err.message);
@@ -1359,6 +1513,7 @@
         setCerrandoDia(false);
       };
 
+      // ================= IMPRESIÓN EN LOTE SEGURA (CONFIRMA ANTES DE SACAR DE PENDIENTES) =================
       const generarEImprimirLoteHoy = () => {
         if (seleccionLoteIds.length === 0) return;
         const seleccionados = facturasPorImprimirHoy
@@ -1367,22 +1522,27 @@
         if (seleccionados.length === 0) return;
 
         setLoteParaImprimir(seleccionados);
-        setTimeout(async () => {
+        setConfirmarImpresionLote(true);
+        setTimeout(() => {
           window.print();
-          const batch = db.batch();
-          const ahoraStr = new Date().toLocaleString("es-CL");
-          const ahoraTs = Date.now();
-          seleccionados.forEach((o) => {
-            batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
-              etiquetaImpresa: true,
-              fechaImpresion: ahoraStr,
-              fechaImpresionTs: ahoraTs
-            });
+        }, 250);
+      };
+
+      const marcarLoteComoImpresoConfirmado = async () => {
+        const batch = db.batch();
+        const ahoraStr = fechaLegibleChile();
+        const ahoraTs = Date.now();
+        loteParaImprimir.forEach((o) => {
+          batch.update(empRef().collection("ecommerce_ordenes").doc(o.id), {
+            etiquetaImpresa: true,
+            fechaImpresion: ahoraStr,
+            fechaImpresionTs: ahoraTs
           });
-          await batch.commit();
-          setLoteParaImprimir([]);
-          setSeleccionLoteIds([]);
-        }, 300);
+        });
+        await batch.commit();
+        setConfirmarImpresionLote(false);
+        setLoteParaImprimir([]);
+        setSeleccionLoteIds([]);
       };
 
       const generarEImprimirLoteHistorico = () => {
@@ -1393,10 +1553,10 @@
         if (seleccionados.length === 0) return;
 
         setLoteParaImprimir(seleccionados);
+        setConfirmarImpresionLote(false);
         setTimeout(() => {
           window.print();
-          setLoteParaImprimir([]);
-        }, 300);
+        }, 250);
       };
 
       const sugeridosCatalogo = useMemo(() => {
@@ -1438,7 +1598,7 @@
 
       const rankingProductosVendidos = useMemo(() => {
         const mapa = {};
-        ordenes.filter((o) => !o.anuladaPorNc61).forEach((o) => {
+        ordenes.filter((o) => o.timbradoSii && !o.anuladaPorNc61 && !o.devolucionInfo).forEach((o) => {
           const key = o.productoNombre || "Producto";
           if (!mapa[key]) mapa[key] = { nombre: key, unidades: 0, totalClp: 0 };
           mapa[key].unidades += Number(o.cantidad || 1);
@@ -1461,96 +1621,127 @@
         setManualProveedor("");
       };
 
-      const subirExcelCatalogo = async (e) => {
+      const subirExcelCatalogo = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        setImportandoExcel(true);
-        try {
-          const buf = await file.arrayBuffer();
-          const wb = XLSX.read(buf, { type: "array" });
-          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-          const normKey = (k) => String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-          const normVal = (v) => String(v || "").trim().replace(/\s+/g, " ").toUpperCase();
-          const existentes = new Set(catalogo.map((p) => normVal(p.nombre)));
-          const nuevos = [];
-
-          rows.forEach((row) => {
-            const keys = Object.keys(row);
-            let cod = "", nom = "", prov = "";
-            keys.forEach((k) => {
-              const kn = normKey(k);
-              if (!cod && (kn.includes("cod") || kn.includes("sku") || kn === "id")) cod = normVal(row[k]);
-              else if (!nom && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art"))) nom = normVal(row[k]);
-              else if (!prov && (kn.includes("prov") || kn.includes("marc"))) prov = normVal(row[k]);
-            });
-            if (!nom && keys.length >= 2) {
-              cod = normVal(row[keys[0]]);
-              nom = normVal(row[keys[1]]);
-              if (keys.length >= 3) prov = normVal(row[keys[2]]);
-            } else if (!nom && keys.length === 1) {
-              nom = normVal(row[keys[0]]);
-            }
-            if (nom && !existentes.has(nom)) {
-              existentes.add(nom);
-              nuevos.push({ codigo: cod, nombre: nom, proveedor: prov, stockOnline: 0 });
-            }
-          });
-
-          const col = empRef().collection("catalogo");
-          for (let i = 0; i < nuevos.length; i += 400) {
-            const batch = db.batch();
-            nuevos.slice(i, i + 400).forEach((item) => batch.set(col.doc(), item));
-            await batch.commit();
-          }
-          alert(`Catálogo actualizado: ${nuevos.length} productos agregados con stock 0.`);
-        } catch (err) {
-          alert("Error al leer Excel: " + err.message);
-        }
-        setImportandoExcel(false);
         e.target.value = "";
+        pedirAutorizacionSupervisor(
+          "Importar Catálogo Masivo desde Excel",
+          `Archivo: ${file.name}. Se agregarán productos nuevos con stock inicial 0.`,
+          async () => {
+            setImportandoExcel(true);
+            try {
+              const buf = await file.arrayBuffer();
+              const wb = XLSX.read(buf, { type: "array" });
+              const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+              const normKey = (k) => String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+              const normVal = (v) => String(v || "").trim().replace(/\s+/g, " ").toUpperCase();
+              const existentes = new Set(catalogo.map((p) => normVal(p.nombre)));
+              const nuevos = [];
+
+              rows.forEach((row) => {
+                const keys = Object.keys(row);
+                let cod = "", nom = "", prov = "";
+                keys.forEach((k) => {
+                  const kn = normKey(k);
+                  if (!cod && (kn.includes("cod") || kn.includes("sku") || kn === "id")) cod = normVal(row[k]);
+                  else if (!nom && (kn.includes("desc") || kn.includes("prod") || kn.includes("nomb") || kn.includes("art"))) nom = normVal(row[k]);
+                  else if (!prov && (kn.includes("prov") || kn.includes("marc"))) prov = normVal(row[k]);
+                });
+                if (!nom && keys.length >= 2) {
+                  cod = normVal(row[keys[0]]);
+                  nom = normVal(row[keys[1]]);
+                  if (keys.length >= 3) prov = normVal(row[keys[2]]);
+                } else if (!nom && keys.length === 1) {
+                  nom = normVal(row[keys[0]]);
+                }
+                if (nom && !existentes.has(nom)) {
+                  existentes.add(nom);
+                  nuevos.push({ codigo: cod, nombre: nom, proveedor: prov, stockOnline: 0 });
+                }
+              });
+
+              const col = empRef().collection("catalogo");
+              for (let i = 0; i < nuevos.length; i += 400) {
+                const batch = db.batch();
+                nuevos.slice(i, i + 400).forEach((item) => batch.set(col.doc(), item));
+                await batch.commit();
+              }
+              alert(`Catálogo actualizado: ${nuevos.length} productos agregados con stock 0.`);
+            } catch (err) {
+              alert("Error al leer Excel: " + err.message);
+            }
+            setImportandoExcel(false);
+          }
+        );
       };
 
-      const guardarApisYEmisor = async (e) => {
+      const guardarApisYEmisor = (e) => {
         e.preventDefault();
-        setGuardandoConfig(true);
-        try {
-          await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
-          alert("Conexiones API y datos del emisor guardados.");
-        } catch (err) {
-          alert(err.message);
-        }
-        setGuardandoConfig(false);
+        pedirAutorizacionSupervisor(
+          "Guardar Credenciales API y Emisor SII",
+          "Modificar llaves de SII, Mercado Libre, Falabella o Lider exige Clave de Supervisor.",
+          async () => {
+            setGuardandoConfig(true);
+            try {
+              await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
+              alert("Conexiones API y datos del emisor guardados.");
+            } catch (err) {
+              alert(err.message);
+            }
+            setGuardandoConfig(false);
+          }
+        );
       };
 
       const guardarSeguridadYDespachos = async (e) => {
         e.preventDefault();
-        if (pinSupervisorActualInput.trim() !== pinSupervisorVigente) {
+        const ok = await verificarClaveSupervisor(pinSupervisorActualInput, empresa);
+        if (!ok) {
           return alert("Debes ingresar tu Clave de Supervisor actual para guardar cambios de seguridad y horarios.");
         }
         setGuardandoConfig(true);
         try {
           const payload = { despachosConfig };
           if (pinSupervisorNuevoInput.trim().length >= 4) {
-            payload.pinSupervisor = pinSupervisorNuevoInput.trim();
+            payload.pinSupervisorHash = await sha256Hex(pinSupervisorNuevoInput.trim());
+            payload.pinSupervisor = FieldValue.delete();
           }
           await empRef().set(payload, { merge: true });
           setPinSupervisorActualInput("");
           setPinSupervisorNuevoInput("");
-          alert("Horarios de despacho y clave de supervisor guardados.");
+          alert("Horarios de despacho y seguridad cifrada guardados correctamente.");
         } catch (err) {
           alert(err.message);
         }
         setGuardandoConfig(false);
       };
 
-      const agregarColaborador = async (e) => {
+      const agregarColaborador = (e) => {
         e.preventDefault();
         if (!nuevoColabNombre.trim() || !empresa) return;
-        const actual = Array.isArray(empresa.equipo) ? empresa.equipo : [];
-        await empRef().update({
-          equipo: [...actual, { id: Date.now().toString(), nombre: nuevoColabNombre.trim(), rol: nuevoColabRol }]
-        });
-        setNuevoColabNombre("");
+        pedirAutorizacionSupervisor(
+          "Agregar Trabajador al Equipo",
+          `Registrar a "${nuevoColabNombre.trim()}" con rol ${nuevoColabRol}.`,
+          async () => {
+            const actual = Array.isArray(empresa.equipo) ? empresa.equipo : [];
+            await empRef().update({
+              equipo: [...actual, { id: Date.now().toString(), nombre: nuevoColabNombre.trim(), rol: nuevoColabRol }]
+            });
+            setNuevoColabNombre("");
+          }
+        );
+      };
+
+      const quitarColaborador = (miembro) => {
+        pedirAutorizacionSupervisor(
+          "Quitar Trabajador del Equipo",
+          `Eliminar a "${miembro.nombre}" de la lista de personal.`,
+          async () => {
+            const actual = Array.isArray(empresa.equipo) ? empresa.equipo : [];
+            await empRef().update({ equipo: actual.filter((x) => x.id !== miembro.id) });
+          }
+        );
       };
 
       if (!empresa) {
@@ -1587,6 +1778,8 @@
         );
       });
 
+      const tienePinPersonalizado = Boolean(empresa.pinSupervisorHash || empresa.pinSupervisor);
+
       return (
         <div className={`min-h-screen pb-24 lg:pb-10 transition-colors ${T.pageBg}`}>
           {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN */}
@@ -1607,6 +1800,83 @@
           {!dteVisualizando && loteParaImprimir.length === 0 && pedidoParaImprimir.length > 0 && (
             <div className="print-only bg-white p-2">
               <HojaPedidoSugeridoPdf items={pedidoParaImprimir} empresa={empresa} filtroProveedor={filtroProvPedido} />
+            </div>
+          )}
+
+          {/* MODAL UNIFICADO DE AUTORIZACIÓN DE SUPERVISOR */}
+          {modalPinReq && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <form onSubmit={confirmarModalPin} className={`${T.card} rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl`}>
+                <div className="flex items-start justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded">
+                      Autorización Supervisor
+                    </span>
+                    <h2 className={`text-base font-extrabold mt-1 ${T.textMain}`}>{modalPinReq.titulo}</h2>
+                  </div>
+                  <button type="button" onClick={() => setModalPinReq(null)} className={`text-xs font-bold px-2.5 py-1 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
+                </div>
+
+                <p className={`text-xs ${T.textSub}`}>{modalPinReq.descripcion}</p>
+
+                {pinModalError && (
+                  <p className="text-xs font-bold text-rose-500 bg-rose-500/10 border border-rose-500/30 p-2.5 rounded-xl text-center">
+                    {pinModalError}
+                  </p>
+                )}
+
+                <div>
+                  <input
+                    type="password"
+                    value={pinModalInput}
+                    onChange={(e) => setPinModalInput(e.target.value)}
+                    placeholder="Ingresa Clave de Supervisor"
+                    className={`w-full rounded-xl px-4 py-3 text-center text-sm font-extrabold tracking-widest outline-none ${T.input}`}
+                    autoFocus
+                    required
+                  />
+                  {!tienePinPersonalizado && (
+                    <p className={`text-[11px] text-center mt-1.5 ${T.textSub}`}>Clave inicial por defecto: <strong>1234</strong></p>
+                  )}
+                </div>
+
+                <button type="submit" className={`w-full font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                  Autorizar Acción
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* MODAL CONFIRMACIÓN DE IMPRESIÓN DE LOTE (EVITA FALSOS POSITIVOS SI CANCELA) */}
+          {confirmarImpresionLote && loteParaImprimir.length > 0 && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <div className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
+                <div>
+                  <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Confirmación de Impresión</span>
+                  <h2 className={`text-base font-extrabold mt-1 ${T.textMain}`}>
+                    ¿Se imprimió correctamente el lote de {loteParaImprimir.length} documento(s)?
+                  </h2>
+                  <p className={`text-xs mt-1 ${T.textSub}`}>
+                    Si confirmas, los documentos pasarán a <strong>Impresas Hoy</strong> para no volver a imprimirse por error. Si cancelaste la impresión, toca "Volver" y seguirán en pendientes.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={marcarLoteComoImpresoConfirmado}
+                    className={`flex-1 font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}
+                  >
+                    Sí, Marcar como Impresas Hoy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setConfirmarImpresionLote(false); setLoteParaImprimir([]); }}
+                    className={`px-4 py-3 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}
+                  >
+                    No / Cancelar
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1741,11 +2011,11 @@
 
                 {ordenRefacturarModal.tipoDte === 39 ? (
                   <p className={`text-xs leading-relaxed ${T.textSub}`}>
-                    Esta orden ya salió con <strong>Boleta 39 N° {ordenRefacturarModal.folioSii}</strong>. Al ingresar el RUT válido del cliente, el sistema emitirá automáticamente la <strong>Nota de Crédito (Tipo 61)</strong> anulando la boleta y generará la <strong>Factura Electrónica (Tipo 33)</strong> para enviársela.
+                    Esta orden ya salió con <strong>Boleta 39 N° {ordenRefacturarModal.folioSii}</strong>. Al ingresar el RUT válido del cliente, se emitirá la <strong>Nota de Crédito (Tipo 61)</strong> anulando la boleta y se generará la <strong>Factura Electrónica (Tipo 33)</strong> lista para enviar.
                   </p>
                 ) : (
                   <p className={`text-xs leading-relaxed ${T.textSub}`}>
-                    El RUT original (<strong>{ordenRefacturarModal.rutComprador}</strong>) era inválido. Ingresa el RUT correcto enviado por el cliente para emitir su Factura 33 antes del despacho de las {ordenRefacturarModal.salidaDespachoHora || proximoCorte.salida} hrs.
+                    El RUT original (<strong>{ordenRefacturarModal.rutComprador}</strong>) era inválido. Ingresa el RUT correcto enviado por el cliente para emitir su Factura 33 antes del despacho ({ordenRefacturarModal.salidaDespachoHora || proximoCorte.salida}).
                   </p>
                 )}
 
@@ -1773,10 +2043,10 @@
             </div>
           )}
 
-          {/* MODAL EJECUTIVO DE CERRAR DÍA / CAJA */}
+          {/* MODAL EJECUTIVO DE CERRAR DÍA / CAJA (PROTEGIDO CON CLAVE SUPERVISOR) */}
           {modalCierreCaja && (
             <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
-              <div className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
+              <form onSubmit={confirmarCierreDeDiaCaja} className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
                 <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
                   <div>
                     <span className="text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded">
@@ -1784,7 +2054,7 @@
                     </span>
                     <h2 className={`text-lg font-extrabold mt-1 ${T.textMain}`}>Cerrar Día Laboral</h2>
                   </div>
-                  <button onClick={() => setModalCierreCaja(false)} className={`text-xs font-bold px-2.5 py-1.5 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
+                  <button type="button" onClick={() => { setModalCierreCaja(false); setPinCierreCaja(""); }} className={`text-xs font-bold px-2.5 py-1.5 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
                 </div>
 
                 {resumenCierreActual.docs === 0 ? (
@@ -1793,8 +2063,8 @@
                   <>
                     <div className={`${T.cardMuted} rounded-2xl p-4 space-y-2 text-xs`}>
                       <div className="flex justify-between">
-                        <span className={T.textSub}>Documentos emitidos hoy:</span>
-                        <span className={`font-extrabold ${T.textMain}`}>{resumenCierreActual.docs} ({resumenCierreActual.boletas} Boletas / {resumenCierreActual.facturas} Facturas)</span>
+                        <span className={T.textSub}>Documentos a archivar hoy:</span>
+                        <span className={`font-extrabold ${T.textMain}`}>{resumenCierreActual.docs} ({resumenCierreActual.boletas} Bol / {resumenCierreActual.facturas} Fact{resumenCierreActual.anuladas > 0 ? ` / ${resumenCierreActual.anuladas} Anul.` : ""})</span>
                       </div>
                       <div className="flex justify-between">
                         <span className={T.textSub}>Rango correlativo de folios:</span>
@@ -1814,13 +2084,20 @@
                       className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none ${T.input}`}
                     />
 
-                    <p className={`text-[11px] leading-relaxed ${T.textSub}`}>
-                      Al confirmar, todas las facturas de hoy se archivarán para siempre en el <strong>Archivo Histórico</strong> y el contador quedará en <strong>0</strong> para mañana.
-                    </p>
+                    <div className={`${T.cardMuted} p-3 rounded-xl space-y-1`}>
+                      <label className="text-[11px] font-extrabold text-amber-600 block">Clave de Supervisor para Cerrar Caja *</label>
+                      <input
+                        type="password"
+                        value={pinCierreCaja}
+                        onChange={(e) => setPinCierreCaja(e.target.value)}
+                        placeholder="Ingresa clave de supervisor"
+                        className={`w-full rounded-xl px-3.5 py-2 text-xs font-extrabold tracking-widest outline-none ${T.input}`}
+                        required
+                      />
+                    </div>
 
                     <button
-                      type="button"
-                      onClick={confirmarCierreDeDiaCaja}
+                      type="submit"
                       disabled={cerrandoDia}
                       className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold py-3.5 rounded-xl text-xs cursor-pointer"
                     >
@@ -1828,7 +2105,7 @@
                     </button>
                   </>
                 )}
-              </div>
+              </form>
             </div>
           )}
 
@@ -1846,7 +2123,7 @@
                       Analiza todo tu catálogo cruzando stock actual vs. ritmo real de ventas (cobertura proyectada a 14 días), sin requerir proveedores previos.
                     </p>
                   </div>
-                  <button onClick={() => setModalPedidoSugerido(false)} className={`text-xs font-extrabold px-3.5 py-2 rounded-xl cursor-pointer ${T.btnSec}`}>
+                  <button onClick={() => { setModalPedidoSugerido(false); setPedidoParaImprimir([]); }} className={`text-xs font-extrabold px-3.5 py-2 rounded-xl cursor-pointer ${T.btnSec}`}>
                     Cerrar
                   </button>
                 </div>
@@ -1982,27 +2259,34 @@
                 <div className="max-h-[70vh] overflow-y-auto py-1">
                   <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={async () => {
-                      window.print();
-                      if (!dteVisualizando.diaCerrado) {
-                        await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({
-                          etiquetaImpresa: true,
-                          fechaImpresion: new Date().toLocaleString("es-CL"),
-                          fechaImpresionTs: Date.now()
-                        });
-                      }
-                    }}
+                    onClick={() => window.print()}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}
                   >
                     Imprimir / Guardar PDF
                   </button>
-                  {dteVisualizando.esSimulacion !== false && !dteVisualizando.diaCerrado && (
+                  {!dteVisualizando.diaCerrado && !dteVisualizando.etiquetaImpresa && (
                     <button
                       onClick={async () => {
-                        await eliminarSimulacion(dteVisualizando);
+                        await empRef().collection("ecommerce_ordenes").doc(dteVisualizando.id).update({
+                          etiquetaImpresa: true,
+                          fechaImpresion: fechaLegibleChile(),
+                          fechaImpresionTs: Date.now()
+                        });
                         setDteVisualizando(null);
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-3 rounded-xl text-xs cursor-pointer"
+                    >
+                      Marcar Impresa
+                    </button>
+                  )}
+                  {dteVisualizando.esSimulacion !== false && !dteVisualizando.diaCerrado && (
+                    <button
+                      onClick={() => {
+                        const target = dteVisualizando;
+                        setDteVisualizando(null);
+                        eliminarSimulacion(target);
                       }}
                       className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-3 rounded-xl text-xs cursor-pointer"
                     >
@@ -2038,7 +2322,7 @@
               <form onSubmit={registrarOrdenOmnicanal} className={`${T.card} rounded-3xl max-w-lg w-full p-6 space-y-4`}>
                 <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
                   <h2 className={`text-base font-extrabold ${T.textMain}`}>Registrar / Simular Venta</h2>
-                  <button type="button" onClick={() => setModalNuevaVenta(false)} className={`text-xs font-bold px-2 py-1 cursor-pointer ${T.textSub}`}>✕</button>
+                  <button type="button" onClick={cerrarYLimpiarModalVenta} className={`text-xs font-bold px-2 py-1 cursor-pointer ${T.textSub}`}>✕</button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2072,7 +2356,7 @@
                       <span className={`text-[10px] font-bold block mt-1 ${validarRutChileno(rutCompradorNuevo) ? "text-emerald-500" : "text-amber-500"}`}>
                         {validarRutChileno(rutCompradorNuevo)
                           ? "✓ RUT válido (emitirá Factura 33)"
-                          : `⚠️ RUT inválido: quedará retenida esperando cliente hasta ${proximoCorte.limite} hrs`}
+                          : `⚠️ RUT inválido: quedará retenida esperando cliente hasta ${proximoCorte.limite}`}
                       </span>
                     )}
                   </div>
@@ -2113,24 +2397,41 @@
             </div>
           )}
 
-          {/* CABECERA EJECUTIVA */}
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 space-y-4 no-print">
-            <div className={`${T.card} rounded-2xl p-4 sm:p-5 border-t-4 ${T.borderTop} flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
-              <div className="flex items-center gap-3.5">
-                {empresa.logoBase64 && (
-                  <div className="w-20 h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1.5 shrink-0">
-                    <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
+          {/* CABECERA EJECUTIVA (ADAPTADA A MÓVIL COMPACTO Y PC PANORÁMICO) */}
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 space-y-4 no-print">
+            <div className={`${T.card} rounded-2xl p-3.5 sm:p-5 border-t-4 ${T.borderTop} flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
+              {/* FILA SUPERIOR: IDENTIDAD + ACCESO RÁPIDO MÓVIL (SUPERVISOR / SALIR) */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  {empresa.logoBase64 && (
+                    <div className="w-14 sm:w-20 h-10 sm:h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1 shrink-0">
+                      <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${T.tag}`}>RUT {empresa.rut}</span>
+                      <span className="text-[10px] font-bold text-emerald-600">Corte: {proximoCorte.salida}</span>
+                    </div>
+                    <h1 className={`text-base sm:text-xl font-extrabold mt-0.5 truncate ${T.textMain}`}>{empresa.nombre}</h1>
                   </div>
-                )}
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${T.tag}`}>RUT {empresa.rut}</span>
-                    <span className="text-[10px] font-bold text-emerald-600">Próx. Despacho: {proximoCorte.salida} hrs</span>
-                  </div>
-                  <h1 className={`text-lg sm:text-xl font-extrabold mt-0.5 ${T.textMain}`}>{empresa.nombre}</h1>
+                </div>
+
+                {/* BOTONES SECUNDARIOS EN MÓVIL (FILA 1 DERECHA) */}
+                <div className="flex lg:hidden items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => navegarAislado("supervisor-bi.html")}
+                    className="bg-slate-900 text-amber-400 border border-amber-500/40 text-[11px] font-extrabold px-2.5 py-2 rounded-xl cursor-pointer"
+                  >
+                    Supervisor
+                  </button>
+                  <button onClick={cerrarSesion} className={`text-[11px] font-bold px-2.5 py-2 rounded-xl cursor-pointer ${T.btnSec}`}>
+                    Salir
+                  </button>
                 </div>
               </div>
 
+              {/* MENÚ HORIZONTAL SOLO EN PC */}
               <div className="hidden lg:flex items-center gap-1.5 p-1 rounded-2xl border border-slate-200/40">
                 {menuOrdenado.map((item) => (
                   <button
@@ -2150,34 +2451,35 @@
                 ))}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <div className={`${T.cardMuted} px-2.5 py-2 rounded-xl flex items-center gap-2`}>
-                  <span className={`text-[11px] font-bold ${T.textMain}`}>
+              {/* CONTROLES PRINCIPALES: GRILLA 3 COLUMNAS EN MÓVIL / FILA EN PC */}
+              <div className="grid grid-cols-3 lg:flex items-center gap-2">
+                <div className={`${T.cardMuted} px-2.5 py-2 rounded-xl flex items-center justify-between lg:justify-start gap-1.5`}>
+                  <span className={`text-[11px] font-bold truncate ${T.textMain}`}>
                     {pilotoAutomaticoActivo ? "Auto: ON" : "Manual"}
                   </span>
                   <SwitchToggle checked={pilotoAutomaticoActivo} onChange={togglePilotoAutomatico} colorClass={T.sw} />
                 </div>
 
-                <button onClick={() => setModalNuevaVenta(true)} className={`text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer ${T.btn}`}>
+                <button onClick={() => setModalNuevaVenta(true)} className={`text-xs font-extrabold px-2.5 py-2.5 rounded-xl cursor-pointer text-center ${T.btn}`}>
                   + Venta
                 </button>
 
                 <button
-                  onClick={() => setModalCierreCaja(true)}
-                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer"
+                  onClick={() => { setPinCierreCaja(""); setModalCierreCaja(true); }}
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-2.5 py-2.5 rounded-xl cursor-pointer text-center truncate"
                 >
-                  Cerrar Día ({ordenesJornadaActiva.length})
+                  Cerrar ({ordenesJornadaActiva.length})
                 </button>
 
                 <button
                   onClick={() => navegarAislado("supervisor-bi.html")}
-                  className="bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/40 text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer"
+                  className="hidden lg:inline-block bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/40 text-xs font-extrabold px-3 py-2.5 rounded-xl cursor-pointer"
                   title="Área restringida con clave: Gráficas comparativas, Utilidad Neta e IVA"
                 >
                   Supervisor
                 </button>
 
-                <button onClick={cerrarSesion} className={`text-xs font-bold px-3 py-2.5 rounded-xl cursor-pointer ${T.btnSec}`}>
+                <button onClick={cerrarSesion} className={`hidden lg:inline-block text-xs font-bold px-3 py-2.5 rounded-xl cursor-pointer ${T.btnSec}`}>
                   Salir
                 </button>
               </div>
@@ -2188,37 +2490,44 @@
               <div className={`${T.card} rounded-2xl p-4 border-2 border-amber-500 space-y-2.5`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-extrabold uppercase text-amber-600">
-                    ⚠️ Atención: {ordenesRutInvalidoPendientes.length} Orden(es) con RUT Inválido Esperando Respuesta del Cliente
+                    ⚠️ Atención: {ordenesRutInvalidoPendientes.length} Orden(es) con RUT Inválido Esperando Respuesta
                   </span>
                   <span className={`text-[11px] font-bold ${T.textSub}`}>
-                    Regla activa: si no responde 1h antes del despacho, emite Boleta 39 automática.
+                    Regla activa: 1h antes del despacho se emite Boleta 39 automática.
                   </span>
                 </div>
                 <div className="space-y-2">
-                  {ordenesRutInvalidoPendientes.map((o) => (
-                    <div key={o.id} className={`${T.cardMuted} p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs`}>
-                      <div>
-                        <p className={`font-extrabold ${T.textMain}`}>
-                          {o.comprador} ({o.canal}) • RUT ingresado: <span className="text-rose-500">{o.rutComprador}</span> • Límite: <strong>{o.limiteDespachoHora} hrs</strong>
-                        </p>
-                        <p className={`text-[11px] italic mt-0.5 ${T.textSub}`}>Mensaje enviado: "{o.mensajeRutEnviado}"</p>
+                  {ordenesRutInvalidoPendientes.map((o) => {
+                    const plazoVencido = o.limiteDespachoTs > 0 && ahoraTick >= o.limiteDespachoTs;
+                    return (
+                      <div key={o.id} className={`${T.cardMuted} p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${plazoVencido ? "border-rose-500" : ""}`}>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`font-extrabold ${T.textMain}`}>{o.comprador} ({o.canal})</span>
+                            <span className="text-rose-500 font-extrabold">RUT: {o.rutComprador}</span>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${plazoVencido ? "bg-rose-600 text-white" : "bg-amber-400 text-slate-950"}`}>
+                              {plazoVencido ? "PLAZO VENCIDO — EMITIR BOLETA" : `Límite: ${o.limiteDespachoHora}`}
+                            </span>
+                          </div>
+                          <p className={`text-[11px] italic mt-1 ${T.textSub}`}>Mensaje enviado: "{o.mensajeRutEnviado}"</p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 shrink-0">
+                          <button
+                            onClick={() => { setOrdenRefacturarModal(o); setNuevoRutCorregido(""); }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${T.btn}`}
+                          >
+                            Ingresar RUT Corregido
+                          </button>
+                          <button
+                            onClick={() => emitirBoletaPorPlazoVencido(o)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${plazoVencido ? "bg-rose-600 text-white" : "bg-amber-500 text-slate-950"}`}
+                          >
+                            Emitir Boleta 39
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5 shrink-0">
-                        <button
-                          onClick={() => { setOrdenRefacturarModal(o); setNuevoRutCorregido(""); }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-extrabold cursor-pointer ${T.btn}`}
-                        >
-                          Ingresar RUT Corregido
-                        </button>
-                        <button
-                          onClick={() => emitirBoletaPorPlazoVencido(o)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 text-slate-950 cursor-pointer"
-                        >
-                          Emitir Boleta 39 (Plazo)
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -2347,7 +2656,7 @@
               </div>
             )}
 
-            {/* ================= VISTA 2: VENTAS (CON DEVOLUCIÓN Y REFACTURACIÓN NC 61 -> F33) ================= */}
+            {/* ================= VISTA 2: VENTAS ================= */}
             {vista === "ventas" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-8 space-y-4">
@@ -2466,7 +2775,7 @@
                     ) : (
                       <div className="space-y-2">
                         {equipo.map((m) => {
-                          const ventasColab = ordenes.filter((o) => o.vendedor === m.nombre).length;
+                          const ventasColab = ordenes.filter((o) => o.vendedor === m.nombre && !o.anuladaPorNc61).length;
                           return (
                             <div key={m.id} className={`${T.cardMuted} p-3 rounded-xl flex items-center justify-between text-xs`}>
                               <div>
@@ -2562,11 +2871,11 @@
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
                         <h2 className={`text-sm font-extrabold ${T.textMain}`}>Facturas y Boletas Por Imprimir — Jornada Actual (Orden de Folio)</h2>
-                        <p className={`text-xs ${T.textSub}`}>Ordenadas estrictamente por número de folio (700, 701, 702...). Al imprimirlas pasan a "Impresas Hoy".</p>
+                        <p className={`text-xs ${T.textSub}`}>Ordenadas estrictamente por número de folio (700, 701, 702...). Al confirmar impresión pasan a "Impresas Hoy".</p>
                       </div>
                       <button
-                        onClick={() => setModalCierreCaja(true)}
-                        disabled={ordenesJornadaActiva.length === 0}
+                        onClick={() => { setPinCierreCaja(""); setModalCierreCaja(true); }}
+                        disabled={ordenesParaArchivarAlCierre.length === 0}
                         className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
                       >
                         Cerrar Día / Caja ({ordenesJornadaActiva.length})
@@ -2615,8 +2924,8 @@
                         <p className={`text-xs ${T.textSub}`}>Ya fueron impresas hoy y salieron de la cola de lotes. Al terminar tu jornada presiona "Cerrar Día / Caja".</p>
                       </div>
                       <button
-                        onClick={() => setModalCierreCaja(true)}
-                        disabled={ordenesJornadaActiva.length === 0}
+                        onClick={() => { setPinCierreCaja(""); setModalCierreCaja(true); }}
+                        disabled={ordenesParaArchivarAlCierre.length === 0}
                         className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
                       >
                         Cerrar Día / Caja ({ordenesJornadaActiva.length})
@@ -2714,6 +3023,18 @@
                         </div>
                       </div>
 
+                      {(busquedaArchivo || fechaDesdeArchivo || fechaHastaArchivo) && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={T.textSub}>Mostrando {archivoHistoricoFiltrado.length} documento(s) en orden de folio</span>
+                          <button
+                            onClick={() => { setBusquedaArchivo(""); setFechaDesdeArchivo(""); setFechaHastaArchivo(""); setSeleccionArchivoIds([]); }}
+                            className="font-bold underline cursor-pointer"
+                          >
+                            Limpiar Filtros
+                          </button>
+                        </div>
+                      )}
+
                       {archivoHistoricoFiltrado.length === 0 ? (
                         <div className={`${T.cardMuted} rounded-xl p-8 text-center space-y-1`}>
                           <p className={`text-xs font-bold ${T.textMain}`}>No hay facturas archivadas en ese rango o búsqueda</p>
@@ -2726,7 +3047,7 @@
                               <div
                                 key={o.id}
                                 onClick={() => setSeleccionArchivoIds((prev) => prev.includes(o.id) ? prev.filter((x) => x !== o.id) : [...prev, o.id])}
-                                className="py-3.5 flex items-center justify-between gap-3 cursor-pointer"
+                                className={`py-3.5 flex items-center justify-between gap-3 cursor-pointer ${o.anuladaPorNc61 ? "opacity-60" : ""}`}
                               >
                                 <div className="flex items-center gap-3 min-w-0">
                                   <input type="checkbox" checked={marcado} onChange={() => {}} className="w-4 h-4 shrink-0" />
@@ -2736,6 +3057,9 @@
                                         {o.tipoDte === 33 ? `Factura 33 N° ${o.folioSii}` : `Boleta 39 N° ${o.folioSii}`}
                                       </span>
                                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${T.tag}`}>{o.canal}</span>
+                                      {o.anuladaPorNc61 && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-600 text-white">Anulada NC 61</span>
+                                      )}
                                       <span className={`text-[11px] font-semibold ${T.textSub}`}>Fecha: {o.fechaIso || o.fechaCierreDia}</span>
                                     </div>
                                     <p className={`text-xs truncate mt-0.5 ${T.textSub}`}>
@@ -2772,7 +3096,7 @@
               </div>
             )}
 
-            {/* ================= VISTA 4: CATÁLOGO (EDICIÓN PROTEGIDA + CUARENTENA) ================= */}
+            {/* ================= VISTA 4: CATÁLOGO ================= */}
             {vista === "catalogo" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-8 space-y-4">
@@ -2803,7 +3127,7 @@
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
                         <h2 className={`text-base font-extrabold ${T.textMain}`}>Catálogo Maestro ({catalogo.length})</h2>
-                        <p className={`text-xs ${T.textSub}`}>Modificar stock, nombre o SKU exige <strong>Clave de Supervisor</strong> para proteger tu inventario.</p>
+                        <p className={`text-xs ${T.textSub}`}>Modificar stock, nombre, SKU o subir Excel exige <strong>Clave de Supervisor</strong>.</p>
                       </div>
                       <div className="flex flex-wrap gap-2 shrink-0">
                         <button
@@ -2850,18 +3174,16 @@
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
-                                <span className={`font-extrabold px-2.5 py-1 rounded-lg ${T.tag}`}>{st} unds</span>
+                                <span className={`font-extrabold px-2.5 py-1 rounded-lg ${st <= 0 ? "bg-rose-500/15 text-rose-500" : T.tag}`}>{st} unds</span>
                                 <button
                                   onClick={() => abrirEditorProducto(p)}
                                   className={`px-3 py-1 rounded-lg font-bold cursor-pointer ${T.btnSec}`}
-                                  title="Editar nombre, SKU o stock (requiere Clave Supervisor)"
                                 >
                                   Editar
                                 </button>
                                 <button
                                   onClick={() => eliminarProductoCatalogo(p)}
                                   className="px-2 py-1 rounded-lg font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 cursor-pointer"
-                                  title="Eliminar producto (requiere Clave Supervisor)"
                                 >
                                   ✕
                                 </button>
@@ -2875,13 +3197,10 @@
                 </div>
 
                 <div className="lg:col-span-4 space-y-4">
-                  {/* PANEL DE CUARENTENA / REVISIÓN TÉCNICA */}
                   <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                    <div className="flex items-center justify-between">
-                      <h3 className={`text-xs font-extrabold uppercase tracking-wider text-amber-500`}>
-                        Cuarentena / Devoluciones ({cuarentena.length})
-                      </h3>
-                    </div>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-500">
+                      Cuarentena / Devoluciones ({cuarentena.length})
+                    </h3>
                     {cuarentena.length === 0 ? (
                       <p className={`text-xs ${T.textSub}`}>Sin productos en revisión técnica.</p>
                     ) : (
@@ -2940,7 +3259,7 @@
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/30 pb-3">
                       <div>
                         <h2 className={`text-base font-extrabold ${T.textMain}`}>Centro de Conexiones API y Facturación SII</h2>
-                        <p className={`text-xs ${T.textSub}`}>Toca el botón <strong>?</strong> en cada plataforma para ver cómo obtener su clave.</p>
+                        <p className={`text-xs ${T.textSub}`}>Guardar llaves o activar Piloto Automático requiere Clave de Supervisor.</p>
                       </div>
                       <div className={`${T.cardMuted} px-3.5 py-2 rounded-xl flex items-center gap-2.5`}>
                         <span className={`text-xs font-bold ${T.textMain}`}>Piloto Automático</span>
@@ -3015,9 +3334,9 @@
                 {subTabConfig === "seguridad" && (
                   <form onSubmit={guardarSeguridadYDespachos} className={`${T.card} rounded-2xl p-6 space-y-5 max-w-2xl`}>
                     <div>
-                      <h2 className={`text-base font-extrabold ${T.textMain}`}>Seguridad de Supervisor y Horarios de Salida a Despacho</h2>
+                      <h2 className={`text-base font-extrabold ${T.textMain}`}>Seguridad de Supervisor (SHA-256) y Horarios de Despacho</h2>
                       <p className={`text-xs ${T.textSub}`}>
-                        Define cuántos despachos diarios salen (1, 2 o 3). Si un cliente ingresa mal su RUT, el sistema espera hasta 1 hora antes del próximo corte y luego emite Boleta 39 automáticamente.
+                        Define cuántos despachos diarios salen (1, 2 o 3). Si un cliente ingresa mal su RUT, el sistema espera hasta 1 hora antes del próximo corte disponible y luego emite Boleta 39.
                       </p>
                     </div>
 
@@ -3058,7 +3377,7 @@
                     <div className={`${T.cardMuted} p-4 rounded-xl space-y-3`}>
                       <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>Clave Privada de Supervisor</h3>
                       <p className={`text-[11px] ${T.textSub}`}>
-                        Se exige para entrar al área de Supervisor (gráficas, utilidades e IVA) y para editar stock/productos. {!empresa.pinSupervisor && <strong>(Clave inicial actual: 1234)</strong>}
+                        Se guarda cifrada (SHA-256) y se exige en el área de Supervisor y en toda modificación crítica. {!tienePinPersonalizado && <strong>(Clave inicial actual: 1234)</strong>}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <input
@@ -3089,7 +3408,7 @@
                   <div className={`${T.card} rounded-2xl p-6 space-y-4`}>
                     <div>
                       <h2 className={`text-base font-extrabold ${T.textMain}`}>Gestión de Personal y Roles</h2>
-                      <p className={`text-xs ${T.textSub}`}>Registra a tu equipo para asignar ventas, conteos físicos y despachos.</p>
+                      <p className={`text-xs ${T.textSub}`}>Agregar o quitar trabajadores exige Clave de Supervisor.</p>
                     </div>
                     <form onSubmit={agregarColaborador} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       <input type="text" value={nuevoColabNombre} onChange={(e) => setNuevoColabNombre(e.target.value)} placeholder="Nombre del trabajador *" className={`rounded-xl px-3.5 py-2.5 text-xs font-semibold ${T.input}`} required />
@@ -3105,7 +3424,7 @@
                             <p className={`text-sm font-extrabold ${T.textMain}`}>{m.nombre}</p>
                             <span className={`text-[11px] ${T.textSub}`}>{m.rol}</span>
                           </div>
-                          <button onClick={async () => { await empRef().update({ equipo: equipo.filter((x) => x.id !== m.id) }); }} className="text-xs font-bold text-rose-500 cursor-pointer">
+                          <button onClick={() => quitarColaborador(m)} className="text-xs font-bold text-rose-500 cursor-pointer">
                             Quitar
                           </button>
                         </div>
@@ -3168,7 +3487,8 @@
             )}
           </div>
 
-          <nav className={`lg:hidden fixed bottom-0 inset-x-0 z-40 border-t px-2 py-2 grid grid-cols-5 gap-1 no-print ${T.navBar}`}>
+          {/* BARRA INFERIOR MÓVIL LIMPIA (USA ETIQUETA CORTA "AJUSTES" PARA NO DESBORDAR) */}
+          <nav className={`lg:hidden fixed bottom-0 inset-x-0 z-40 border-t px-1.5 py-2 grid grid-cols-5 gap-1 no-print ${T.navBar}`}>
             {menuOrdenado.map((item) => {
               const activo = vista === item.id;
               return (
@@ -3179,9 +3499,9 @@
                     activo ? T.navActive : T.navIdle
                   }`}
                 >
-                  <span>{item.label}</span>
+                  <span className="truncate max-w-full">{item.shortLabel || item.label}</span>
                   {item.id === "facturas" && facturasPorImprimirHoy.length > 0 && (
-                    <span className="absolute -top-1 right-1.5 px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-amber-400 text-slate-950">
+                    <span className="absolute -top-1 right-1 px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-amber-400 text-slate-950">
                       {facturasPorImprimirHoy.length}
                     </span>
                   )}
