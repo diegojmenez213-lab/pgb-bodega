@@ -18,19 +18,26 @@
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
   </style>
   <script>
-    // Si el usuario vuelve a la portada con el botón Atrás, aseguramos limpieza de sesión residual si venía de cerrar sesión
     window.addEventListener("pageshow", function (e) {
       if (e.persisted) {
         window.location.reload();
       }
     });
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
   </script>
 </head>
-<body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 selection:bg-blue-600 selection:text-white">
+<body class="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center p-4 selection:bg-blue-600 selection:text-white">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:12px 16px; border-radius:12px; font-size:12px; font-weight:700; margin-bottom:16px; max-width:28rem; width:100%;"></div>
   <div id="root" class="w-full max-w-md"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -46,7 +53,7 @@
     const db = firebase.firestore();
 
     const RUT_PGB = "769497226";
-    const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+    const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase().slice(0, 9);
     const formatearRut = (r) => {
       const c = limpiarRut(r);
       if (c.length < 2) return c;
@@ -54,59 +61,121 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
+    // VALIDADOR OFICIAL DE RUT CHILENO (MÓDULO 11)
+    const validarRutChileno = (rut) => {
+      const limpio = limpiarRut(rut);
+      if (limpio.length < 7 || limpio.length > 9) return false;
+      const cuerpo = limpio.slice(0, -1);
+      const dv = limpio.slice(-1);
+      if (!/^\d+$/.test(cuerpo)) return false;
+      let suma = 0;
+      let multiplo = 2;
+      for (let i = cuerpo.length - 1; i >= 0; i--) {
+        suma += parseInt(cuerpo.charAt(i), 10) * multiplo;
+        multiplo = multiplo < 7 ? multiplo + 1 : 2;
+      }
+      const dvEsperado = 11 - (suma % 11);
+      const dvCalc = dvEsperado === 11 ? "0" : dvEsperado === 10 ? "K" : String(dvEsperado);
+      return dv === dvCalc;
+    };
+
     function LoginNexusApp() {
       const [rutInput, setRutInput] = useState("");
       const [claveInput, setClaveInput] = useState("");
+      const [verClave, setVerClave] = useState(false);
       const [cargando, setCargando] = useState(false);
       const [errorMsg, setErrorMsg] = useState("");
+      const [intentosFallidos, setIntentosFallidos] = useState(0);
+      const [bloqueoHastaTs, setBloqueoHastaTs] = useState(0);
+      const [segundosRestantes, setSegundosRestantes] = useState(0);
+
+      const loginLockRef = useRef(false);
 
       useEffect(() => {
+        // Al regresar a la portada se cierra automáticamente cualquier sesión temporal de Super Admin
+        sessionStorage.removeItem("nexus_admin_ok");
         auth.signInAnonymously().catch(() => {});
       }, []);
 
+      // Contador visual de pausa preventiva si excedió 5 intentos fallidos
+      useEffect(() => {
+        if (!bloqueoHastaTs) return;
+        const tick = () => {
+          const diff = Math.ceil((bloqueoHastaTs - Date.now()) / 1000);
+          if (diff <= 0) {
+            setBloqueoHastaTs(0);
+            setSegundosRestantes(0);
+            setIntentosFallidos(0);
+          } else {
+            setSegundosRestantes(diff);
+          }
+        };
+        tick();
+        const id = setInterval(tick, 1000);
+        return () => clearInterval(id);
+      }, [bloqueoHastaTs]);
+
+      const registrarFalloAcceso = (mensaje) => {
+        const nuevos = intentosFallidos + 1;
+        setIntentosFallidos(nuevos);
+        if (nuevos >= 5) {
+          setBloqueoHastaTs(Date.now() + 30000);
+          setErrorMsg("Demasiados intentos fallidos. Espera 30 segundos antes de volver a intentar.");
+        } else {
+          setErrorMsg(mensaje);
+        }
+      };
+
       const ingresarEmpresa = async (e) => {
         e.preventDefault();
-        setErrorMsg("");
-        const rutLimpio = limpiarRut(rutInput);
-        if (rutLimpio.length < 7) {
-          setErrorMsg("Ingresa un RUT empresarial válido.");
+        if (loginLockRef.current) return;
+
+        if (bloqueoHastaTs > Date.now()) {
+          setErrorMsg(`Acceso pausado temporalmente. Intenta en ${segundosRestantes}s.`);
           return;
         }
 
+        setErrorMsg("");
+        const rutLimpio = limpiarRut(rutInput);
+        if (rutLimpio.length < 7) {
+          setErrorMsg("Ingresa un RUT empresarial válido (mínimo 7 caracteres).");
+          return;
+        }
+
+        loginLockRef.current = true;
         setCargando(true);
         try {
-          await auth.signInAnonymously().catch(() => {});
+          if (!auth.currentUser) {
+            await auth.signInAnonymously().catch(() => {});
+          }
           const docRef = db.collection("saas_empresas").doc(rutLimpio);
           const snap = await docRef.get();
 
           if (!snap.exists) {
             if (rutLimpio === RUT_PGB) {
-              // Acceso directo PGB si aún no tiene ficha en saas_empresas
               sessionStorage.clear();
               localStorage.setItem("nexus_empresa_rut", RUT_PGB);
+              localStorage.setItem("nexus_session_ts", String(Date.now()));
               window.location.replace("pgb-operacion.html");
               return;
             }
-            setErrorMsg("Este RUT no está registrado en la plataforma. Contacta al administrador.");
-            setCargando(false);
+            registrarFalloAcceso("Este RUT no está registrado en la plataforma. Contacta al administrador.");
             return;
           }
 
-          const data = snap.data();
+          const data = snap.data() || {};
           if (data.activa === false) {
             setErrorMsg("El acceso para esta empresa se encuentra pausado temporalmente.");
-            setCargando(false);
             return;
           }
 
           const claveGuardada = String(data.claveAcceso || data.pin || "").trim();
           if (claveGuardada && claveInput.trim() !== claveGuardada) {
-            setErrorMsg("Clave de acceso incorrecta.");
-            setCargando(false);
+            registrarFalloAcceso("Clave de acceso incorrecta.");
             return;
           }
 
-          // Limpiamos cualquier rastro previo y usamos replace() para que el botón Atrás no regrese a otra empresa
+          // Sesión aislada por RUT usando replace() para bloquear retroceso entre empresas
           sessionStorage.clear();
           localStorage.setItem("nexus_empresa_rut", rutLimpio);
           localStorage.setItem("nexus_session_ts", String(Date.now()));
@@ -117,10 +186,20 @@
             window.location.replace("empresa-panel.html");
           }
         } catch (err) {
-          setErrorMsg("Error de conexión: " + err.message);
+          const msg = String(err?.message || "");
+          if (!navigator.onLine || msg.toLowerCase().includes("offline") || msg.toLowerCase().includes("unavailable")) {
+            setErrorMsg("Sin conexión a internet o servidor temporalmente no disponible. Verifica tu señal e intenta de nuevo.");
+          } else {
+            setErrorMsg("Error de conexión: " + msg);
+          }
+        } finally {
           setCargando(false);
+          loginLockRef.current = false;
         }
       };
+
+      const rutLimpioActual = limpiarRut(rutInput);
+      const bloqueadoAhora = segundosRestantes > 0;
 
       return (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-7 sm:p-9 shadow-2xl space-y-6">
@@ -150,28 +229,50 @@
                 value={rutInput}
                 onChange={(e) => setRutInput(formatearRut(e.target.value))}
                 placeholder="Ej: 77.528.042-5"
+                autoComplete="username"
                 className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-2xl px-4 py-3.5 text-sm font-bold text-white outline-none"
                 required
               />
+              {rutLimpioActual.length >= 7 && (
+                <p className={`text-[10px] font-bold mt-1.5 px-1 ${validarRutChileno(rutLimpioActual) ? "text-emerald-400" : "text-amber-400"}`}>
+                  {validarRutChileno(rutLimpioActual)
+                    ? "✓ Formato de RUT chileno verificado"
+                    : "⚠️ Revisa el dígito verificador del RUT"}
+                </p>
+              )}
             </div>
 
             <div>
               <label className="text-xs font-bold text-slate-300 block mb-1.5">Clave de Acceso</label>
-              <input
-                type="password"
-                value={claveInput}
-                onChange={(e) => setClaveInput(e.target.value)}
-                placeholder="Ingresa tu clave empresarial"
-                className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-2xl px-4 py-3.5 text-sm font-bold text-white outline-none"
-              />
+              <div className="relative">
+                <input
+                  type={verClave ? "text" : "password"}
+                  value={claveInput}
+                  onChange={(e) => setClaveInput(e.target.value)}
+                  placeholder="Ingresa tu clave empresarial"
+                  autoComplete="current-password"
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-2xl pl-4 pr-16 py-3.5 text-sm font-bold text-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setVerClave(!verClave)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 hover:text-white px-2 py-1 cursor-pointer"
+                >
+                  {verClave ? "Ocultar" : "Ver"}
+                </button>
+              </div>
             </div>
 
             <button
               type="submit"
-              disabled={cargando}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
+              disabled={cargando || bloqueadoAhora}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
             >
-              {cargando ? "Verificando Acceso..." : "Ingresar a mi Empresa →"}
+              {cargando
+                ? "Verificando Acceso..."
+                : bloqueadoAhora
+                  ? `Espera ${segundosRestantes}s...`
+                  : "Ingresar a mi Empresa →"}
             </button>
           </form>
 
