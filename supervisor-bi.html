@@ -20,6 +20,7 @@
       window.addEventListener("pageshow", function (ev) {
         var rutActual = limpiar(localStorage.getItem("nexus_empresa_rut"));
         if (!rutActual) window.location.replace("index.html");
+        else if (rutActual === RUT_PGB) window.location.replace("pgb-operacion.html");
         else if (ev.persisted) window.location.reload();
       });
       window.addEventListener("storage", function (ev) {
@@ -43,8 +44,18 @@
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
   </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
 </head>
 <body class="min-h-screen">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
@@ -62,8 +73,66 @@
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
+    const FieldValue = firebase.firestore.FieldValue;
 
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+
+    // FECHA Y HORA OFICIAL DE CHILE (AMERICA/SANTIAGO)
+    const fechaIsoChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date(ts));
+      } catch (e) {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+
+    const isoHaceDiasChile = (dias) => fechaIsoChile(Date.now() - dias * 86400000);
+
+    const horaBucketChile = (ts = Date.now(), horaFallback = "") => {
+      if (horaFallback && /^\d{2}:\d{2}/.test(horaFallback)) {
+        return `${horaFallback.slice(0, 2)}:00`;
+      }
+      try {
+        const parts = new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          hour: "2-digit",
+          hour12: false
+        }).formatToParts(new Date(ts));
+        const hPart = parts.find((p) => p.type === "hour");
+        const hh = hPart ? (hPart.value === "24" ? "00" : hPart.value.padStart(2, "0")) : "00";
+        return `${hh}:00`;
+      } catch (e) {
+        return `${String(new Date(ts).getHours()).padStart(2, "0")}:00`;
+      }
+    };
+
+    // CIFRADO SHA-256 SINCRONIZADO CON EMPRESA-PANEL
+    const sha256Hex = async (texto) => {
+      const str = String(texto || "").trim();
+      if (window.crypto && window.crypto.subtle) {
+        const data = new TextEncoder().encode(str);
+        const hashBuf = await window.crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      return str;
+    };
+
+    const verificarClaveSupervisor = async (pinIngresado, empObj) => {
+      const limpio = String(pinIngresado || "").trim();
+      if (!limpio) return false;
+      if (empObj?.pinSupervisorHash) {
+        const h = await sha256Hex(limpio);
+        return h === empObj.pinSupervisorHash;
+      }
+      const fallback = String(empObj?.pinSupervisor || "1234").trim();
+      return limpio === fallback;
+    };
 
     const TEMAS = {
       claro_retail: { dark: false, page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
@@ -76,7 +145,8 @@
       "Mercado Libre": { color: "#eab308", bg: "rgba(234, 179, 8, 0.22)" },
       "Falabella": { color: "#10b981", bg: "rgba(16, 185, 129, 0.22)" },
       "Lider": { color: "#2563eb", bg: "rgba(37, 99, 235, 0.22)" },
-      "Venta Directa": { color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.22)" }
+      "Venta Directa": { color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.22)" },
+      "Total Global": { color: "#0ea5e9", bg: "rgba(14, 165, 233, 0.20)" }
     };
 
     const COMISIONES_DEFAULT = {
@@ -84,13 +154,6 @@
       "Falabella": 16,
       "Lider": 14,
       "Venta Directa": 0
-    };
-
-    const isoHoy = () => new Date().toISOString().slice(0, 10);
-    const isoHaceDias = (dias) => {
-      const d = new Date();
-      d.setDate(d.getDate() - dias);
-      return d.toISOString().slice(0, 10);
     };
 
     function SupervisorBiApp() {
@@ -107,9 +170,10 @@
       const [pinError, setPinError] = useState("");
 
       // Controles de Gráfica Comparativa
-      const [fechaDesde, setFechaDesde] = useState(() => isoHaceDias(30));
-      const [fechaHasta, setFechaHasta] = useState(() => isoHoy());
+      const [fechaDesde, setFechaDesde] = useState(() => isoHaceDiasChile(30));
+      const [fechaHasta, setFechaHasta] = useState(() => fechaIsoChile());
       const [canalesActivos, setCanalesActivos] = useState(["Mercado Libre", "Falabella", "Lider", "Venta Directa"]);
+      const [modoSerie, setModoSerie] = useState("plataformas"); // plataformas | global
       const [tipoGrafica, setTipoGrafica] = useState("line"); // line | bar
 
       // Configuración de comisiones y seguridad
@@ -137,6 +201,11 @@
             return;
           }
           const data = { id: doc.id, ...doc.data() };
+          if (data.activa === false) {
+            localStorage.removeItem("nexus_empresa_rut");
+            window.location.replace("index.html");
+            return;
+          }
           setEmpresa(data);
           if (data.comisionesCanales) {
             setComisionesForm({ ...COMISIONES_DEFAULT, ...data.comisionesCanales });
@@ -165,12 +234,12 @@
       }, [rutActivo]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
-      const pinReal = String(empresa?.pinSupervisor || "1234").trim();
-      const tienePinPersonalizado = Boolean(empresa?.pinSupervisor);
+      const tienePinPersonalizado = Boolean(empresa?.pinSupervisorHash || empresa?.pinSupervisor);
 
-      const validarAccesoSupervisor = (e) => {
+      const validarAccesoSupervisor = async (e) => {
         e.preventDefault();
-        if (pinInput.trim() === pinReal) {
+        const ok = await verificarClaveSupervisor(pinInput, empresa);
+        if (ok) {
           setDesbloqueado(true);
           setPinError("");
           setPinInput("");
@@ -190,19 +259,20 @@
       };
 
       const aplicarRangoRapido = (dias) => {
+        const hoyCl = fechaIsoChile();
         if (dias === 0) {
-          setFechaDesde(isoHoy());
-          setFechaHasta(isoHoy());
+          setFechaDesde(hoyCl);
+          setFechaHasta(hoyCl);
         } else if (dias === -1) {
           setFechaDesde("2020-01-01");
-          setFechaHasta(isoHoy());
+          setFechaHasta(hoyCl);
         } else {
-          setFechaDesde(isoHaceDias(dias));
-          setFechaHasta(isoHoy());
+          setFechaDesde(isoHaceDiasChile(dias));
+          setFechaHasta(hoyCl);
         }
       };
 
-      // ================= CÁLCULOS FINANCIEROS Y SERIES PARA GRÁFICAS =================
+      // ================= MAPA DE COSTOS NETOS DESDE CATÁLOGO / FACTURAS XML =================
       const mapaCostosNetos = useMemo(() => {
         const porId = {};
         const porNom = {};
@@ -216,19 +286,30 @@
         return { porId, porNom };
       }, [catalogo]);
 
-      const ordenesPeriodo = useMemo(() => {
-        return ordenes.filter((o) => {
-          if (o.anuladaPorNc61) return false;
-          const f = o.fechaIso || new Date(o.timestamp || Date.now()).toISOString().slice(0, 10);
-          if (fechaDesde && f < fechaDesde) return false;
-          if (fechaHasta && f > fechaHasta) return false;
-          return canalesActivos.includes(o.canal || "Venta Directa");
+      // FILTRO ESTRICTO: SOLO VENTAS EFECTIVAS (TIMBRADAS, NO ANULADAS POR NC 61 Y NO DEVUELTAS)
+      const { ordenesPeriodo, excluidasPeriodo } = useMemo(() => {
+        let excluidas = 0;
+        const validas = [];
+
+        ordenes.forEach((o) => {
+          const f = o.fechaIso || fechaIsoChile(o.timestamp || Date.now());
+          if (fechaDesde && f < fechaDesde) return;
+          if (fechaHasta && f > fechaHasta) return;
+          if (!canalesActivos.includes(o.canal || "Venta Directa")) return;
+
+          if (!o.timbradoSii || o.anuladaPorNc61 || Boolean(o.devolucionInfo)) {
+            excluidas += 1;
+            return;
+          }
+          validas.push(o);
         });
+
+        return { ordenesPeriodo: validas, excluidasPeriodo: excluidas };
       }, [ordenes, fechaDesde, fechaHasta, canalesActivos]);
 
       const comprasPeriodo = useMemo(() => {
         return compras.filter((c) => {
-          const f = c.fecha || new Date(c.timestamp || Date.now()).toISOString().slice(0, 10);
+          const f = c.fecha || fechaIsoChile(c.timestamp || Date.now());
           if (fechaDesde && f < fechaDesde) return false;
           if (fechaHasta && f > fechaHasta) return false;
           return true;
@@ -242,6 +323,7 @@
         let ivaDebito = 0;
         let comisionesPagadas = 0;
         let costoMercaderiaNeto = 0;
+        let ordenesSinCosto = 0;
 
         const porCanal = {};
         ["Mercado Libre", "Falabella", "Lider", "Venta Directa"].forEach((c) => {
@@ -258,7 +340,8 @@
 
           const nomKey = String(o.productoNombre || "").trim().toUpperCase();
           const costoUnit = mapaCostosNetos.porId[o.productoId] || mapaCostosNetos.porNom[nomKey] || 0;
-          const costoLinea = costoUnit * Number(o.cantidad || 1);
+          if (costoUnit <= 0) ordenesSinCosto += 1;
+          const costoLinea = costoUnit * Math.max(1, Number(o.cantidad || 1));
 
           ventasBrutas += bruto;
           ventasNetas += neto;
@@ -298,56 +381,78 @@
           costoMercaderiaNeto,
           comprasNetasPeriodo,
           gananciaNetaSinIva,
+          ordenesSinCosto,
           porCanal
         };
       }, [ordenesPeriodo, comprasPeriodo, empresa, mapaCostosNetos]);
 
       const T = TEMAS[empresa?.temaVisual || "claro_retail"] || TEMAS.claro_retail;
 
-      // ================= RENDER GRÁFICA 1: COMPARATIVA DE VENTAS POR PLATAFORMA =================
+      // ================= RENDER GRÁFICA 1: COMPARATIVA O CURVA GLOBAL CONSOLIDADA =================
       useEffect(() => {
         if (!desbloqueado || tabSup !== "graficas" || !chartVentasRef.current || !window.Chart) return;
         if (chartVentasInst.current) chartVentasInst.current.destroy();
 
-        const d1 = new Date(fechaDesde || isoHaceDias(30));
-        const d2 = new Date(fechaHasta || isoHoy());
-        const diffDias = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
-        const granularidad = diffDias <= 62 ? "dia" : diffDias <= 730 ? "mes" : "anio";
+        const esUnSoloDia = Boolean(fechaDesde && fechaHasta && fechaDesde === fechaHasta);
+        const d1 = new Date(`${fechaDesde || isoHaceDiasChile(30)}T12:00:00`);
+        const d2 = new Date(`${fechaHasta || fechaIsoChile()}T12:00:00`);
+        const diffDias = Math.max(1, Math.ceil((d2 - d1) / 86400000));
+        const granularidad = esUnSoloDia ? "hora" : (diffDias <= 62 ? "dia" : diffDias <= 730 ? "mes" : "anio");
 
-        const bucketKey = (iso) => {
-          if (granularidad === "dia") return iso.slice(0, 10);
-          if (granularidad === "mes") return iso.slice(0, 7);
-          return iso.slice(0, 4);
+        const bucketOrden = (o) => {
+          if (granularidad === "hora") return horaBucketChile(o.timestamp || Date.now(), o.horaCorta || "");
+          const f = o.fechaIso || fechaIsoChile(o.timestamp || Date.now());
+          if (granularidad === "dia") return f.slice(0, 10);
+          if (granularidad === "mes") return f.slice(0, 7);
+          return f.slice(0, 4);
         };
 
         const labelsSet = new Set();
-        ordenesPeriodo.forEach((o) => {
-          const f = o.fechaIso || new Date(o.timestamp || Date.now()).toISOString().slice(0, 10);
-          labelsSet.add(bucketKey(f));
-        });
+        ordenesPeriodo.forEach((o) => labelsSet.add(bucketOrden(o)));
         const labels = Array.from(labelsSet).sort();
-        const labelsFinales = labels.length > 0 ? labels : [fechaHasta || isoHoy()];
+        const labelsFinales = labels.length > 0 ? labels : [esUnSoloDia ? horaBucketChile() : (fechaHasta || fechaIsoChile())];
 
-        const datasets = canalesActivos.map((canal) => {
-          const mapa = {};
+        let datasets = [];
+        if (modoSerie === "global") {
+          const mapaGlobal = {};
           ordenesPeriodo.forEach((o) => {
-            if ((o.canal || "Venta Directa") !== canal) return;
-            const f = o.fechaIso || new Date(o.timestamp || Date.now()).toISOString().slice(0, 10);
-            const k = bucketKey(f);
-            mapa[k] = (mapa[k] || 0) + Number(o.totalClp || 0);
+            const k = bucketOrden(o);
+            mapaGlobal[k] = (mapaGlobal[k] || 0) + Number(o.totalClp || 0);
           });
-          const estilo = CANALES_COLOR[canal] || { color: "#64748b", bg: "rgba(100,116,139,0.2)" };
-          return {
-            label: canal,
-            data: labelsFinales.map((lbl) => mapa[lbl] || 0),
-            borderColor: estilo.color,
-            backgroundColor: tipoGrafica === "bar" ? estilo.color : estilo.bg,
-            borderWidth: 2.5,
-            tension: 0.3,
-            fill: tipoGrafica === "line" && canalesActivos.length === 1,
-            borderRadius: 6
-          };
-        });
+          const estilo = CANALES_COLOR["Total Global"];
+          datasets = [
+            {
+              label: `Total Global (${canalesActivos.length} ${canalesActivos.length === 1 ? "canal" : "canales"})`,
+              data: labelsFinales.map((lbl) => mapaGlobal[lbl] || 0),
+              borderColor: estilo.color,
+              backgroundColor: tipoGrafica === "bar" ? estilo.color : estilo.bg,
+              borderWidth: 3,
+              tension: 0.3,
+              fill: tipoGrafica === "line",
+              borderRadius: 6
+            }
+          ];
+        } else {
+          datasets = canalesActivos.map((canal) => {
+            const mapa = {};
+            ordenesPeriodo.forEach((o) => {
+              if ((o.canal || "Venta Directa") !== canal) return;
+              const k = bucketOrden(o);
+              mapa[k] = (mapa[k] || 0) + Number(o.totalClp || 0);
+            });
+            const estilo = CANALES_COLOR[canal] || { color: "#64748b", bg: "rgba(100,116,139,0.2)" };
+            return {
+              label: canal,
+              data: labelsFinales.map((lbl) => mapa[lbl] || 0),
+              borderColor: estilo.color,
+              backgroundColor: tipoGrafica === "bar" ? estilo.color : estilo.bg,
+              borderWidth: 2.5,
+              tension: 0.3,
+              fill: tipoGrafica === "line" && canalesActivos.length === 1,
+              borderRadius: 6
+            };
+          });
+        }
 
         const textColor = T.dark ? "#cbd5e1" : "#334155";
         const gridColor = T.dark ? "rgba(148,163,184,0.12)" : "rgba(15,23,42,0.07)";
@@ -385,7 +490,7 @@
         return () => {
           if (chartVentasInst.current) chartVentasInst.current.destroy();
         };
-      }, [desbloqueado, tabSup, ordenesPeriodo, canalesActivos, tipoGrafica, fechaDesde, fechaHasta, T.dark]);
+      }, [desbloqueado, tabSup, ordenesPeriodo, canalesActivos, modoSerie, tipoGrafica, fechaDesde, fechaHasta, T.dark]);
 
       // ================= RENDER GRÁFICA 2: DESGLOSE FINANCIERO PRIVADO =================
       useEffect(() => {
@@ -437,11 +542,12 @@
         try {
           const payload = { comisionesCanales: comisionesForm };
           if (nuevoPin.trim().length >= 4) {
-            payload.pinSupervisor = nuevoPin.trim();
+            payload.pinSupervisorHash = await sha256Hex(nuevoPin.trim());
+            payload.pinSupervisor = FieldValue.delete();
           }
           await empRef().set(payload, { merge: true });
           setNuevoPin("");
-          alert("Configuración de seguridad y comisiones guardada.");
+          alert("Configuración de comisiones y clave cifrada (SHA-256) guardada.");
         } catch (err) {
           alert(err.message);
         }
@@ -508,21 +614,21 @@
 
       return (
         <div className={`min-h-screen pb-16 transition-colors ${T.page}`}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 space-y-4">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-4 sm:pt-5 space-y-4">
             {/* CABECERA GERENCIAL */}
             <div className={`${T.card} rounded-2xl p-4 sm:p-5 border-t-4 ${T.top} flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3">
                 {empresa.logoBase64 && (
-                  <div className="w-16 h-11 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1 shrink-0">
+                  <div className="w-14 sm:w-16 h-10 sm:h-11 rounded-xl border border-slate-200 bg-white flex items-center justify-center p-1 shrink-0">
                     <img src={empresa.logoBase64} alt={empresa.nombre} className="max-h-full max-w-full object-contain" />
                   </div>
                 )}
-                <div>
+                <div className="min-w-0">
                   <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950">
                     Modo Supervisor Desbloqueado
                   </span>
-                  <h1 className={`text-lg sm:text-xl font-extrabold mt-0.5 ${T.main}`}>
-                    Gerencia, Gráficas & Utilidad Neta — {empresa.nombre}
+                  <h1 className={`text-base sm:text-xl font-extrabold mt-0.5 truncate ${T.main}`}>
+                    Gerencia & Utilidad Neta — {empresa.nombre}
                   </h1>
                 </div>
               </div>
@@ -543,10 +649,10 @@
               </div>
             </div>
 
-            {/* BARRA DE RANGO DE FECHAS UNIVERSAL (1 DÍA HASTA 10 AÑOS) */}
+            {/* BARRA DE RANGO DE FECHAS UNIVERSAL (1 DÍA HASTA 10 AÑOS — HORA CHILE) */}
             <div className={`${T.card} rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-xs font-extrabold ${T.sub}`}>Periodo:</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className={`text-xs font-extrabold mr-1 ${T.sub}`}>Periodo:</span>
                 {[
                   { label: "Hoy", dias: 0 },
                   { label: "7 Días", dias: 7 },
@@ -564,11 +670,15 @@
                 ))}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <label className={`font-bold ${T.sub}`}>Desde:</label>
-                <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className={`rounded-xl px-3 py-1.5 font-bold ${T.input}`} />
-                <label className={`font-bold ${T.sub}`}>Hasta:</label>
-                <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className={`rounded-xl px-3 py-1.5 font-bold ${T.input}`} />
+              <div className="grid grid-cols-2 sm:flex items-center gap-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <label className={`font-bold ${T.sub}`}>Desde:</label>
+                  <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className={`w-full sm:w-auto rounded-xl px-2.5 py-1.5 font-bold ${T.input}`} />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <label className={`font-bold ${T.sub}`}>Hasta:</label>
+                  <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className={`w-full sm:w-auto rounded-xl px-2.5 py-1.5 font-bold ${T.input}`} />
+                </div>
               </div>
             </div>
 
@@ -581,7 +691,7 @@
                 2. Utilidad Neta, IVA y Comisiones
               </button>
               <button onClick={() => setTabSup("auditoria")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tabSup === "auditoria" ? T.btn : T.sec}`}>
-                3. Auditoría de Cambios ({auditoriaInv.length})
+                3. Auditoría ({auditoriaInv.length})
               </button>
               <button onClick={() => setTabSup("seguridad")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tabSup === "seguridad" ? T.btn : T.sec}`}>
                 4. Clave y % Comisiones
@@ -591,17 +701,16 @@
             {/* ================= TAB 1: GRÁFICAS COMPARATIVAS POR PLATAFORMA ================= */}
             {tabSup === "graficas" && (
               <div className="space-y-4">
-                {/* SELECTOR DE PLATAFORMAS (1, 2, 3 O TODAS) */}
-                <div className={`${T.card} rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
+                <div className={`${T.card} rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-xs font-extrabold ${T.sub}`}>Comparar plataformas:</span>
+                    <span className={`text-xs font-extrabold ${T.sub}`}>Plataformas:</span>
                     {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
                       const on = canalesActivos.includes(c);
                       return (
                         <button
                           key={c}
                           onClick={() => toggleCanal(c)}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
+                          className={`px-3 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
                             on ? T.btn : T.sec
                           }`}
                         >
@@ -612,13 +721,26 @@
                     })}
                     <button
                       onClick={() => setCanalesActivos(["Mercado Libre", "Falabella", "Lider", "Venta Directa"])}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold underline cursor-pointer ${T.sub}`}
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold underline cursor-pointer ${T.sub}`}
                     >
-                      Global (Todas)
+                      Todas
                     </button>
                   </div>
 
-                  <div className="flex gap-1.5 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => setModoSerie("plataformas")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${modoSerie === "plataformas" ? T.btn : T.sec}`}
+                    >
+                      Por Plataforma
+                    </button>
+                    <button
+                      onClick={() => setModoSerie("global")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${modoSerie === "global" ? T.btn : T.sec}`}
+                    >
+                      Total Global (1 Curva)
+                    </button>
+                    <span className="opacity-30 px-1">|</span>
                     <button onClick={() => setTipoGrafica("line")} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${tipoGrafica === "line" ? T.btn : T.sec}`}>
                       Líneas
                     </button>
@@ -628,12 +750,16 @@
                   </div>
                 </div>
 
-                {/* CONTENEDOR DE GRÁFICA */}
                 <div className={`${T.card} rounded-2xl p-5`}>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div>
-                      <h2 className={`text-sm font-extrabold ${T.main}`}>Evolución de Ventas Comparada ({ordenesPeriodo.length} órdenes)</h2>
-                      <p className={`text-xs ${T.sub}`}>Total seleccionado en periodo: <strong>${resumenFinanciero.ventasBrutas.toLocaleString("es-CL")} CLP</strong></p>
+                      <h2 className={`text-sm font-extrabold ${T.main}`}>
+                        Evolución de Ventas Efectivas ({ordenesPeriodo.length} órdenes válidas)
+                      </h2>
+                      <p className={`text-xs ${T.sub}`}>
+                        Total periodo: <strong>${resumenFinanciero.ventasBrutas.toLocaleString("es-CL")} CLP</strong>
+                        {excluidasPeriodo > 0 && ` • (${excluidasPeriodo} orden/es anuladas, devueltas o con RUT pendiente excluidas)`}
+                      </p>
                     </div>
                   </div>
                   <div className="h-[340px] w-full">
@@ -641,7 +767,6 @@
                   </div>
                 </div>
 
-                {/* TARJETAS COMPARATIVAS POR PLATAFORMA */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
                     const st = resumenFinanciero.porCanal[c];
@@ -668,6 +793,17 @@
             {/* ================= TAB 2: FINANZAS PRIVADAS (GANANCIA NETA, IVA, COMISIONES) ================= */}
             {tabSup === "finanzas" && (
               <div className="space-y-4">
+                {resumenFinanciero.ordenesSinCosto > 0 && (
+                  <div className={`${T.card} rounded-2xl p-4 border-2 border-amber-500/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs`}>
+                    <div>
+                      <span className="font-extrabold text-amber-500 uppercase block">Aviso de Precisión de Costos</span>
+                      <p className={T.sub}>
+                        Hay <strong>{resumenFinanciero.ordenesSinCosto} venta(s)</strong> en este periodo cuyo producto aún tiene costo neto <strong>$0</strong>. Carga sus facturas de compra XML o edita su costo neto en Catálogo para que la Ganancia Neta sea exacta al peso.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <div className={`${T.card} rounded-2xl p-4`}>
                     <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ventas Netas (Sin IVA)</span>
@@ -677,7 +813,7 @@
                   <div className={`${T.card} rounded-2xl p-4`}>
                     <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Comisiones Marketplaces</span>
                     <p className="text-xl font-extrabold text-rose-500 mt-1">-${resumenFinanciero.comisionesPagadas.toLocaleString("es-CL")}</p>
-                    <span className={`text-[11px] ${T.sub}`}>Según % por plataforma</span>
+                    <span className={`text-[11px] ${T.sub}`}>Según % configurado por canal</span>
                   </div>
                   <div className={`${T.card} rounded-2xl p-4`}>
                     <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Balance IVA (F29 Est.)</span>
@@ -686,8 +822,10 @@
                   </div>
                   <div className={`${T.card} rounded-2xl p-4`}>
                     <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ganancia Neta Real (Sin IVA)</span>
-                    <p className="text-xl font-extrabold text-emerald-500 mt-1">${resumenFinanciero.gananciaNetaSinIva.toLocaleString("es-CL")}</p>
-                    <span className={`text-[11px] ${T.sub}`}>Descontando IVA, comisiones y costos</span>
+                    <p className={`text-xl font-extrabold mt-1 ${resumenFinanciero.gananciaNetaSinIva >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                      ${resumenFinanciero.gananciaNetaSinIva.toLocaleString("es-CL")}
+                    </p>
+                    <span className={`text-[11px] ${T.sub}`}>Costo mercadería: ${resumenFinanciero.costoMercaderiaNeto.toLocaleString("es-CL")}</span>
                   </div>
                 </div>
 
@@ -743,7 +881,7 @@
               <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                 <div>
                   <h2 className={`text-sm font-extrabold ${T.main}`}>Registro de Modificaciones Autorizadas por Supervisor ({auditoriaInv.length})</h2>
-                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre o SKU de un producto con clave de supervisor, queda registrado aquí.</p>
+                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre, SKU o cuarentena con clave de supervisor, queda respaldado aquí.</p>
                 </div>
                 {auditoriaInv.length === 0 ? (
                   <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no se han registrado modificaciones manuales de inventario.</p>
@@ -767,8 +905,8 @@
             {tabSup === "seguridad" && (
               <form onSubmit={guardarSeguridadYComisiones} className={`${T.card} rounded-2xl p-6 space-y-5 max-w-2xl`}>
                 <div>
-                  <h2 className={`text-base font-extrabold ${T.main}`}>Seguridad de Supervisor y Comisiones por Canal</h2>
-                  <p className={`text-xs ${T.sub}`}>Define la clave privada que se exigirá para entrar a esta área y para autorizar cambios de inventario.</p>
+                  <h2 className={`text-base font-extrabold ${T.main}`}>Seguridad de Supervisor (SHA-256) y Comisiones por Canal</h2>
+                  <p className={`text-xs ${T.sub}`}>La clave se guarda cifrada (SHA-256) y se comparte con el panel principal para autorizar cambios críticos.</p>
                 </div>
 
                 <div className={`${T.muted} p-4 rounded-xl space-y-2`}>
@@ -806,7 +944,7 @@
                 </div>
 
                 <button type="submit" disabled={guardandoCfg} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                  {guardandoCfg ? "Guardando..." : "Guardar Clave de Supervisor y Comisiones"}
+                  {guardandoCfg ? "Guardando..." : "Guardar Clave Cifrada y Comisiones"}
                 </button>
               </form>
             )}
