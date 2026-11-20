@@ -83,7 +83,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -200,7 +200,6 @@
       let elegido = null;
       let esManana = false;
 
-      // Busca el primer despacho cuyo límite (-60 min) sea estrictamente futuro hoy
       for (let i = 0; i < lista.length; i++) {
         const [h, m] = lista[i].split(":").map(Number);
         const minsLimite = h * 60 + m - 60;
@@ -593,6 +592,9 @@
       const [vista, setVista] = useState("inicio");
       const [ahoraTick, setAhoraTick] = useState(() => Date.now());
 
+      // Evita sobrescribir formularios de Configuración mientras el usuario edita y entra una venta
+      const configInicializadaRef = useRef(false);
+
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
       const [cierresDiarios, setCierresDiarios] = useState([]);
@@ -600,7 +602,7 @@
       const [cuarentena, setCuarentena] = useState([]);
 
       // Modal Unificado de Autorización de Supervisor
-      const [modalPinReq, setModalPinReq] = useState(null); // { titulo, descripcion, onConfirm }
+      const [modalPinReq, setModalPinReq] = useState(null);
       const [pinModalInput, setPinModalInput] = useState("");
       const [pinModalError, setPinModalError] = useState("");
 
@@ -614,7 +616,7 @@
       const [totalNuevo, setTotalNuevo] = useState(19990);
       const [vendedorSeleccionado, setVendedorSeleccionado] = useState("");
 
-      // Ventas & Facturas
+      // Ventas, Facturas & Canal Exclusivo de Impresión (dte | lote | pedido | null)
       const [filtroCanalVenta, setFiltroCanalVenta] = useState("TODOS");
       const [busquedaVenta, setBusquedaVenta] = useState("");
       const [subTabFacturas, setSubTabFacturas] = useState("por_imprimir");
@@ -622,6 +624,7 @@
       const [loteParaImprimir, setLoteParaImprimir] = useState([]);
       const [confirmarImpresionLote, setConfirmarImpresionLote] = useState(false);
       const [dteVisualizando, setDteVisualizando] = useState(null);
+      const [modoImpresion, setModoImpresion] = useState(null);
 
       // Archivo Histórico Infinito
       const [busquedaArchivo, setBusquedaArchivo] = useState("");
@@ -707,6 +710,17 @@
         return () => clearInterval(timer);
       }, []);
 
+      // Limpieza automática de cola de impresión tras cerrar el diálogo de imprimir (excepto cuando espera confirmación)
+      useEffect(() => {
+        const handleAfterPrint = () => {
+          if (!confirmarImpresionLote) {
+            setModoImpresion(null);
+          }
+        };
+        window.addEventListener("afterprint", handleAfterPrint);
+        return () => window.removeEventListener("afterprint", handleAfterPrint);
+      }, [confirmarImpresionLote]);
+
       useEffect(() => {
         if (!rutActivo) {
           window.location.replace("index.html");
@@ -728,12 +742,18 @@
               return;
             }
             setEmpresa(data);
-            if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
-            if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
+            // Los folios CAF siempre se mantienen sincronizados en tiempo real
             if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
-            if (data.despachosConfig) setDespachosConfig((prev) => ({ ...prev, ...data.despachosConfig }));
-            if (data.modulosActivos?.m8_omnicanal) {
-              setCanalNuevo((prev) => (prev === "Venta Directa" ? "Mercado Libre" : prev));
+
+            // Los formularios editables solo se hidratan en la primera carga para nunca borrar texto mientras se edita
+            if (!configInicializadaRef.current) {
+              configInicializadaRef.current = true;
+              if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
+              if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
+              if (data.despachosConfig) setDespachosConfig((prev) => ({ ...prev, ...data.despachosConfig }));
+              if (data.modulosActivos?.m8_omnicanal) {
+                setCanalNuevo("Mercado Libre");
+              }
             }
           } else {
             localStorage.removeItem("nexus_empresa_rut");
@@ -774,7 +794,6 @@
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
 
-      // Helper para solicitar Clave de Supervisor con Modal elegante
       const pedirAutorizacionSupervisor = (titulo, descripcion, onConfirm) => {
         setPinModalInput("");
         setPinModalError("");
@@ -817,10 +836,12 @@
       const usaColaLider = Boolean(mods.m11_colas_print);
       const usaLectorComprasXml = Boolean(mods.m17_compras_prov);
 
+      // Usa siempre los horarios guardados en Firestore para mostrar el próximo corte real
       const horariosActivosDespacho = useMemo(() => {
-        const cant = Math.max(1, Math.min(3, Number(despachosConfig.cantidadHorarios || 2)));
-        return (despachosConfig.horarios || ["12:00", "16:30", "18:30"]).slice(0, cant);
-      }, [despachosConfig]);
+        const fuente = empresa?.despachosConfig || despachosConfig;
+        const cant = Math.max(1, Math.min(3, Number(fuente.cantidadHorarios || 2)));
+        return (fuente.horarios || ["12:00", "16:30", "18:30"]).slice(0, cant);
+      }, [empresa?.despachosConfig, despachosConfig]);
 
       const proximoCorte = useMemo(() => calcularProximoCorteDespacho(horariosActivosDespacho, ahoraTick), [horariosActivosDespacho, ahoraTick]);
 
@@ -886,15 +907,16 @@
         await empRef().update({ ordenMenu: nuevo });
       };
 
-      const pilotoAutomaticoActivo = Boolean(apisForm.siiModoAutomatico);
+      // Piloto Automático siempre lee estado vivo de Firestore (sin pisar campos del formulario)
+      const pilotoAutomaticoActivo = Boolean(empresa?.apis?.siiModoAutomatico);
       const togglePilotoAutomatico = () => {
+        const nuevoValor = !pilotoAutomaticoActivo;
         pedirAutorizacionSupervisor(
           pilotoAutomaticoActivo ? "Desactivar Piloto Automático" : "Activar Piloto Automático",
           "Cambiar el modo de emisión tributaria requiere autorización del Supervisor.",
           async () => {
-            const actualizado = { ...apisForm, siiModoAutomatico: !pilotoAutomaticoActivo };
-            setApisForm(actualizado);
-            await empRef().set({ apis: actualizado }, { merge: true });
+            setApisForm((prev) => ({ ...prev, siiModoAutomatico: nuevoValor }));
+            await empRef().set({ apis: { siiModoAutomatico: nuevoValor } }, { merge: true });
           }
         );
       };
@@ -1258,16 +1280,32 @@
         );
       };
 
+      // ELIMINAR SIMULACIÓN: RESTAURA EL STOCK ATÓMICAMENTE AL CATÁLOGO SI CORRESPONDE
       const eliminarSimulacion = (orden) => {
         if (orden.esSimulacion === false) {
           return alert("Documento real emitido al SII: no se puede eliminar por normativa tributaria.");
         }
         pedirAutorizacionSupervisor(
           "Eliminar Simulación",
-          `Eliminar ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii} de ${orden.comprador}.`,
+          `Eliminar ${orden.tipoDte === 33 ? "Factura 33" : orden.tipoDte === 39 ? "Boleta 39" : "Orden"} #${orden.folioSii || "S/N"} de ${orden.comprador} y restaurar stock.`,
           async () => {
             const batch = db.batch();
             batch.delete(empRef().collection("ecommerce_ordenes").doc(orden.id));
+
+            // Restaura stock si existía producto en catálogo, no fue ya devuelto intacto y no es una refactura de otra boleta
+            const debeRestaurarStock =
+              !orden.refBoletaAnulada &&
+              orden.devolucionInfo?.estadoFisico !== "intacto" &&
+              orden.productoId &&
+              orden.productoId !== "manual" &&
+              catalogo.some((p) => p.id === orden.productoId);
+
+            if (debeRestaurarStock) {
+              batch.update(empRef().collection("catalogo").doc(orden.productoId), {
+                stockOnline: FieldValue.increment(Math.max(1, Number(orden.cantidad || 1)))
+              });
+            }
+
             if (orden.timbradoSii) {
               const esFactura33 = orden.tipoDte === 33;
               batch.set(
@@ -1389,7 +1427,10 @@
         if (analisisEconomicoInventario.listaCompraConsolidada.length === 0) {
           return alert("No hay productos seleccionados en el pedido sugerido para imprimir.");
         }
+        setConfirmarImpresionLote(false);
+        setLoteParaImprimir([]);
         setPedidoParaImprimir(analisisEconomicoInventario.listaCompraConsolidada);
+        setModoImpresion("pedido");
         setTimeout(() => {
           window.print();
         }, 250);
@@ -1417,7 +1458,6 @@
         return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii && !o.anuladaPorNc61).sort(ordenarPorFolioAsc);
       }, [ordenes]);
 
-      // Incluye anuladas del día para que también se archiven al cerrar caja (sin dejar huérfanas)
       const ordenesParaArchivarAlCierre = useMemo(() => {
         return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii).sort(ordenarPorFolioAsc);
       }, [ordenes]);
@@ -1513,7 +1553,7 @@
         setCerrandoDia(false);
       };
 
-      // ================= IMPRESIÓN EN LOTE SEGURA (CONFIRMA ANTES DE SACAR DE PENDIENTES) =================
+      // ================= IMPRESIÓN EN LOTE SEGURA (MODO EXCLUSIVO + CONFIRMACIÓN) =================
       const generarEImprimirLoteHoy = () => {
         if (seleccionLoteIds.length === 0) return;
         const seleccionados = facturasPorImprimirHoy
@@ -1521,7 +1561,9 @@
           .sort(ordenarPorFolioAsc);
         if (seleccionados.length === 0) return;
 
+        setPedidoParaImprimir([]);
         setLoteParaImprimir(seleccionados);
+        setModoImpresion("lote");
         setConfirmarImpresionLote(true);
         setTimeout(() => {
           window.print();
@@ -1542,6 +1584,7 @@
         await batch.commit();
         setConfirmarImpresionLote(false);
         setLoteParaImprimir([]);
+        setModoImpresion(null);
         setSeleccionLoteIds([]);
       };
 
@@ -1552,8 +1595,10 @@
           .sort(ordenarPorFolioAsc);
         if (seleccionados.length === 0) return;
 
-        setLoteParaImprimir(seleccionados);
+        setPedidoParaImprimir([]);
         setConfirmarImpresionLote(false);
+        setLoteParaImprimir(seleccionados);
+        setModoImpresion("lote");
         setTimeout(() => {
           window.print();
         }, 250);
@@ -1621,17 +1666,24 @@
         setManualProveedor("");
       };
 
-      const subirExcelCatalogo = (e) => {
+      // LEE EL ARRAYBUFFER DEL EXCEL ANTES DE ABRIR EL MODAL DE CLAVE (EVITA QUE MÓVILES SUELTEN EL ARCHIVO)
+      const subirExcelCatalogo = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         e.target.value = "";
+        let buf;
+        try {
+          buf = await file.arrayBuffer();
+        } catch (err) {
+          return alert("No se pudo leer el archivo seleccionado: " + err.message);
+        }
+
         pedirAutorizacionSupervisor(
           "Importar Catálogo Masivo desde Excel",
           `Archivo: ${file.name}. Se agregarán productos nuevos con stock inicial 0.`,
           async () => {
             setImportandoExcel(true);
             try {
-              const buf = await file.arrayBuffer();
               const wb = XLSX.read(buf, { type: "array" });
               const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
               const normKey = (k) => String(k || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -1684,7 +1736,8 @@
           async () => {
             setGuardandoConfig(true);
             try {
-              await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
+              const payloadApis = { ...apisForm, siiModoAutomatico: pilotoAutomaticoActivo };
+              await empRef().set({ apis: payloadApis, datosEmisor }, { merge: true });
               alert("Conexiones API y datos del emisor guardados.");
             } catch (err) {
               alert(err.message);
@@ -1782,14 +1835,14 @@
 
       return (
         <div className={`min-h-screen pb-24 lg:pb-10 transition-colors ${T.pageBg}`}>
-          {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN */}
-          {dteVisualizando && (
+          {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN (SIN CONFLICTOS ENTRE ARCHIVO Y PEDIDO) */}
+          {modoImpresion === "dte" && dteVisualizando && (
             <div className="print-only bg-white p-2">
               <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisor} />
             </div>
           )}
 
-          {!dteVisualizando && loteParaImprimir.length > 0 && (
+          {modoImpresion === "lote" && loteParaImprimir.length > 0 && (
             <div className="print-only bg-white">
               {loteParaImprimir.map((docItem) => (
                 <HojaDocumentoOficialSii key={docItem.id} orden={docItem} empresa={empresa} datosEmisor={datosEmisor} />
@@ -1797,7 +1850,7 @@
             </div>
           )}
 
-          {!dteVisualizando && loteParaImprimir.length === 0 && pedidoParaImprimir.length > 0 && (
+          {modoImpresion === "pedido" && pedidoParaImprimir.length > 0 && (
             <div className="print-only bg-white p-2">
               <HojaPedidoSugeridoPdf items={pedidoParaImprimir} empresa={empresa} filtroProveedor={filtroProvPedido} />
             </div>
@@ -1847,7 +1900,7 @@
             </div>
           )}
 
-          {/* MODAL CONFIRMACIÓN DE IMPRESIÓN DE LOTE (EVITA FALSOS POSITIVOS SI CANCELA) */}
+          {/* MODAL CONFIRMACIÓN DE IMPRESIÓN DE LOTE */}
           {confirmarImpresionLote && loteParaImprimir.length > 0 && (
             <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
               <div className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
@@ -1857,7 +1910,7 @@
                     ¿Se imprimió correctamente el lote de {loteParaImprimir.length} documento(s)?
                   </h2>
                   <p className={`text-xs mt-1 ${T.textSub}`}>
-                    Si confirmas, los documentos pasarán a <strong>Impresas Hoy</strong> para no volver a imprimirse por error. Si cancelaste la impresión, toca "Volver" y seguirán en pendientes.
+                    Si confirmas, los documentos pasarán a <strong>Impresas Hoy</strong> para no volver a imprimirse por error. Si cancelaste la impresión, toca "No / Cancelar" y seguirán en pendientes.
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -1870,7 +1923,7 @@
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setConfirmarImpresionLote(false); setLoteParaImprimir([]); }}
+                    onClick={() => { setConfirmarImpresionLote(false); setLoteParaImprimir([]); setModoImpresion(null); }}
                     className={`px-4 py-3 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}
                   >
                     No / Cancelar
@@ -2123,7 +2176,7 @@
                       Analiza todo tu catálogo cruzando stock actual vs. ritmo real de ventas (cobertura proyectada a 14 días), sin requerir proveedores previos.
                     </p>
                   </div>
-                  <button onClick={() => { setModalPedidoSugerido(false); setPedidoParaImprimir([]); }} className={`text-xs font-extrabold px-3.5 py-2 rounded-xl cursor-pointer ${T.btnSec}`}>
+                  <button onClick={() => { setModalPedidoSugerido(false); setPedidoParaImprimir([]); setModoImpresion(null); }} className={`text-xs font-extrabold px-3.5 py-2 rounded-xl cursor-pointer ${T.btnSec}`}>
                     Cerrar
                   </button>
                 </div>
@@ -2252,7 +2305,7 @@
                   <span className="text-xs font-extrabold uppercase text-slate-700">
                     Documento Oficial SII • {dteVisualizando.tipoDte === 33 ? `Factura 33 N° ${dteVisualizando.folioSii}` : `Boleta 39 N° ${dteVisualizando.folioSii}`}
                   </span>
-                  <button onClick={() => setDteVisualizando(null)} className="bg-white border border-slate-300 text-xs font-bold px-3.5 py-1.5 rounded-xl cursor-pointer">
+                  <button onClick={() => { setDteVisualizando(null); setModoImpresion(null); }} className="bg-white border border-slate-300 text-xs font-bold px-3.5 py-1.5 rounded-xl cursor-pointer">
                     Cerrar
                   </button>
                 </div>
@@ -2261,7 +2314,10 @@
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => window.print()}
+                    onClick={() => {
+                      setModoImpresion("dte");
+                      setTimeout(() => window.print(), 150);
+                    }}
                     className={`flex-1 font-bold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}
                   >
                     Imprimir / Guardar PDF
@@ -2275,6 +2331,7 @@
                           fechaImpresionTs: Date.now()
                         });
                         setDteVisualizando(null);
+                        setModoImpresion(null);
                       }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-3 rounded-xl text-xs cursor-pointer"
                     >
@@ -2286,6 +2343,7 @@
                       onClick={() => {
                         const target = dteVisualizando;
                         setDteVisualizando(null);
+                        setModoImpresion(null);
                         eliminarSimulacion(target);
                       }}
                       className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-3 rounded-xl text-xs cursor-pointer"
@@ -2400,7 +2458,6 @@
           {/* CABECERA EJECUTIVA (ADAPTADA A MÓVIL COMPACTO Y PC PANORÁMICO) */}
           <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 space-y-4 no-print">
             <div className={`${T.card} rounded-2xl p-3.5 sm:p-5 border-t-4 ${T.borderTop} flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
-              {/* FILA SUPERIOR: IDENTIDAD + ACCESO RÁPIDO MÓVIL (SUPERVISOR / SALIR) */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-3 min-w-0">
                   {empresa.logoBase64 && (
@@ -2417,7 +2474,6 @@
                   </div>
                 </div>
 
-                {/* BOTONES SECUNDARIOS EN MÓVIL (FILA 1 DERECHA) */}
                 <div className="flex lg:hidden items-center gap-1.5 shrink-0">
                   <button
                     onClick={() => navegarAislado("supervisor-bi.html")}
@@ -2431,7 +2487,6 @@
                 </div>
               </div>
 
-              {/* MENÚ HORIZONTAL SOLO EN PC */}
               <div className="hidden lg:flex items-center gap-1.5 p-1 rounded-2xl border border-slate-200/40">
                 {menuOrdenado.map((item) => (
                   <button
@@ -2451,7 +2506,6 @@
                 ))}
               </div>
 
-              {/* CONTROLES PRINCIPALES: GRILLA 3 COLUMNAS EN MÓVIL / FILA EN PC */}
               <div className="grid grid-cols-3 lg:flex items-center gap-2">
                 <div className={`${T.cardMuted} px-2.5 py-2 rounded-xl flex items-center justify-between lg:justify-start gap-1.5`}>
                   <span className={`text-[11px] font-bold truncate ${T.textMain}`}>
@@ -2721,7 +2775,7 @@
                                   PDF
                                 </button>
                               )}
-                              {!o.anuladaPorNc61 && o.tipoDte === 39 && (
+                              {!o.anuladaPorNc61 && !o.devolucionInfo && o.tipoDte === 39 && (
                                 <button
                                   onClick={() => { setOrdenRefacturarModal(o); setNuevoRutCorregido(""); }}
                                   className={`px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.btnSec}`}
@@ -3487,7 +3541,7 @@
             )}
           </div>
 
-          {/* BARRA INFERIOR MÓVIL LIMPIA (USA ETIQUETA CORTA "AJUSTES" PARA NO DESBORDAR) */}
+          {/* BARRA INFERIOR MÓVIL LIMPIA */}
           <nav className={`lg:hidden fixed bottom-0 inset-x-0 z-40 border-t px-1.5 py-2 grid grid-cols-5 gap-1 no-print ${T.navBar}`}>
             {menuOrdenado.map((item) => {
               const activo = vista === item.id;
