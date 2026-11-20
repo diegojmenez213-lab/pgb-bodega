@@ -52,7 +52,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -103,12 +103,36 @@
       }
     };
 
+    // PARSEO NUMÉRICO SEGURO (ACEPTA STRINGS VACÍOS, PUNTOS Y COMAS DECIMALES)
+    const parseNum = (val) => {
+      if (val === "" || val === null || val === undefined) return 0;
+      const limpio = String(val).replace(",", ".").trim();
+      const n = Number(limpio);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    };
+
+    const redondear2 = (n) => Math.round(parseNum(n) * 100) / 100;
+
+    // LECTORES XML COMPATIBLES CON NAMESPACES / PREFIJOS (EJ. <sii:Detalle>)
+    const getTagsNS = (parent, name) => {
+      if (!parent) return [];
+      const nsList = typeof parent.getElementsByTagNameNS === "function"
+        ? Array.from(parent.getElementsByTagNameNS("*", name))
+        : [];
+      if (nsList.length > 0) return nsList;
+      return Array.from(parent.getElementsByTagName(name));
+    };
+
+    const getTagText = (parent, name) => {
+      const list = getTagsNS(parent, name);
+      return list.length > 0 ? list[0].textContent.trim() : "";
+    };
+
     // DECODIFICADOR INTELIGENTE PARA XML DEL SII CHILE (ISO-8859-1 / WINDOWS-1252 / UTF-8)
     const decodificarArchivoXmlSii = async (file) => {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
-      // Inspecciona cabecera ASCII para detectar encoding="ISO-8859-1" o similar
-      const cabecera = new TextDecoder("latin1").decode(bytes.slice(0, 220));
+      const cabecera = new TextDecoder("latin1").decode(bytes.slice(0, 240));
       const matchEnc = cabecera.match(/encoding\s*=\s*["']([^"']+)["']/i);
       const encDeclarado = matchEnc ? matchEnc[1].trim().toLowerCase() : "";
 
@@ -119,7 +143,6 @@
         return new TextDecoder("utf-8").decode(bytes);
       }
 
-      // Si no declara encoding, intenta UTF-8 estricto y hace fallback automático a ISO-8859-1/Windows-1252
       try {
         return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       } catch (e) {
@@ -149,8 +172,6 @@
       return limpio === fallback;
     };
 
-    const redondear2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-
     const TEMAS = {
       claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
       claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", muted: "bg-slate-100 border border-slate-200", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
@@ -174,17 +195,18 @@
       const [vistaPreviaFactura, setVistaPreviaFactura] = useState(null);
       const [fotoReferenciaUrl, setFotoReferenciaUrl] = useState("");
       const [guardando, setGuardando] = useState(false);
+      const confirmLockRef = useRef(false);
 
       // Modal Autorización Supervisor (SHA-256) antes de impactar stock y costos
       const [modalPinConfirmar, setModalPinConfirmar] = useState(false);
       const [pinConfirmInput, setPinConfirmInput] = useState("");
       const [pinConfirmError, setPinConfirmError] = useState("");
 
-      // Nuevo ítem manual en la pre-visualización
+      // Nuevo ítem manual en la pre-visualización (strings para escritura fluida en móvil)
       const [itemCod, setItemCod] = useState("");
       const [itemNom, setItemNom] = useState("");
-      const [itemCant, setItemCant] = useState(1);
-      const [itemNetoUnit, setItemNetoUnit] = useState(0);
+      const [itemCant, setItemCant] = useState("1");
+      const [itemNetoUnit, setItemNetoUnit] = useState("");
       const [itemExento, setItemExento] = useState(false);
 
       // Archivo Histórico Infinito de Compras
@@ -255,7 +277,7 @@
         setVistaPreviaFactura(null);
       };
 
-      // ================= LECTURA XML DTE SII (ISO-8859-1 / UTF-8 + PARSERERROR + DECIMALES) =================
+      // ================= LECTURA XML DTE SII (NAMESPACES + BONIFICADOS $0 + DESCUENTOS GLOBALES) =================
       const procesarArchivoXml = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -265,48 +287,62 @@
           const parser = new DOMParser();
           const xml = parser.parseFromString(texto, "text/xml");
 
-          if (xml.getElementsByTagName("parsererror").length > 0) {
+          if (getTagsNS(xml, "parsererror").length > 0) {
             return alert("El archivo seleccionado no es un XML válido del SII o está dañado.");
           }
 
-          const getTag = (parent, name) => {
-            const el = parent.getElementsByTagName(name)[0];
-            return el ? el.textContent.trim() : "";
-          };
+          // Si el XML es un EnvioDTE con varios DTE o contiene un nodo DTE/Documento, toma el documento principal
+          const docsDte = getTagsNS(xml, "Documento");
+          const raiz = docsDte.length > 0 ? docsDte[0] : xml;
 
-          const detalles = Array.from(xml.getElementsByTagName("Detalle"));
-          const rutProv = getTag(xml, "RUTEmisor") || "S/I";
-          const razonProv = getTag(xml, "RznSoc") || (rutProv !== "S/I" ? `PROVEEDOR ${formatearRut(rutProv)}` : "");
-          const folio = getTag(xml, "Folio") || String(Date.now()).slice(-6);
-          const fchEmis = getTag(xml, "FchEmis") || fechaIsoChile();
-          const mntNetoXml = Number(getTag(xml, "MntNeto") || 0);
-          const mntExeXml = Number(getTag(xml, "MntExe") || 0);
-          const ivaXml = Number(getTag(xml, "IVA") || 0);
-          const mntTotalXml = Number(getTag(xml, "MntTotal") || 0);
+          const detalles = getTagsNS(raiz, "Detalle");
+          const rutProv = getTagText(raiz, "RUTEmisor") || "S/I";
+          const razonProv = getTagText(raiz, "RznSoc") || (rutProv !== "S/I" ? `PROVEEDOR ${formatearRut(rutProv)}` : "");
+          const folio = getTagText(raiz, "Folio") || String(Date.now()).slice(-6);
+          const fchEmis = getTagText(raiz, "FchEmis") || fechaIsoChile();
+          const mntNetoXml = Number(getTagText(raiz, "MntNeto") || 0);
+          const mntExeXml = Number(getTagText(raiz, "MntExe") || 0);
+          const ivaXml = Number(getTagText(raiz, "IVA") || 0);
+          const mntTotalXml = Number(getTagText(raiz, "MntTotal") || 0);
 
           if (detalles.length === 0 && mntTotalXml === 0 && rutProv === "S/I") {
             return alert("El XML no contiene estructura DTE del SII (<Detalle>, <RUTEmisor> o <MntTotal>).");
           }
 
-          const items = detalles.map((det, idx) => {
-            const cod = (getTag(det, "VlrCodigo") || "").toUpperCase();
-            const nom = (getTag(det, "NmbItem") || "ARTICULO XML").toUpperCase();
-            const cant = Math.max(1, Number(getTag(det, "QtyItem") || 1));
-            const indExe = getTag(det, "IndExe") === "1";
+          // Detecta Descuentos o Recargos Globales al pie de la factura (<DscRcgGlobal>)
+          const dscRcgGlobales = getTagsNS(raiz, "DscRcgGlobal").map((dr, idx) => {
+            const tpoMov = (getTagText(dr, "TpoMov") || "D").toUpperCase(); // D = Descuento, R = Recargo
+            const glosa = getTagText(dr, "GlosaDR") || (tpoMov === "R" ? "Recargo Global" : "Descuento Global");
+            const tpoValor = (getTagText(dr, "TpoValor") || "$").trim();    // % o $
+            const valor = parseNum(getTagText(dr, "ValorDR"));
+            const exento = getTagText(dr, "IndExeDR") === "1";
+            return { id: `${Date.now()}_dr_${idx}`, tpoMov, glosa, tpoValor, valor, exento };
+          }).filter((dr) => dr.valor > 0);
 
-            // Prioriza MontoItem / QtyItem con precisión decimal (absorbe descuentos de línea sin descuadrar pesos)
-            const montoNetoLinea = Number(getTag(det, "MontoItem") || 0);
-            const precioUnitXml = Number(getTag(det, "PrcItem") || 0);
-            const netoUnitario = montoNetoLinea > 0
-              ? redondear2(montoNetoLinea / cant)
-              : redondear2(precioUnitXml);
+          const items = detalles.map((det, idx) => {
+            const cod = getTagText(det, "VlrCodigo").toUpperCase();
+            const nom = (getTagText(det, "NmbItem") || "ARTICULO XML").toUpperCase();
+            const cant = Math.max(1, parseNum(getTagText(det, "QtyItem") || 1));
+            const indExe = getTagText(det, "IndExe") === "1";
+
+            // Respeta estrictamente <MontoItem>0</MontoItem> (bonificado/gratis) sin caer a <PrcItem>
+            const montoItemStr = getTagText(det, "MontoItem");
+            const prcItemStr = getTagText(det, "PrcItem");
+            let netoUnitario = 0;
+
+            if (montoItemStr !== "") {
+              const montoNetoLinea = parseNum(montoItemStr);
+              netoUnitario = cant > 0 ? redondear2(montoNetoLinea / cant) : 0;
+            } else if (prcItemStr !== "") {
+              netoUnitario = redondear2(prcItemStr);
+            }
 
             return {
               uid: `${Date.now()}_${idx}`,
               codigo: cod,
               nombre: nom,
-              cantidad: cant,
-              netoUnitario: Math.max(0, netoUnitario),
+              cantidad: String(cant),
+              netoUnitario: String(netoUnitario),
               exentoIva: indExe,
               sumarAlStock: true
             };
@@ -323,6 +359,7 @@
             exentoDeclaradoXml: mntExeXml,
             ivaDeclaradoXml: ivaXml,
             totalDeclaradoXml: mntTotalXml,
+            dscRcgGlobales,
             items
           });
         } catch (err) {
@@ -347,6 +384,7 @@
             exentoDeclaradoXml: 0,
             ivaDeclaradoXml: 0,
             totalDeclaradoXml: 0,
+            dscRcgGlobales: [],
             items: []
           });
         }
@@ -368,6 +406,7 @@
           exentoDeclaradoXml: 0,
           ivaDeclaradoXml: 0,
           totalDeclaradoXml: 0,
+          dscRcgGlobales: [],
           items: []
         });
       };
@@ -392,21 +431,33 @@
             exentoDeclaradoXml: 0,
             ivaDeclaradoXml: tot - netoEst,
             totalDeclaradoXml: tot,
+            dscRcgGlobales: [],
             items: []
           });
           setTimbreScan("");
         }
       };
 
-      // ================= EDICIÓN EN TIEMPO REAL DE LA PRE-VISUALIZACIÓN =================
+      // ================= EDICIÓN FLUIDA EN MÓVIL (NO FUERZA "0" AL BORRAR EL CAMPO) =================
       const actualizarItemPrevia = (uid, campo, valor) => {
         setVistaPreviaFactura((prev) => {
           if (!prev) return null;
           const itemsAct = prev.items.map((it) => {
             if (it.uid !== uid) return it;
-            if (campo === "cantidad") return { ...it, cantidad: Math.max(0, Number(valor)) };
-            if (campo === "netoUnitario") return { ...it, netoUnitario: Math.max(0, Number(valor)) };
-            if (campo === "sumarAlStock" || campo === "exentoIva") return { ...it, [campo]: Boolean(valor) };
+            if (campo === "cantidad") {
+              const str = String(valor).replace(/[^0-9]/g, "");
+              return { ...it, cantidad: str };
+            }
+            if (campo === "netoUnitario") {
+              const norm = String(valor).replace(",", ".");
+              if (norm === "" || /^\d*\.?\d*$/.test(norm)) {
+                return { ...it, netoUnitario: norm };
+              }
+              return it;
+            }
+            if (campo === "sumarAlStock" || campo === "exentoIva") {
+              return { ...it, [campo]: Boolean(valor) };
+            }
             return { ...it, [campo]: String(valor).toUpperCase() };
           });
           return { ...prev, items: itemsAct };
@@ -423,12 +474,14 @@
       const agregarItemVistaPrevia = (e) => {
         e.preventDefault();
         if (!itemNom.trim() || !vistaPreviaFactura) return;
+        const cantNum = Math.max(1, Math.round(parseNum(itemCant) || 1));
+        const costoNum = redondear2(itemNetoUnit);
         const nuevo = {
           uid: `${Date.now()}_man`,
           codigo: itemCod.trim().toUpperCase(),
           nombre: itemNom.trim().toUpperCase(),
-          cantidad: Math.max(1, Number(itemCant)),
-          netoUnitario: Math.max(0, redondear2(itemNetoUnit)),
+          cantidad: String(cantNum),
+          netoUnitario: String(costoNum),
           exentoIva: Boolean(itemExento),
           sumarAlStock: true
         };
@@ -438,30 +491,47 @@
         });
         setItemCod("");
         setItemNom("");
-        setItemCant(1);
-        setItemNetoUnit(0);
+        setItemCant("1");
+        setItemNetoUnit("");
         setItemExento(false);
       };
 
-      // Cuadratura automática Neto Afecto + Exento + IVA 19% + Total
+      // Cuadratura automática: Líneas Afectas + Exentas + Descuentos/Recargos Globales + IVA 19% + Total
       const cuadraturaPrevia = useMemo(() => {
-        if (!vistaPreviaFactura) return { netoAfecto: 0, exento: 0, netoTotal: 0, iva: 0, total: 0, diferenciaXml: 0, cuadraConXml: true };
-        let netoAfecto = 0;
-        let exento = 0;
+        if (!vistaPreviaFactura) {
+          return { netoAfecto: 0, exento: 0, ajusteGlobalAfecto: 0, ajusteGlobalExento: 0, netoTotal: 0, iva: 0, total: 0, diferenciaXml: 0, cuadraConXml: true };
+        }
+        let netoAfectoBase = 0;
+        let exentoBase = 0;
 
         vistaPreviaFactura.items.forEach((it) => {
-          const linea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
-          if (it.exentoIva) exento += linea;
-          else netoAfecto += linea;
+          const linea = Math.round(parseNum(it.cantidad) * parseNum(it.netoUnitario));
+          if (it.exentoIva) exentoBase += linea;
+          else netoAfectoBase += linea;
         });
 
+        let ajusteGlobalAfecto = 0;
+        let ajusteGlobalExento = 0;
+        (vistaPreviaFactura.dscRcgGlobales || []).forEach((dr) => {
+          const signo = dr.tpoMov === "R" ? 1 : -1;
+          const base = dr.exento ? exentoBase : netoAfectoBase;
+          const monto = dr.tpoValor === "%" ? Math.round(base * (dr.valor / 100)) : Math.round(dr.valor);
+          if (dr.exento) ajusteGlobalExento += signo * monto;
+          else ajusteGlobalAfecto += signo * monto;
+        });
+
+        const netoAfecto = Math.max(0, netoAfectoBase + ajusteGlobalAfecto);
+        const exento = Math.max(0, exentoBase + ajusteGlobalExento);
         const iva = Math.round(netoAfecto * 0.19);
         const total = netoAfecto + exento + iva;
         const totXml = Number(vistaPreviaFactura.totalDeclaradoXml || 0);
         const diferenciaXml = totXml > 0 ? total - totXml : 0;
+
         return {
           netoAfecto,
           exento,
+          ajusteGlobalAfecto,
+          ajusteGlobalExento,
           netoTotal: netoAfecto + exento,
           iva,
           total,
@@ -472,7 +542,7 @@
 
       // ================= PASO PREVIO: VALIDACIÓN + SOLICITUD DE CLAVE DE SUPERVISOR =================
       const solicitarConfirmacionFactura = () => {
-        if (!vistaPreviaFactura) return;
+        if (!vistaPreviaFactura || guardando || confirmLockRef.current) return;
         if (vistaPreviaFactura.items.length === 0) {
           return alert("La factura debe tener al menos un producto para confirmar.");
         }
@@ -497,33 +567,35 @@
         setModalPinConfirmar(true);
       };
 
-      // ================= CONFIRMACIÓN ATÓMICA AUTORIZADA CON CLAVE DE SUPERVISOR =================
+      // ================= CONFIRMACIÓN ATÓMICA CON ANTI-DOBLE CLIC Y LOTES DE 450 =================
       const ejecutarConfirmacionConPin = async (e) => {
         e.preventDefault();
-        const ok = await verificarClaveSupervisor(pinConfirmInput, empresa);
-        if (!ok) {
-          setPinConfirmError("Clave de Supervisor incorrecta.");
-          return;
-        }
-
-        setModalPinConfirmar(false);
-        setPinConfirmInput("");
-        setPinConfirmError("");
-        setGuardando(true);
+        if (confirmLockRef.current || !vistaPreviaFactura) return;
+        confirmLockRef.current = true;
 
         try {
-          const batch = db.batch();
+          const ok = await verificarClaveSupervisor(pinConfirmInput, empresa);
+          if (!ok) {
+            setPinConfirmError("Clave de Supervisor incorrecta.");
+            confirmLockRef.current = false;
+            return;
+          }
+
+          setModalPinConfirmar(false);
+          setPinConfirmInput("");
+          setPinConfirmError("");
+          setGuardando(true);
+
           const porNombre = new Map(catalogo.map((p) => [String(p.nombre || "").trim().toUpperCase(), p]));
           const porSku = new Map(catalogo.filter((p) => p.codigo).map((p) => [String(p.codigo || "").trim().toUpperCase(), p]));
 
-          // Acumuladores para evitar pisar stock o duplicar fichas si un SKU viene repetido en el XML
           const deltasExistentes = new Map();
           const nuevosCatalogo = new Map();
           let lineasSumadas = 0;
           let unidadesTotalesSumadas = 0;
 
           const itemsGuardados = vistaPreviaFactura.items.map((it) => {
-            const cant = Math.max(0, Number(it.cantidad || 0));
+            const cant = Math.max(0, Math.round(parseNum(it.cantidad)));
             const netoUnitExacto = Math.max(0, redondear2(it.netoUnitario));
             const netoUnitRedondeado = Math.round(netoUnitExacto);
             const netoLinea = Math.round(cant * netoUnitExacto);
@@ -581,47 +653,68 @@
             };
           });
 
+          // Construye lista de operaciones y ejecuta en bloques seguros de 450
+          const ops = [];
           deltasExistentes.forEach((info, docId) => {
             const updateObj = { stockOnline: FieldValue.increment(info.cant) };
             if (info.ultimoCostoNeto > 0) {
               updateObj.ultimoCostoNeto = info.ultimoCostoNeto;
               updateObj.ultimoCostoBruto = info.ultimoCostoBruto;
             }
-            batch.update(catRef().doc(docId), updateObj);
+            ops.push({ type: "update", ref: catRef().doc(docId), data: updateObj });
           });
 
           nuevosCatalogo.forEach((nuevoProd) => {
-            batch.set(catRef().doc(), nuevoProd);
+            ops.push({ type: "set", ref: catRef().doc(), data: nuevoProd });
           });
 
           const ahora = Date.now();
           const fechaCargaLegible = fechaLegibleChile(ahora);
+          const ajusteGlobalTotal = cuadraturaPrevia.ajusteGlobalAfecto + cuadraturaPrevia.ajusteGlobalExento;
 
-          batch.set(empRef().collection("compras_proveedores").doc(), {
-            origen: vistaPreviaFactura.origen,
-            rutProveedor: vistaPreviaFactura.rutProveedor ? formatearRut(vistaPreviaFactura.rutProveedor) : "S/I",
-            proveedor: vistaPreviaFactura.proveedor.trim().toUpperCase(),
-            folio: vistaPreviaFactura.folio.trim(),
-            fecha: vistaPreviaFactura.fecha || fechaIsoChile(ahora),
-            fechaCargaLegible,
-            netoClp: cuadraturaPrevia.netoTotal,
-            netoAfectoClp: cuadraturaPrevia.netoAfecto,
-            exentoClp: cuadraturaPrevia.exento,
-            ivaClp: cuadraturaPrevia.iva,
-            totalClp: cuadraturaPrevia.total,
-            items: itemsGuardados,
-            timestamp: ahora
+          ops.push({
+            type: "set",
+            ref: empRef().collection("compras_proveedores").doc(),
+            data: {
+              origen: vistaPreviaFactura.origen,
+              rutProveedor: vistaPreviaFactura.rutProveedor ? formatearRut(vistaPreviaFactura.rutProveedor) : "S/I",
+              proveedor: vistaPreviaFactura.proveedor.trim().toUpperCase(),
+              folio: vistaPreviaFactura.folio.trim(),
+              fecha: vistaPreviaFactura.fecha || fechaIsoChile(ahora),
+              fechaCargaLegible,
+              netoClp: cuadraturaPrevia.netoTotal,
+              netoAfectoClp: cuadraturaPrevia.netoAfecto,
+              exentoClp: cuadraturaPrevia.exento,
+              ajusteGlobalClp: ajusteGlobalTotal,
+              dscRcgGlobales: vistaPreviaFactura.dscRcgGlobales || [],
+              ivaClp: cuadraturaPrevia.iva,
+              totalClp: cuadraturaPrevia.total,
+              items: itemsGuardados,
+              timestamp: ahora
+            }
           });
 
-          // Deja trazabilidad automática en Auditoría de Supervisor
-          batch.set(empRef().collection("auditoria_inventario").doc(), {
-            producto: `FACTURA COMPRA #${vistaPreviaFactura.folio.trim()} (${vistaPreviaFactura.proveedor.trim().toUpperCase()})`,
-            detalle: `Ingreso autorizado (${vistaPreviaFactura.origen}) • +${unidadesTotalesSumadas} unds en ${lineasSumadas} línea(s) • Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")} (IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")})`,
-            fecha: fechaCargaLegible,
-            timestamp: ahora
+          ops.push({
+            type: "set",
+            ref: empRef().collection("auditoria_inventario").doc(),
+            data: {
+              producto: `FACTURA COMPRA #${vistaPreviaFactura.folio.trim()} (${vistaPreviaFactura.proveedor.trim().toUpperCase()})`,
+              detalle: `Ingreso autorizado (${vistaPreviaFactura.origen}) • +${unidadesTotalesSumadas} unds en ${lineasSumadas} línea(s) • Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")} (IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")})`,
+              fecha: fechaCargaLegible,
+              timestamp: ahora
+            }
           });
 
-          await batch.commit();
+          const CHUNK = 450;
+          for (let i = 0; i < ops.length; i += CHUNK) {
+            const batch = db.batch();
+            ops.slice(i, i + CHUNK).forEach((op) => {
+              if (op.type === "update") batch.update(op.ref, op.data);
+              else batch.set(op.ref, op.data);
+            });
+            await batch.commit();
+          }
+
           alert(
             `Factura #${vistaPreviaFactura.folio} confirmada y archivada.\n` +
             `• Neto/Exento: $${cuadraturaPrevia.netoTotal.toLocaleString("es-CL")} | IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")} | Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")}\n` +
@@ -633,8 +726,10 @@
           setTab("historial");
         } catch (err) {
           alert("Error al confirmar factura: " + err.message);
+        } finally {
+          setGuardando(false);
+          confirmLockRef.current = false;
         }
-        setGuardando(false);
       };
 
       // ================= FILTRO ARCHIVO HISTÓRICO INFINITO DE COMPRAS =================
@@ -712,8 +807,8 @@
                   )}
                 </div>
 
-                <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                  Autorizar, Cuadrar IVA y Sumar Stock
+                <button type="submit" disabled={guardando} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer disabled:opacity-40 ${T.btn}`}>
+                  {guardando ? "Guardando..." : "Autorizar, Cuadrar IVA y Sumar Stock"}
                 </button>
               </form>
             </div>
@@ -761,6 +856,17 @@
                   </div>
                 </div>
 
+                {Array.isArray(facturaAuditando.dscRcgGlobales) && facturaAuditando.dscRcgGlobales.length > 0 && (
+                  <div className={`${T.muted} p-3 rounded-xl text-xs space-y-1`}>
+                    <span className="text-[10px] font-extrabold uppercase text-amber-600 block">Descuentos / Recargos Globales Aplicados</span>
+                    {facturaAuditando.dscRcgGlobales.map((dr, idx) => (
+                      <p key={idx} className={T.sub}>
+                        • {dr.glosa}: <strong>{dr.tpoMov === "R" ? "+" : "-"}{dr.tpoValor === "%" ? `${dr.valor}%` : `$${Number(dr.valor).toLocaleString("es-CL")}`}</strong> {dr.exento ? "(Exento)" : "(Afecto)"}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
                 <div className="overflow-x-auto border border-slate-200/40 rounded-2xl">
                   <table className="w-full text-left text-xs">
                     <thead className={`${T.muted} uppercase text-[10px]`}>
@@ -782,7 +888,10 @@
                         return (
                           <tr key={i}>
                             <td className="p-3 font-mono">{it.codigo || "-"}</td>
-                            <td className={`p-3 font-bold ${T.main}`}>{it.nombre}</td>
+                            <td className={`p-3 font-bold ${T.main}`}>
+                              {it.nombre}
+                              {unitNeto === 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-sky-100 text-sky-800">BONIFICADO</span>}
+                            </td>
                             <td className="p-3 text-center font-extrabold">{it.cantidad}</td>
                             <td className="p-3 text-right">${unitNeto.toLocaleString("es-CL", { maximumFractionDigits: 2 })}</td>
                             <td className="p-3 text-right font-semibold">${unitBruto.toLocaleString("es-CL")}</td>
@@ -903,6 +1012,24 @@
                       </div>
                     )}
 
+                    {/* AVISO DE DESCUENTOS / RECARGOS GLOBALES DETECTADOS EN EL XML */}
+                    {Array.isArray(vistaPreviaFactura.dscRcgGlobales) && vistaPreviaFactura.dscRcgGlobales.length > 0 && (
+                      <div className={`${T.muted} rounded-2xl p-3.5 border-2 border-amber-500/70 space-y-1 text-xs`}>
+                        <span className="text-[10px] font-extrabold uppercase text-amber-600 block">
+                          Descuento / Recargo Global Detectado en el XML (Aplicado a la Cuadratura)
+                        </span>
+                        {vistaPreviaFactura.dscRcgGlobales.map((dr) => (
+                          <p key={dr.id} className={T.main}>
+                            • <strong>{dr.glosa}:</strong>{" "}
+                            <span className={dr.tpoMov === "R" ? "text-rose-500 font-extrabold" : "text-emerald-600 font-extrabold"}>
+                              {dr.tpoMov === "R" ? "+" : "-"}{dr.tpoValor === "%" ? `${dr.valor}%` : `$${Number(dr.valor).toLocaleString("es-CL")}`}
+                            </span>{" "}
+                            <span className={T.sub}>{dr.exento ? "(Sobre Exento)" : "(Sobre Neto Afecto)"}</span>
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       <div className="sm:col-span-2">
                         <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Proveedor / Razón Social *</label>
@@ -947,13 +1074,18 @@
                       </div>
                     </div>
 
-                    {/* CUADRATURA TRIBUTARIA EN VIVO (AFECTO / EXENTO / IVA 19% / TOTAL) */}
+                    {/* CUADRATURA TRIBUTARIA EN VIVO (AFECTO / EXENTO / DESC. GLOBAL / IVA 19% / TOTAL) */}
                     <div className={`${T.muted} rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 items-center`}>
                       <div>
                         <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Neto Afecto {cuadraturaPrevia.exento > 0 ? "/ Exento" : ""}</span>
                         <p className={`text-base font-extrabold ${T.main}`}>${cuadraturaPrevia.netoTotal.toLocaleString("es-CL")}</p>
                         {cuadraturaPrevia.exento > 0 && (
-                          <span className={`text-[10px] ${T.sub}`}>Exento: ${cuadraturaPrevia.exento.toLocaleString("es-CL")}</span>
+                          <span className={`text-[10px] block ${T.sub}`}>Exento: ${cuadraturaPrevia.exento.toLocaleString("es-CL")}</span>
+                        )}
+                        {(cuadraturaPrevia.ajusteGlobalAfecto + cuadraturaPrevia.ajusteGlobalExento) !== 0 && (
+                          <span className="text-[10px] font-bold text-amber-600 block">
+                            Ajuste Global: {(cuadraturaPrevia.ajusteGlobalAfecto + cuadraturaPrevia.ajusteGlobalExento) > 0 ? "+" : ""}${(cuadraturaPrevia.ajusteGlobalAfecto + cuadraturaPrevia.ajusteGlobalExento).toLocaleString("es-CL")}
+                          </span>
                         )}
                       </div>
                       <div>
@@ -1001,9 +1133,12 @@
                           </thead>
                           <tbody className="divide-y divide-slate-200/30">
                             {vistaPreviaFactura.items.map((it) => {
-                              const netoLinea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
+                              const cantN = parseNum(it.cantidad);
+                              const netoUnitN = parseNum(it.netoUnitario);
+                              const netoLinea = Math.round(cantN * netoUnitN);
                               const totalLinea = it.exentoIva ? netoLinea : Math.round(netoLinea * 1.19);
-                              const unitFinal = it.exentoIva ? Math.round(Number(it.netoUnitario || 0)) : Math.round(Number(it.netoUnitario || 0) * 1.19);
+                              const unitFinal = it.exentoIva ? Math.round(netoUnitN) : Math.round(netoUnitN * 1.19);
+                              const esBonificado = it.netoUnitario !== "" && netoUnitN === 0;
                               return (
                                 <tr key={it.uid} className={!it.sumarAlStock ? "opacity-50" : ""}>
                                   <td className="p-2 text-center">
@@ -1038,23 +1173,29 @@
                                       onChange={(e) => actualizarItemPrevia(it.uid, "nombre", e.target.value)}
                                       className={`w-full rounded-lg px-2 py-1.5 text-xs font-bold ${T.input}`}
                                     />
+                                    {esBonificado && (
+                                      <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-sky-100 text-sky-800">
+                                        BONIFICADO ($0)
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="p-2">
                                     <input
-                                      type="number"
-                                      min="0"
+                                      type="text"
+                                      inputMode="numeric"
                                       value={it.cantidad}
                                       onChange={(e) => actualizarItemPrevia(it.uid, "cantidad", e.target.value)}
+                                      placeholder="0"
                                       className={`w-full rounded-lg px-2 py-1.5 text-xs font-extrabold text-center ${T.input}`}
                                     />
                                   </td>
                                   <td className="p-2">
                                     <input
-                                      type="number"
-                                      step="any"
-                                      min="0"
+                                      type="text"
+                                      inputMode="decimal"
                                       value={it.netoUnitario}
                                       onChange={(e) => actualizarItemPrevia(it.uid, "netoUnitario", e.target.value)}
+                                      placeholder="0"
                                       className={`w-full rounded-lg px-2 py-1.5 text-xs font-bold text-right ${T.input}`}
                                     />
                                   </td>
@@ -1101,8 +1242,26 @@
                             {catalogo.map((p) => <option key={p.id} value={p.nombre} />)}
                           </datalist>
                         </div>
-                        <input type="number" min="1" value={itemCant} onChange={(e) => setItemCant(e.target.value)} placeholder="Cant." className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
-                        <input type="number" step="any" min="0" value={itemNetoUnit} onChange={(e) => setItemNetoUnit(e.target.value)} placeholder="Costo Neto Unit." className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={itemCant}
+                          onChange={(e) => setItemCant(e.target.value.replace(/[^0-9]/g, ""))}
+                          placeholder="Cant."
+                          className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                          required
+                        />
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={itemNetoUnit}
+                          onChange={(e) => {
+                            const norm = e.target.value.replace(",", ".");
+                            if (norm === "" || /^\d*\.?\d*$/.test(norm)) setItemNetoUnit(norm);
+                          }}
+                          placeholder="Costo Neto Unit."
+                          className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                        />
                         <label className={`${T.muted} rounded-xl px-2.5 py-2 flex items-center justify-center gap-1.5 text-[11px] font-bold cursor-pointer`}>
                           <input type="checkbox" checked={itemExento} onChange={(e) => setItemExento(e.target.checked)} className="w-3.5 h-3.5" />
                           <span>Exento</span>
@@ -1128,7 +1287,7 @@
                       <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Carga Automática con Pre-Auditoría</span>
                       <h2 className={`text-base font-extrabold ${T.main}`}>Subir Archivo XML de Factura SII (.xml)</h2>
                       <p className={`text-xs ${T.sub}`}>
-                        Compatible con ISO-8859-1 y UTF-8 del SII. Extrae proveedor, folio, productos, descuentos e ítems exentos para que revises y confirmes antes de sumar stock.
+                        Compatible con ISO-8859-1, UTF-8, namespaces, bonificados ($0) y descuentos globales del SII. Muestra la tabla editable antes de sumar stock.
                       </p>
                       <label className={`block w-full text-center font-extrabold py-4 rounded-xl text-xs cursor-pointer shadow-sm ${T.btn}`}>
                         Seleccionar Archivo XML (.xml)
