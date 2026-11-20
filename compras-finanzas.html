@@ -76,6 +76,49 @@
       return `${c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}-${c.slice(-1)}`;
     };
 
+    // VALIDADOR OFICIAL DE RUT CHILENO (MÓDULO 11)
+    const validarRutChileno = (rut) => {
+      const limpio = limpiarRut(rut);
+      if (limpio.length < 7 || limpio.length > 9) return false;
+      const cuerpo = limpio.slice(0, -1);
+      const dv = limpio.slice(-1);
+      if (!/^\d+$/.test(cuerpo)) return false;
+      let suma = 0;
+      let multiplo = 2;
+      for (let i = cuerpo.length - 1; i >= 0; i--) {
+        suma += parseInt(cuerpo.charAt(i), 10) * multiplo;
+        multiplo = multiplo < 7 ? multiplo + 1 : 2;
+      }
+      const dvEsperado = 11 - (suma % 11);
+      const dvCalc = dvEsperado === 11 ? "0" : dvEsperado === 10 ? "K" : String(dvEsperado);
+      return dv === dvCalc;
+    };
+
+    // CLASIFICADOR Y BLOQUEADOR DE TIPOS DTE DEL SII CHILE
+    const TIPOS_DTE_INFO = {
+      33: { nombre: "Factura Electrónica (33)", permitido: true },
+      34: { nombre: "Factura Exenta Electrónica (34)", permitido: true },
+      46: { nombre: "Factura de Compra Electrónica (46)", permitido: true },
+      52: { nombre: "Guía de Despacho Electrónica (52)", permitido: false, motivo: "Una Guía de Despacho no da derecho a IVA Crédito ni reemplaza la factura definitiva." },
+      56: { nombre: "Nota de Débito Electrónica (56)", permitido: false, motivo: "Una Nota de Débito no puede cargarse como factura de ingreso de mercadería." },
+      61: { nombre: "Nota de Crédito Electrónica (61)", permitido: false, motivo: "Una Nota de Crédito anula/rebaja compras; cargarla aquí sumaría stock e IVA Crédito indebidamente." },
+      39: { nombre: "Boleta Electrónica (39)", permitido: false, motivo: "Una Boleta Electrónica no otorga derecho a IVA Crédito de compras." },
+      41: { nombre: "Boleta Exenta Electrónica (41)", permitido: false, motivo: "Una Boleta Exenta no corresponde a Factura de Proveedor." }
+    };
+
+    const evaluarTipoDteCompra = (tipoRaw) => {
+      const num = Number(String(tipoRaw || "").trim());
+      if (!num) return { tipo: 0, nombre: "Documento sin TipoDTE", permitido: true, motivo: "" };
+      const info = TIPOS_DTE_INFO[num];
+      if (info) return { tipo: num, ...info, motivo: info.motivo || "" };
+      return {
+        tipo: num,
+        nombre: `Documento Tipo ${num}`,
+        permitido: false,
+        motivo: `El TipoDTE ${num} no corresponde a una Factura de Compra válida (33, 34 o 46).`
+      };
+    };
+
     // FECHA Y HORA LOCAL OFICIAL DE CHILE (AMERICA/SANTIAGO)
     const fechaIsoChile = (ts = Date.now()) => {
       try {
@@ -150,6 +193,79 @@
       }
     };
 
+    // PARSEA UN NODO <Documento> INDIVIDUAL DE UN XML DTE O ENVIODTE
+    const parsearNodoDocumentoSii = (raiz, indiceDoc = 0) => {
+      const tipoDteRaw = getTagText(raiz, "TipoDTE");
+      const dteEval = evaluarTipoDteCompra(tipoDteRaw);
+      const esFacturaExenta34 = dteEval.tipo === 34;
+
+      const detalles = getTagsNS(raiz, "Detalle");
+      const rutProv = getTagText(raiz, "RUTEmisor") || "S/I";
+      const razonProv = getTagText(raiz, "RznSoc") || (rutProv !== "S/I" ? `PROVEEDOR ${formatearRut(rutProv)}` : "");
+      const folio = getTagText(raiz, "Folio") || String(Date.now()).slice(-6);
+      const fchEmis = getTagText(raiz, "FchEmis") || fechaIsoChile();
+      const mntNetoXml = Number(getTagText(raiz, "MntNeto") || 0);
+      const mntExeXml = Number(getTagText(raiz, "MntExe") || 0);
+      const ivaXml = Number(getTagText(raiz, "IVA") || 0);
+      const mntTotalXml = Number(getTagText(raiz, "MntTotal") || 0);
+
+      const dscRcgGlobales = getTagsNS(raiz, "DscRcgGlobal").map((dr, idx) => {
+        const tpoMov = (getTagText(dr, "TpoMov") || "D").toUpperCase();
+        const glosa = getTagText(dr, "GlosaDR") || (tpoMov === "R" ? "Recargo Global" : "Descuento Global");
+        const tpoValor = (getTagText(dr, "TpoValor") || "$").trim();
+        const valor = parseNum(getTagText(dr, "ValorDR"));
+        const exento = esFacturaExenta34 || getTagText(dr, "IndExeDR") === "1";
+        return { id: `${Date.now()}_${indiceDoc}_dr_${idx}`, tpoMov, glosa, tpoValor, valor, exento };
+      }).filter((dr) => dr.valor > 0);
+
+      const items = detalles.map((det, idx) => {
+        const cod = getTagText(det, "VlrCodigo").toUpperCase();
+        const nom = (getTagText(det, "NmbItem") || "ARTICULO XML").toUpperCase();
+        const cant = Math.max(1, parseNum(getTagText(det, "QtyItem") || 1));
+        const indExe = esFacturaExenta34 || getTagText(det, "IndExe") === "1";
+
+        const montoItemStr = getTagText(det, "MontoItem");
+        const prcItemStr = getTagText(det, "PrcItem");
+        let netoUnitario = 0;
+
+        if (montoItemStr !== "") {
+          const montoNetoLinea = parseNum(montoItemStr);
+          netoUnitario = cant > 0 ? redondear2(montoNetoLinea / cant) : 0;
+        } else if (prcItemStr !== "") {
+          netoUnitario = redondear2(prcItemStr);
+        }
+
+        return {
+          uid: `${Date.now()}_${indiceDoc}_${idx}`,
+          codigo: cod,
+          nombre: nom,
+          cantidad: String(cant),
+          netoUnitario: String(netoUnitario),
+          exentoIva: indExe,
+          sumarAlStock: true
+        };
+      });
+
+      return {
+        docUid: `${indiceDoc}_${limpiarRut(rutProv)}_${folio}`,
+        tipoDte: dteEval.tipo || 33,
+        tipoDteNombre: dteEval.nombre,
+        tipoDtePermitido: dteEval.permitido,
+        tipoDteMotivoBloqueo: dteEval.motivo,
+        origen: `Archivo XML ${dteEval.nombre}`,
+        rutProveedor: rutProv !== "S/I" ? formatearRut(rutProv) : "S/I",
+        proveedor: razonProv.toUpperCase(),
+        folio,
+        fecha: fchEmis,
+        netoDeclaradoXml: mntNetoXml,
+        exentoDeclaradoXml: mntExeXml,
+        ivaDeclaradoXml: ivaXml,
+        totalDeclaradoXml: mntTotalXml,
+        dscRcgGlobales,
+        items
+      };
+    };
+
     // CIFRADO SHA-256 SINCRONIZADO CON EMPRESA-PANEL Y SUPERVISOR-BI
     const sha256Hex = async (texto) => {
       const str = String(texto || "").trim();
@@ -190,6 +306,9 @@
       const [rutEmisor, setRutEmisor] = useState("");
       const [folioFactura, setFolioFactura] = useState("");
       const [timbreScan, setTimbreScan] = useState("");
+
+      // Selector de múltiples facturas cuando se sube un EnvioDTE
+      const [loteEnvioDte, setLoteEnvioDte] = useState([]);
 
       // Pre-visualización editable + foto de referencia local (no pesa en Firestore)
       const [vistaPreviaFactura, setVistaPreviaFactura] = useState(null);
@@ -271,13 +390,14 @@
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const catRef = () => (rutActivo === RUT_PGB ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
 
-      const limpiarVistaPrevia = () => {
+      const limpiarVistaPrevia = (limpiarLote = false) => {
         if (fotoReferenciaUrl) URL.revokeObjectURL(fotoReferenciaUrl);
         setFotoReferenciaUrl("");
         setVistaPreviaFactura(null);
+        if (limpiarLote) setLoteEnvioDte([]);
       };
 
-      // ================= LECTURA XML DTE SII (NAMESPACES + BONIFICADOS $0 + DESCUENTOS GLOBALES) =================
+      // ================= LECTURA XML DTE / ENVIODTE SII (VALIDA TIPODTE + MULTI-DOCUMENTO) =================
       const procesarArchivoXml = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -291,80 +411,50 @@
             return alert("El archivo seleccionado no es un XML válido del SII o está dañado.");
           }
 
-          // Si el XML es un EnvioDTE con varios DTE o contiene un nodo DTE/Documento, toma el documento principal
           const docsDte = getTagsNS(xml, "Documento");
-          const raiz = docsDte.length > 0 ? docsDte[0] : xml;
 
-          const detalles = getTagsNS(raiz, "Detalle");
-          const rutProv = getTagText(raiz, "RUTEmisor") || "S/I";
-          const razonProv = getTagText(raiz, "RznSoc") || (rutProv !== "S/I" ? `PROVEEDOR ${formatearRut(rutProv)}` : "");
-          const folio = getTagText(raiz, "Folio") || String(Date.now()).slice(-6);
-          const fchEmis = getTagText(raiz, "FchEmis") || fechaIsoChile();
-          const mntNetoXml = Number(getTagText(raiz, "MntNeto") || 0);
-          const mntExeXml = Number(getTagText(raiz, "MntExe") || 0);
-          const ivaXml = Number(getTagText(raiz, "IVA") || 0);
-          const mntTotalXml = Number(getTagText(raiz, "MntTotal") || 0);
+          // CASO A: EnvioDTE con 2 o más documentos internos -> muestra selector para elegir uno por uno
+          if (docsDte.length > 1) {
+            const listaParseada = docsDte.map((nodo, idx) => parsearNodoDocumentoSii(nodo, idx));
+            limpiarVistaPrevia(true);
+            setLoteEnvioDte(listaParseada);
+            return;
+          }
 
-          if (detalles.length === 0 && mntTotalXml === 0 && rutProv === "S/I") {
+          // CASO B: Documento único
+          const raiz = docsDte.length === 1 ? docsDte[0] : xml;
+          const docParsed = parsearNodoDocumentoSii(raiz, 0);
+
+          if (docParsed.items.length === 0 && docParsed.totalDeclaradoXml === 0 && docParsed.rutProveedor === "S/I") {
             return alert("El XML no contiene estructura DTE del SII (<Detalle>, <RUTEmisor> o <MntTotal>).");
           }
 
-          // Detecta Descuentos o Recargos Globales al pie de la factura (<DscRcgGlobal>)
-          const dscRcgGlobales = getTagsNS(raiz, "DscRcgGlobal").map((dr, idx) => {
-            const tpoMov = (getTagText(dr, "TpoMov") || "D").toUpperCase(); // D = Descuento, R = Recargo
-            const glosa = getTagText(dr, "GlosaDR") || (tpoMov === "R" ? "Recargo Global" : "Descuento Global");
-            const tpoValor = (getTagText(dr, "TpoValor") || "$").trim();    // % o $
-            const valor = parseNum(getTagText(dr, "ValorDR"));
-            const exento = getTagText(dr, "IndExeDR") === "1";
-            return { id: `${Date.now()}_dr_${idx}`, tpoMov, glosa, tpoValor, valor, exento };
-          }).filter((dr) => dr.valor > 0);
+          if (!docParsed.tipoDtePermitido) {
+            return alert(
+              `DOCUMENTO BLOQUEADO (${docParsed.tipoDteNombre}):\n\n` +
+              `${docParsed.tipoDteMotivoBloqueo}\n\n` +
+              `Solo se permiten Facturas Electrónicas (Tipo 33), Facturas Exentas (Tipo 34) o Facturas de Compra (Tipo 46).`
+            );
+          }
 
-          const items = detalles.map((det, idx) => {
-            const cod = getTagText(det, "VlrCodigo").toUpperCase();
-            const nom = (getTagText(det, "NmbItem") || "ARTICULO XML").toUpperCase();
-            const cant = Math.max(1, parseNum(getTagText(det, "QtyItem") || 1));
-            const indExe = getTagText(det, "IndExe") === "1";
-
-            // Respeta estrictamente <MontoItem>0</MontoItem> (bonificado/gratis) sin caer a <PrcItem>
-            const montoItemStr = getTagText(det, "MontoItem");
-            const prcItemStr = getTagText(det, "PrcItem");
-            let netoUnitario = 0;
-
-            if (montoItemStr !== "") {
-              const montoNetoLinea = parseNum(montoItemStr);
-              netoUnitario = cant > 0 ? redondear2(montoNetoLinea / cant) : 0;
-            } else if (prcItemStr !== "") {
-              netoUnitario = redondear2(prcItemStr);
-            }
-
-            return {
-              uid: `${Date.now()}_${idx}`,
-              codigo: cod,
-              nombre: nom,
-              cantidad: String(cant),
-              netoUnitario: String(netoUnitario),
-              exentoIva: indExe,
-              sumarAlStock: true
-            };
-          });
-
-          limpiarVistaPrevia();
-          setVistaPreviaFactura({
-            origen: "Archivo XML DTE SII",
-            rutProveedor: rutProv !== "S/I" ? formatearRut(rutProv) : "S/I",
-            proveedor: razonProv.toUpperCase(),
-            folio,
-            fecha: fchEmis,
-            netoDeclaradoXml: mntNetoXml,
-            exentoDeclaradoXml: mntExeXml,
-            ivaDeclaradoXml: ivaXml,
-            totalDeclaradoXml: mntTotalXml,
-            dscRcgGlobales,
-            items
-          });
+          limpiarVistaPrevia(true);
+          setVistaPreviaFactura(docParsed);
         } catch (err) {
           alert("No se pudo leer el archivo XML: " + err.message);
         }
+      };
+
+      const seleccionarDocDeLoteEnvio = (docItem) => {
+        if (!docItem.tipoDtePermitido) {
+          return alert(`DOCUMENTO BLOQUEADO (${docItem.tipoDteNombre}):\n\n${docItem.tipoDteMotivoBloqueo}`);
+        }
+        limpiarVistaPrevia(false);
+        // Clona ítems para editar sin mutar el array del selector
+        setVistaPreviaFactura({
+          ...docItem,
+          items: docItem.items.map((it) => ({ ...it })),
+          dscRcgGlobales: (docItem.dscRcgGlobales || []).map((dr) => ({ ...dr }))
+        });
       };
 
       const abrirCargaManualDesdeFoto = (e) => {
@@ -374,7 +464,10 @@
         const url = URL.createObjectURL(file);
         setFotoReferenciaUrl(url);
         if (!vistaPreviaFactura) {
+          setLoteEnvioDte([]);
           setVistaPreviaFactura({
+            tipoDte: 33,
+            tipoDteNombre: "Factura Electrónica (33)",
             origen: "Carga Manual desde Foto / Comprobante",
             rutProveedor: rutEmisor.trim() ? formatearRut(rutEmisor) : "",
             proveedor: "",
@@ -395,8 +488,10 @@
         e.preventDefault();
         if (!rutEmisor.trim() || !folioFactura.trim()) return;
         const tieneKey = Boolean(empresa?.apis?.siiApiKey);
-        limpiarVistaPrevia();
+        limpiarVistaPrevia(true);
         setVistaPreviaFactura({
+          tipoDte: 33,
+          tipoDteNombre: "Factura Electrónica (33)",
           origen: tieneKey ? "Consulta / Carga Manual por Folio" : "Ingreso Manual por Folio",
           rutProveedor: formatearRut(rutEmisor),
           proveedor: `PROVEEDOR ${formatearRut(rutEmisor)}`,
@@ -414,22 +509,36 @@
       const procesarTimbrePdf417 = (val) => {
         setTimbreScan(val);
         if (val.includes("</TED>") || (val.includes("<F>") && val.includes("</F>"))) {
+          const tdMatch = val.match(/<TD>(.*?)<\/TD>/);
+          const dteEval = evaluarTipoDteCompra(tdMatch ? tdMatch[1] : "");
+          if (!dteEval.permitido) {
+            setTimbreScan("");
+            return alert(
+              `TIMBRE BLOQUEADO (${dteEval.nombre}):\n\n` +
+              `${dteEval.motivo}\n\n` +
+              `Escanea únicamente Facturas de Proveedor (Tipo 33, 34 o 46).`
+            );
+          }
+
           const reMatch = val.match(/<RE>(.*?)<\/RE>/);
           const fMatch = val.match(/<F>(.*?)<\/F>/);
           const mMatch = val.match(/<MNT>(.*?)<\/MNT>/);
           const feMatch = val.match(/<FE>(.*?)<\/FE>/);
           const tot = mMatch ? Number(mMatch[1]) : 0;
-          const netoEst = Math.round(tot / 1.19);
-          limpiarVistaPrevia();
+          const esExenta = dteEval.tipo === 34;
+          const netoEst = esExenta ? tot : Math.round(tot / 1.19);
+          limpiarVistaPrevia(true);
           setVistaPreviaFactura({
-            origen: "Escaneo Timbre PDF417 SII",
+            tipoDte: dteEval.tipo || 33,
+            tipoDteNombre: dteEval.nombre,
+            origen: `Escaneo Timbre PDF417 (${dteEval.nombre})`,
             rutProveedor: reMatch ? formatearRut(reMatch[1]) : "S/I",
             proveedor: reMatch ? `PROVEEDOR ${formatearRut(reMatch[1])}` : "PROVEEDOR SII",
             folio: fMatch ? fMatch[1] : "S/N",
             fecha: feMatch ? feMatch[1] : fechaIsoChile(),
-            netoDeclaradoXml: netoEst,
-            exentoDeclaradoXml: 0,
-            ivaDeclaradoXml: tot - netoEst,
+            netoDeclaradoXml: esExenta ? 0 : netoEst,
+            exentoDeclaradoXml: esExenta ? tot : 0,
+            ivaDeclaradoXml: esExenta ? 0 : tot - netoEst,
             totalDeclaradoXml: tot,
             dscRcgGlobales: [],
             items: []
@@ -482,7 +591,7 @@
           nombre: itemNom.trim().toUpperCase(),
           cantidad: String(cantNum),
           netoUnitario: String(costoNum),
-          exentoIva: Boolean(itemExento),
+          exentoIva: Boolean(itemExento || vistaPreviaFactura.tipoDte === 34),
           sumarAlStock: true
         };
         setVistaPreviaFactura({
@@ -540,7 +649,7 @@
         };
       }, [vistaPreviaFactura]);
 
-      // ================= PASO PREVIO: VALIDACIÓN + SOLICITUD DE CLAVE DE SUPERVISOR =================
+      // ================= PASO PREVIO: VALIDACIÓN ESTRICTA DE FILAS + RUT MÓDULO 11 + PIN =================
       const solicitarConfirmacionFactura = () => {
         if (!vistaPreviaFactura || guardando || confirmLockRef.current) return;
         if (vistaPreviaFactura.items.length === 0) {
@@ -550,9 +659,29 @@
           return alert("Completa el Proveedor y el N° de Folio de la factura antes de confirmar.");
         }
 
+        // Bloqueo estricto de líneas con nombre vacío o cantidad 0
+        const filaSinNombre = vistaPreviaFactura.items.find((it) => !String(it.nombre || "").trim());
+        if (filaSinNombre) {
+          return alert("Hay al menos una línea sin nombre de producto. Complétala o elimínala con la '✕' antes de confirmar.");
+        }
+        const filaCantCero = vistaPreviaFactura.items.find((it) => Math.round(parseNum(it.cantidad)) <= 0);
+        if (filaCantCero) {
+          return alert(`El producto "${filaCantCero.nombre}" tiene cantidad 0. Ingresa una cantidad mayor a 0 o elimina esa fila.`);
+        }
+
+        // Validador Módulo 11 del RUT Proveedor
+        const rutProvLimpio = limpiarRut(vistaPreviaFactura.rutProveedor);
+        if (rutProvLimpio.length > 0 && vistaPreviaFactura.rutProveedor !== "S/I" && !validarRutChileno(rutProvLimpio)) {
+          const seguirRut = confirm(
+            `ADVERTENCIA: El RUT del proveedor (${vistaPreviaFactura.rutProveedor}) no pasa la validación oficial del SII (Módulo 11).\n\n` +
+            `¿Seguro que deseas archivar la factura con ese RUT? (Presiona Cancelar para corregirlo).`
+          );
+          if (!seguirRut) return;
+        }
+
         const duplicada = compras.find(
           (c) =>
-            limpiarRut(c.rutProveedor) === limpiarRut(vistaPreviaFactura.rutProveedor) &&
+            limpiarRut(c.rutProveedor) === rutProvLimpio &&
             String(c.folio || "").trim() === String(vistaPreviaFactura.folio || "").trim()
         );
         if (duplicada) {
@@ -595,20 +724,20 @@
           let unidadesTotalesSumadas = 0;
 
           const itemsGuardados = vistaPreviaFactura.items.map((it) => {
-            const cant = Math.max(0, Math.round(parseNum(it.cantidad)));
+            const cant = Math.max(1, Math.round(parseNum(it.cantidad)));
             const netoUnitExacto = Math.max(0, redondear2(it.netoUnitario));
             const netoUnitRedondeado = Math.round(netoUnitExacto);
             const netoLinea = Math.round(cant * netoUnitExacto);
             const ivaLinea = it.exentoIva ? 0 : Math.round(netoLinea * 0.19);
             const totalLinea = netoLinea + ivaLinea;
             const unitConIva = it.exentoIva ? netoUnitRedondeado : Math.round(netoUnitExacto * 1.19);
+            const nomLimpio = String(it.nombre || "").trim().toUpperCase();
+            const skuLimpio = String(it.codigo || "").trim().toUpperCase();
 
             if (it.sumarAlStock && cant > 0) {
               lineasSumadas++;
               unidadesTotalesSumadas += cant;
-              const skuKey = String(it.codigo || "").trim().toUpperCase();
-              const nomKey = String(it.nombre || "").trim().toUpperCase();
-              const existente = (skuKey && porSku.get(skuKey)) || porNombre.get(nomKey);
+              const existente = (skuLimpio && porSku.get(skuLimpio)) || porNombre.get(nomLimpio);
 
               if (existente) {
                 const prev = deltasExistentes.get(existente.id) || { cant: 0, ultimoCostoNeto: 0, ultimoCostoBruto: 0 };
@@ -618,7 +747,7 @@
                   ultimoCostoBruto: unitConIva > 0 ? unitConIva : prev.ultimoCostoBruto
                 });
               } else {
-                const nuevaKey = skuKey || nomKey;
+                const nuevaKey = skuLimpio || nomLimpio;
                 const prevNuevo = nuevosCatalogo.get(nuevaKey);
                 if (prevNuevo) {
                   prevNuevo.stockOnline += cant;
@@ -628,8 +757,8 @@
                   }
                 } else {
                   nuevosCatalogo.set(nuevaKey, {
-                    codigo: skuKey,
-                    nombre: nomKey,
+                    codigo: skuLimpio,
+                    nombre: nomLimpio,
                     proveedor: vistaPreviaFactura.proveedor.trim().toUpperCase(),
                     stockOnline: cant,
                     ultimoCostoNeto: netoUnitRedondeado,
@@ -640,8 +769,8 @@
             }
 
             return {
-              codigo: it.codigo || "",
-              nombre: it.nombre,
+              codigo: skuLimpio,
+              nombre: nomLimpio,
               cantidad: cant,
               netoUnitario: netoUnitExacto,
               unitConIva,
@@ -653,7 +782,6 @@
             };
           });
 
-          // Construye lista de operaciones y ejecuta en bloques seguros de 450
           const ops = [];
           deltasExistentes.forEach((info, docId) => {
             const updateObj = { stockOnline: FieldValue.increment(info.cant) };
@@ -676,6 +804,7 @@
             type: "set",
             ref: empRef().collection("compras_proveedores").doc(),
             data: {
+              tipoDte: vistaPreviaFactura.tipoDte || 33,
               origen: vistaPreviaFactura.origen,
               rutProveedor: vistaPreviaFactura.rutProveedor ? formatearRut(vistaPreviaFactura.rutProveedor) : "S/I",
               proveedor: vistaPreviaFactura.proveedor.trim().toUpperCase(),
@@ -715,15 +844,23 @@
             await batch.commit();
           }
 
+          const docCargadoUid = vistaPreviaFactura.docUid;
+          const quedanOtrosEnLote = loteEnvioDte.some((d) => d.docUid !== docCargadoUid && d.tipoDtePermitido);
+
           alert(
             `Factura #${vistaPreviaFactura.folio} confirmada y archivada.\n` +
             `• Neto/Exento: $${cuadraturaPrevia.netoTotal.toLocaleString("es-CL")} | IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")} | Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")}\n` +
             `• ${lineasSumadas} línea(s) (+${unidadesTotalesSumadas} unds) sumadas de forma atómica al inventario.`
           );
-          limpiarVistaPrevia();
+
+          if (docCargadoUid && loteEnvioDte.length > 0) {
+            setLoteEnvioDte((prev) => prev.map((d) => (d.docUid === docCargadoUid ? { ...d, yaCargadaSesion: true } : d)));
+          }
+
+          limpiarVistaPrevia(!quedanOtrosEnLote);
           setRutEmisor("");
           setFolioFactura("");
-          setTab("historial");
+          if (!quedanOtrosEnLote) setTab("historial");
         } catch (err) {
           alert("Error al confirmar factura: " + err.message);
         } finally {
@@ -765,6 +902,8 @@
       const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
       const urlVolver = rutActivo === RUT_PGB ? "pgb-operacion.html" : "empresa-panel.html";
       const tienePinPersonalizado = Boolean(empresa.pinSupervisorHash || empresa.pinSupervisor);
+      const rutManualLimpio = limpiarRut(rutEmisor);
+      const rutPreviaLimpio = vistaPreviaFactura ? limpiarRut(vistaPreviaFactura.rutProveedor) : "";
 
       return (
         <div className={`min-h-screen pb-24 ${T.page}`}>
@@ -821,7 +960,7 @@
                 <div className="flex items-start justify-between border-b border-slate-200/30 pb-3">
                   <div>
                     <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${T.tag}`}>
-                      Auditoría de Factura Archivada
+                      Auditoría de Factura Archivada • Tipo {facturaAuditando.tipoDte || 33}
                     </span>
                     <h2 className={`text-lg font-extrabold mt-1 ${T.main}`}>
                       Factura Compra N° {facturaAuditando.folio} • {facturaAuditando.proveedor}
@@ -965,7 +1104,7 @@
               </button>
             </div>
 
-            {/* ================= TAB 1: LECTOR CON PRE-VISUALIZACIÓN EDITABLE, FOTO Y CUADRATURA ================= */}
+            {/* ================= TAB 1: LECTOR CON PRE-VISUALIZACIÓN EDITABLE, ENVIODTE Y CUADRATURA ================= */}
             {tab === "lector" && (
               <div className="space-y-4">
                 {vistaPreviaFactura ? (
@@ -986,10 +1125,10 @@
                         </label>
                         <button
                           type="button"
-                          onClick={limpiarVistaPrevia}
+                          onClick={() => limpiarVistaPrevia(false)}
                           className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer ${T.sec}`}
                         >
-                          Descartar y Volver
+                          {loteEnvioDte.length > 1 ? "← Volver al Lote EnvioDTE" : "Descartar y Volver"}
                         </button>
                       </div>
                     </div>
@@ -1050,6 +1189,11 @@
                           placeholder="76.123.456-7"
                           className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
                         />
+                        {rutPreviaLimpio.length >= 2 && vistaPreviaFactura.rutProveedor !== "S/I" && (
+                          <span className={`text-[10px] font-bold block mt-1 ${validarRutChileno(rutPreviaLimpio) ? "text-emerald-600" : "text-rose-500"}`}>
+                            {validarRutChileno(rutPreviaLimpio) ? "✓ RUT válido SII" : "⚠️ RUT inválido (Módulo 11)"}
+                          </span>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
@@ -1139,8 +1283,10 @@
                               const totalLinea = it.exentoIva ? netoLinea : Math.round(netoLinea * 1.19);
                               const unitFinal = it.exentoIva ? Math.round(netoUnitN) : Math.round(netoUnitN * 1.19);
                               const esBonificado = it.netoUnitario !== "" && netoUnitN === 0;
+                              const nombreInvalido = !String(it.nombre || "").trim();
+                              const cantInvalida = Math.round(cantN) <= 0;
                               return (
-                                <tr key={it.uid} className={!it.sumarAlStock ? "opacity-50" : ""}>
+                                <tr key={it.uid} className={`${!it.sumarAlStock ? "opacity-50" : ""} ${(nombreInvalido || cantInvalida) ? "bg-rose-500/10" : ""}`}>
                                   <td className="p-2 text-center">
                                     <input
                                       type="checkbox"
@@ -1171,7 +1317,8 @@
                                       type="text"
                                       value={it.nombre}
                                       onChange={(e) => actualizarItemPrevia(it.uid, "nombre", e.target.value)}
-                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-bold ${T.input}`}
+                                      placeholder="Nombre obligatorio *"
+                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-bold ${T.input} ${nombreInvalido ? "border-rose-500" : ""}`}
                                     />
                                     {esBonificado && (
                                       <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-sky-100 text-sky-800">
@@ -1185,8 +1332,8 @@
                                       inputMode="numeric"
                                       value={it.cantidad}
                                       onChange={(e) => actualizarItemPrevia(it.uid, "cantidad", e.target.value)}
-                                      placeholder="0"
-                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-extrabold text-center ${T.input}`}
+                                      placeholder="1"
+                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-extrabold text-center ${T.input} ${cantInvalida ? "border-rose-500" : ""}`}
                                     />
                                   </td>
                                   <td className="p-2">
@@ -1281,13 +1428,75 @@
                         : `Confirmar Factura #${vistaPreviaFactura.folio || "---"}, Cuadrar IVA ($${cuadraturaPrevia.iva.toLocaleString("es-CL")}) y Sumar Stock (Clave Supervisor)`}
                     </button>
                   </div>
+                ) : loteEnvioDte.length > 0 ? (
+                  /* SELECTOR DE MÚLTIPLES FACTURAS DENTRO DE UN MISMO ENVIODTE */
+                  <div className={`${T.card} rounded-2xl p-5 sm:p-6 space-y-4 border-2 border-blue-600`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/30 pb-3">
+                      <div>
+                        <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${T.tag}`}>
+                          EnvioDTE Multi-Documento Detectado ({loteEnvioDte.length} DTEs)
+                        </span>
+                        <h2 className={`text-base font-extrabold mt-1 ${T.main}`}>Selecciona la Factura que deseas Auditar y Cargar</h2>
+                        <p className={`text-xs ${T.sub}`}>
+                          Solo se habilitan Facturas de Compra (33, 34 o 46). Notas de Crédito (61) y Guías (52) quedan bloqueadas por seguridad tributaria.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLoteEnvioDte([])}
+                        className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer ${T.sec}`}
+                      >
+                        Cerrar Lote
+                      </button>
+                    </div>
+
+                    <div className="divide-y divide-slate-200/40">
+                      {loteEnvioDte.map((docItem) => {
+                        const yaEnBase = compras.some(
+                          (c) =>
+                            limpiarRut(c.rutProveedor) === limpiarRut(docItem.rutProveedor) &&
+                            String(c.folio || "").trim() === String(docItem.folio || "").trim()
+                        );
+                        return (
+                          <div key={docItem.docUid} className={`py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${!docItem.tipoDtePermitido ? "opacity-55" : ""}`}>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${docItem.tipoDtePermitido ? T.tag : "bg-rose-600 text-white"}`}>
+                                  {docItem.tipoDteNombre}
+                                </span>
+                                <span className={`font-extrabold text-sm ${T.main}`}>Folio N° {docItem.folio}</span>
+                                <span className={T.sub}>• {docItem.fecha}</span>
+                                {(docItem.yaCargadaSesion || yaEnBase) && (
+                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-600 text-white">Ya Cargada ✓</span>
+                                )}
+                              </div>
+                              <p className={`mt-1 ${T.sub}`}>
+                                {docItem.proveedor} ({docItem.rutProveedor}) • {docItem.items.length} línea(s) • Total XML: <strong>${Number(docItem.totalDeclaradoXml || 0).toLocaleString("es-CL")}</strong>
+                              </p>
+                              {!docItem.tipoDtePermitido && (
+                                <p className="text-[11px] font-semibold text-rose-500 mt-0.5">{docItem.tipoDteMotivoBloqueo}</p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!docItem.tipoDtePermitido}
+                              onClick={() => seleccionarDocDeLoteEnvio(docItem)}
+                              className={`px-4 py-2 rounded-xl text-xs font-extrabold shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${T.btn}`}
+                            >
+                              {docItem.tipoDtePermitido ? "Auditar y Cargar →" : "Bloqueado"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className={`${T.card} rounded-2xl p-6 space-y-3`}>
                       <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Carga Automática con Pre-Auditoría</span>
                       <h2 className={`text-base font-extrabold ${T.main}`}>Subir Archivo XML de Factura SII (.xml)</h2>
                       <p className={`text-xs ${T.sub}`}>
-                        Compatible con ISO-8859-1, UTF-8, namespaces, bonificados ($0) y descuentos globales del SII. Muestra la tabla editable antes de sumar stock.
+                        Compatible con ISO-8859-1, UTF-8, EnvioDTE multi-factura, bonificados ($0) y descuentos globales. Bloquea automáticamente NC 61 y Guías 52.
                       </p>
                       <label className={`block w-full text-center font-extrabold py-4 rounded-xl text-xs cursor-pointer shadow-sm ${T.btn}`}>
                         Seleccionar Archivo XML (.xml)
@@ -1313,8 +1522,17 @@
                           Si solo tienes una foto o factura en papel, adjunta la imagen para verla en pantalla mientras ingresas los productos y cuadras el 19% de IVA.
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
-                          <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                          <div>
+                            <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                            {rutManualLimpio.length >= 2 && (
+                              <span className={`text-[10px] font-bold block mt-1 ${validarRutChileno(rutManualLimpio) ? "text-emerald-600" : "text-rose-500"}`}>
+                                {validarRutChileno(rutManualLimpio) ? "✓ RUT válido SII" : "⚠️ RUT inválido (Módulo 11)"}
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                          </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <button type="submit" className={`w-full font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}>
