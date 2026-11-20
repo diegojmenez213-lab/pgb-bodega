@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#050814" />
+  <title>NEXUS ERP · Portal Corporativo</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-base: #050814;
+      --bg-surface: rgba(13, 20, 40, 0.72);
+      --bg-surface-strong: rgba(15, 23, 46, 0.92);
+      --border-subtle: rgba(148, 163, 184, 0.14);
+      --border-focus: rgba(56, 189, 248, 0.55);
+
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      --accent-blue: #2563eb;
+      --accent-cyan: #38bdf8;
+      --accent-violet: #7c3aed;
+      --accent-emerald: #10b981;
+      --accent-danger: #f43f5e;
+
+      --radius-xl: 24px;
+      --radius-lg: 16px;
+      --radius-md: 12px;
+      --shadow-card: 0 24px 64px -16px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      min-height: 100%;
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Fondo atmosférico con luz viva y grilla sutil */
+    .ambient-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .ambient-bg::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse 80% 70% at 50% 35%, #000 35%, transparent 100%);
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(95px);
+      opacity: 0.42;
+      animation: drift 16s ease-in-out infinite alternate;
+    }
+
+    .orb-1 {
+      width: 520px;
+      height: 520px;
+      background: radial-gradient(circle, var(--accent-blue), transparent 70%);
+      top: -160px;
+      left: -120px;
+    }
+
+    .orb-2 {
+      width: 460px;
+      height: 460px;
+      background: radial-gradient(circle, var(--accent-violet), transparent 70%);
+      bottom: -140px;
+      right: -100px;
+      animation-delay: -6s;
+    }
+
+    .orb-3 {
+      width: 340px;
+      height: 340px;
+      background: radial-gradient(circle, var(--accent-cyan), transparent 70%);
+      top: 42%;
+      left: 38%;
+      opacity: 0.2;
+      animation-delay: -11s;
+    }
+
+    @keyframes drift {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(32px, -24px) scale(1.08); }
+    }
+
+    /* ============================================================
+       LAYOUT PRINCIPAL: SPLIT-SCREEN (PC) -> APP SHEET (MÓVIL)
+       ============================================================ */
+    .stage {
+      position: relative;
+      z-index: 1;
+      min-height: 100dvh;
+      width: 100%;
+      max-width: 1360px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.18fr) minmax(380px, 460px);
+      align-items: center;
+      gap: 48px;
+      padding: 40px 56px;
+    }
+
+    /* ---------- PANEL IZQUIERDO: IDENTIDAD & PRESENTACIÓN (PC) ---------- */
+    .showcase {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      padding-right: 16px;
+    }
+
+    .brand-lockup {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      width: fit-content;
+    }
+
+    .brand-logo-box {
+      width: 52px;
+      height: 52px;
+      border-radius: 15px;
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.28), rgba(124, 58, 237, 0.28));
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      box-shadow: 0 10px 30px -8px rgba(37, 99, 235, 0.55);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .brand-logo-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 6px;
+    }
+
+    .brand-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand-name {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      line-height: 1.1;
+    }
+
+    .brand-sub {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-cyan);
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.24);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #bae6fd;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.65);
+      animation: pulse 2.2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.65); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .hero-title {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: clamp(2.25rem, 3.6vw, 3.35rem);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      color: var(--text-primary);
+    }
+
+    .hero-title .gradient-text {
+      background: linear-gradient(120deg, #60a5fa 0%, #38bdf8 45%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .quote-box {
+      position: relative;
+      padding-left: 18px;
+      border-left: 2px solid var(--accent-cyan);
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+    }
+
+    .quote-text {
+      font-size: 1.05rem;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      transition: opacity 0.45s ease, transform 0.45s ease;
+    }
+
+    .quote-text.fading {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+
+    /* Pilares visibles solo en Escritorio / Tablet horizontal */
+    .pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 6px;
+    }
+
+    .pillar-card {
+      background: rgba(15, 23, 42, 0.52);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 18px 16px;
+      backdrop-filter: blur(14px);
+      transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+    }
+
+    .pillar-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(15, 23, 42, 0.78);
+    }
+
+    .pillar-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 12px;
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent-cyan);
+    }
+
+    .pillar-card:nth-child(2) .pillar-icon {
+      background: rgba(124, 58, 237, 0.16);
+      color: #c4b5fd;
+    }
+
+    .pillar-card:nth-child(3) .pillar-icon {
+      background: rgba(16, 185, 129, 0.14);
+      color: #34d399;
+    }
+
+    .pillar-title {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 0.92rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+      color: var(--text-primary);
+    }
+
+    .pillar-desc {
+      font-size: 0.79rem;
+      line-height: 1.45;
+      color: var(--text-secondary);
+    }
+
+    /* Chips compactos exclusivos de móvil */
+    .mobile-chips {
+      display: none;
+    }
+
+    /* ---------- PANEL DERECHO: TARJETA DE ACCESO ---------- */
+    .access-wrapper {
+      width: 100%;
+    }
+
+    .access-card {
+      position: relative;
+      background: var(--bg-surface);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 36px 32px 26px;
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+
+    .access-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 14%;
+      right: 14%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-cyan), var(--accent-violet), transparent);
+      opacity: 0.85;
+    }
+
+    .card-header {
+      margin-bottom: 26px;
+    }
+
+    .card-kicker {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-cyan);
+      margin-bottom: 6px;
+    }
+
+    .card-title {
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 1.55rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 6px;
+    }
+
+    .card-subtitle {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+
+    .input-shell {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-icon {
+      position: absolute;
+      left: 14px;
+      color: var(--text-muted);
+      pointer-events: none;
+      display: flex;
+    }
+
+    .form-input {
+      width: 100%;
+      height: 50px;
+      padding: 0 44px 0 42px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(5, 8, 20, 0.72);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.96rem;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+
+    .form-input::placeholder {
+      color: #475569;
+    }
+
+    .form-input:focus {
+      border-color: var(--border-focus);
+      background: rgba(7, 12, 28, 0.95);
+      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.12);
+    }
+
+    .toggle-pass {
+      position: absolute;
+      right: 12px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      display: flex;
+      border-radius: 8px;
+      transition: color 0.2s ease;
+    }
+
+    .toggle-pass:hover {
+      color: var(--text-primary);
+    }
+
+    .feedback-msg {
+      display: none;
+      padding: 11px 14px;
+      border-radius: 10px;
+      font-size: 0.83rem;
+      line-height: 1.4;
+      margin-bottom: 16px;
+      border: 1px solid transparent;
+    }
+
+    .feedback-msg.error {
+      display: block;
+      background: rgba(244, 63, 94, 0.12);
+      border-color: rgba(244, 63, 94, 0.32);
+      color: #fda4af;
+    }
+
+    .feedback-msg.success {
+      display: block;
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.32);
+      color: #6ee7b7;
+    }
+
+    .btn-primary {
+      position: relative;
+      width: 100%;
+      height: 52px;
+      border: none;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, #2563eb 0%, #4f46e5 55%, #7c3aed 100%);
+      color: #fff;
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 0.96rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 14px 32px -10px rgba(37, 99, 235, 0.7);
+      transition: transform 0.18s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      overflow: hidden;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.08);
+      box-shadow: 0 18px 36px -10px rgba(79, 70, 229, 0.82);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0) scale(0.99);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+
+    /* PIE DISCRETO CON ESCUDO CAMUFLADO (SIN DECIR "ADMIN") */
+    .card-footer {
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(148, 163, 184, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    .security-seal {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      user-select: none;
+    }
+
+    /* El escudo parece un simple icono decorativo de seguridad SSL */
+    .stealth-shield {
+      background: transparent;
+      border: none;
+      padding: 4px;
+      margin: -4px;
+      color: #475569;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: default; /* No cambia a manito para no delatar que es interactivo */
+      border-radius: 6px;
+      transition: color 0.3s ease, transform 0.2s ease;
+    }
+
+    .stealth-shield.armed {
+      color: var(--accent-cyan);
+      transform: scale(1.1);
+    }
+
+    /* ============================================================
+       MODAL OCULTO DE ACCESO MAESTRO (SOLO SE ABRE CON SECUENCIA)
+       ============================================================ */
+    .vault-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 99;
+      background: rgba(2, 6, 18, 0.82);
+      backdrop-filter: blur(12px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .vault-modal-backdrop.open {
+      display: flex;
+      opacity: 1;
+    }
+
+    .vault-modal {
+      width: 100%;
+      max-width: 390px;
+      background: var(--bg-surface-strong);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 20px;
+      padding: 28px 24px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.85);
+      transform: translateY(10px) scale(0.98);
+      transition: transform 0.25s ease;
+    }
+
+    .vault-modal-backdrop.open .vault-modal {
+      transform: translateY(0) scale(1);
+    }
+
+    .vault-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .vault-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: "Plus Jakarta Sans", sans-serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .vault-close {
+      background: rgba(148, 163, 184, 0.1);
+      border: none;
+      color: var(--text-secondary);
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+
+    .vault-close:hover {
+      color: #fff;
+      background: rgba(148, 163, 184, 0.2);
+    }
+
+    /* ============================================================
+       ADAPTACIÓN NATIVA PARA MÓVIL (MISMO ADN, ESTRUCTURA PROPIA)
+       ============================================================ */
+    @media (max-width: 960px) {
+      .stage {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        padding: 24px 18px max(24px, env(safe-area-inset-bottom));
+        align-content: space-between;
+      }
+
+      .showcase {
+        padding-right: 0;
+        align-items: center;
+        text-align: center;
+        gap: 14px;
+        padding-top: 6px;
+      }
+
+      .brand-lockup {
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .brand-logo-box {
+        width: 58px;
+        height: 58px;
+        border-radius: 18px;
+      }
+
+      .brand-meta {
+        align-items: center;
+      }
+
+      .hero-badge {
+        display: none;
+      }
+
+      .hero-title {
+        font-size: 1.65rem;
+        line-height: 1.15;
+        max-width: 340px;
+      }
+
+      .quote-box {
+        border-left: none;
+        padding-left: 0;
+        min-height: 44px;
+        justify-content: center;
+        max-width: 360px;
+      }
+
+      .quote-text {
+        font-size: 0.88rem;
+      }
+
+      /* En móvil ocultamos las tarjetas grandes de PC y mostramos píldoras limpias */
+      .pillars-grid {
+        display: none;
+      }
+
+      .mobile-chips {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 2px;
+      }
+
+      .m-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 11px;
+        border-radius: 999px;
+        font-size: 0.73rem;
+        font-weight: 600;
+        color: #cbd5e1;
+        background: rgba(15, 23, 42, 0.72);
+        border: 1px solid var(--border-subtle);
+      }
+
+      .m-chip span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent-cyan);
+      }
+
+      .m-chip:nth-child(2) span { background: #a78bfa; }
+      .m-chip:nth-child(3) span { background: var(--accent-emerald); }
+
+      /* Tarjeta estilo Bottom-Sheet elegante */
+      .access-card {
+        padding: 26px 20px 20px;
+        border-radius: 22px;
+      }
+
+      .card-title {
+        font-size: 1.32rem;
+      }
+
+      .form-input, .btn-primary {
+        height: 52px;
+        font-size: 1rem; /* Evita auto-zoom en iPhone */
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <main class="stage">
+    <!-- SECCIÓN DE PRESENTACIÓN DE MARCA -->
+    <section class="showcase">
+      <div class="brand-lockup">
+        <div class="brand-logo-box" id="brandLogoBox">
+          <!-- Si configuras logoUrl abajo, se reemplaza por tu imagen PNG/SVG -->
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2L20.5 7V17L12 22L3.5 17V7L12 2Z" stroke="#38BDF8" stroke-width="1.8" />
+            <path d="M12 7L16.5 9.6V14.8L12 17.4L7.5 14.8V9.6L12 7Z" fill="url(#nexusGrad)" />
+            <defs>
+              <linearGradient id="nexusGrad" x1="7.5" y1="7" x2="16.5" y2="17.4" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#38BDF8" />
+                <stop offset="1" stop-color="#7C3AED" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-meta">
+          <div class="brand-name" id="brandName">NEXUS ERP</div>
+          <div class="brand-sub" id="brandSub">GESTIÓN EMPRESARIAL INTELIGENTE</div>
+        </div>
+      </div>
+
+      <div class="hero-badge">
+        <span class="pulse-dot"></span>
+        <span>Plataforma Multi-Empresa · Operación en Tiempo Real</span>
+      </div>
+
+      <h1 class="hero-title">
+        Control total de tu negocio, <span class="gradient-text">sin fricción.</span>
+      </h1>
+
+      <div class="quote-box">
+        <p class="quote-text" id="rotatingQuote">
+          Cada despacho preciso y cada documento al día construyen la empresa que imaginas.
+        </p>
+      </div>
+
+      <!-- Vista Escritorio: 3 Pilares Ejecutivos -->
+      <div class="pillars-grid">
+        <article class="pillar-card">
+          <div class="pillar-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="8" y1="13" x2="16" y2="13"/>
+              <line x1="8" y1="17" x2="13" y2="17"/>
+            </svg>
+          </div>
+          <h3 class="pillar-title">Motor SII & DTE</h3>
+          <p class="pillar-desc">Emisión, cálculo de IVA y trazabilidad tributaria aislada por empresa.</p>
+        </article>
+
+        <article class="pillar-card">
+          <div class="pillar-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="7" width="20" height="14" rx="2"/>
+              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+            </svg>
+          </div>
+          <h3 class="pillar-title">Omnicanalidad</h3>
+          <p class="pillar-desc">Centraliza inventario y pedidos de Mercado Libre, Falabella y Lider.</p>
+        </article>
+
+        <article class="pillar-card">
+          <div class="pillar-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M9 12l2 2 4-4"/>
+            </svg>
+          </div>
+          <h3 class="pillar-title">Bóveda Cifrada</h3>
+          <p class="pillar-desc">Credenciales protegidas con estándar AES-256-GCM y acceso por roles.</p>
+        </article>
+      </div>
+
+      <!-- Vista Móvil: Píldoras limpias -->
+      <div class="mobile-chips" aria-label="Capacidades principales">
+        <div class="m-chip"><span></span>SII & DTE</div>
+        <div class="m-chip"><span></span>Marketplaces</div>
+        <div class="m-chip"><span></span>Bodega Real-Time</div>
+      </div>
+    </section>
+
+    <!-- SECCIÓN DE ACCESO CORPORATIVO -->
+    <section class="access-wrapper">
+      <div class="access-card">
+        <header class="card-header">
+          <div class="card-kicker">Acceso Seguro</div>
+          <h2 class="card-title">Portal Corporativo</h2>
+          <p class="card-subtitle">Ingresa el RUT de tu empresa y tu clave para operar en tiempo real.</p>
+        </header>
+
+        <div id="loginFeedback" class="feedback-msg" role="alert"></div>
+
+        <form id="empresaLoginForm" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="rutInput">
+              <span>RUT Empresa</span>
+            </label>
+            <div class="input-shell">
+              <span class="input-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/>
+                </svg>
+              </span>
+              <input
+                id="rutInput"
+                name="rut"
+                type="text"
+                class="form-input"
+                placeholder="Ej: 77.528.042-5"
+                autocomplete="username"
+                inputmode="text"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="claveInput">
+              <span>Clave de Acceso</span>
+            </label>
+            <div class="input-shell">
+              <span class="input-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </span>
+              <input
+                id="claveInput"
+                name="clave"
+                type="password"
+                class="form-input"
+                placeholder="Ingresa tu clave empresarial"
+                autocomplete="current-password"
+                required
+              />
+              <button type="button" class="toggle-pass" id="togglePassBtn" aria-label="Mostrar u ocultar clave">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" id="btnIngresar">
+            <span>Ingresar a mi empresa</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </button>
+        </form>
+
+        <!-- PIE DISCRETO: EL ESCUDO PARECE UN SELLO SSL NORMAL -->
+        <footer class="card-footer">
+          <div class="security-seal">
+            <button
+              type="button"
+              id="stealthShield"
+              class="stealth-shield"
+              tabindex="-1"
+              aria-label="Sello de cifrado"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </button>
+            <span>Conexión cifrada AES-256</span>
+          </div>
+          <span id="yearLabel"></span>
+        </footer>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL OCULTO DE SUPER ADMIN (ACTIVADO SOLO POR 3 TOQUES / MANTENER 1.5s / CTRL+SHIFT+A) -->
+  <div class="vault-modal-backdrop" id="vaultModal" aria-hidden="true">
+    <div class="vault-modal" role="dialog" aria-modal="true" aria-labelledby="vaultTitle">
+      <div class="vault-top">
+        <div class="vault-badge" id="vaultTitle">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+          <span>Consola Maestra</span>
+        </div>
+        <button type="button" class="vault-close" id="closeVaultBtn" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div id="adminFeedback" class="feedback-msg" role="alert"></div>
+
+      <form id="adminLoginForm" novalidate>
+        <div class="form-group">
+          <label class="form-label" for="adminPinInput">Clave / PIN Maestro</label>
+          <div class="input-shell">
+            <span class="input-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="7.5" cy="15.5" r="5.5"/>
+                <path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/>
+              </svg>
+            </span>
+            <input
+              id="adminPinInput"
+              type="password"
+              class="form-input"
+              placeholder="Ingresa tu clave maestra"
+              autocomplete="off"
+              required
+            />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary" id="btnAdminEntrar">
+          <span>Validar acceso maestro</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    /* ============================================================
+       1. CONFIGURACIÓN RÁPIDA DE TU EMPRESA Y CONEXIÓN
+       ============================================================ */
+    const NEXUS_BRAND_CONFIG = {
+      nombreEmpresa: "NEXUS ERP",
+      subtitulo: "GESTIÓN EMPRESARIAL INTELIGENTE",
+      // Si subes tu logo a GitHub (ej: "logo.png"), escribe aquí "./logo.png"
+      logoUrl: "",
+      apiBase: "https://pgb-bodega.vercel.app/api",
+      // A dónde redirige tras iniciar sesión correctamente (tu app principal)
+      appRedirectUrl: "/index.html",
+      frasesMotivadoras: [
+        "Cada despacho preciso y cada documento al día construyen la empresa que imaginas.",
+        "Orden en tu bodega, claridad en tus finanzas y velocidad en cada venta.",
+        "La tecnología trabaja en silencio para que tu negocio escale sin límites.",
+        "Control absoluto en tiempo real. Decisiones inteligentes desde cualquier lugar."
+      ]
+    };
+
+    // Aplicar marca y logo personalizado
+    document.getElementById("brandName").textContent = NEXUS_BRAND_CONFIG.nombreEmpresa;
+    document.getElementById("brandSub").textContent = NEXUS_BRAND_CONFIG.subtitulo;
+    document.getElementById("yearLabel").textContent = `© ${new Date().getFullYear()}`;
+
+    if (NEXUS_BRAND_CONFIG.logoUrl) {
+      const box = document.getElementById("brandLogoBox");
+      box.innerHTML = `<img src="${NEXUS_BRAND_CONFIG.logoUrl}" alt="${NEXUS_BRAND_CONFIG.nombreEmpresa}" />`;
+    }
+
+    /* ============================================================
+       2. ROTACIÓN SUAVE DE FRASES EJECUTIVAS
+       ============================================================ */
+    const quoteEl = document.getElementById("rotatingQuote");
+    let quoteIdx = 0;
+    setInterval(() => {
+      quoteEl.classList.add("fading");
+      setTimeout(() => {
+        quoteIdx = (quoteIdx + 1) % NEXUS_BRAND_CONFIG.frasesMotivadoras.length;
+        quoteEl.textContent = NEXUS_BRAND_CONFIG.frasesMotivadoras[quoteIdx];
+        quoteEl.classList.remove("fading");
+      }, 420);
+    }, 5500);
+
+    /* ============================================================
+       3. FORMATEO AUTOMÁTICO DE RUT CHILENO + VER CLAVE
+       ============================================================ */
+    const rutInput = document.getElementById("rutInput");
+    function formatearRut(valor) {
+      const limpio = String(valor || "").replace(/[^0-9kK]/g, "").toUpperCase();
+      if (limpio.length <= 1) return limpio;
+      const cuerpo = limpio.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      const dv = limpio.slice(-1);
+      return `${cuerpo}-${dv}`;
+    }
+
+    rutInput.addEventListener("input", (e) => {
+      e.target.value = formatearRut(e.target.value);
+    });
+
+    const claveInput = document.getElementById("claveInput");
+    document.getElementById("togglePassBtn").addEventListener("click", () => {
+      claveInput.type = claveInput.type === "password" ? "text" : "password";
+    });
+
+    /* ============================================================
+       4. ESCUDO CAMUFLADO PARA SUPER ADMIN
+          - 3 toques rápidos sobre el escudo
+          - O mantener presionado 1.5 segundos
+          - O Ctrl + Shift + A en PC
+       ============================================================ */
+    const shieldBtn = document.getElementById("stealthShield");
+    const vaultModal = document.getElementById("vaultModal");
+    const adminPinInput = document.getElementById("adminPinInput");
+    const closeVaultBtn = document.getElementById("closeVaultBtn");
+
+    let tapCount = 0;
+    let tapTimer = null;
+    let holdTimer = null;
+
+    function abrirModalAdmin() {
+      vaultModal.classList.add("open");
+      vaultModal.setAttribute("aria-hidden", "false");
+      setTimeout(() => adminPinInput.focus(), 120);
+    }
+
+    function cerrarModalAdmin() {
+      vaultModal.classList.remove("open");
+      vaultModal.setAttribute("aria-hidden", "true");
+      adminPinInput.value = "";
+      mostrarFeedback("adminFeedback", "", "");
+    }
+
+    shieldBtn.addEventListener("click", () => {
+      tapCount += 1;
+      clearTimeout(tapTimer);
+      if (tapCount >= 3) {
+        tapCount = 0;
+        abrirModalAdmin();
+        return;
+      }
+      tapTimer = setTimeout(() => { tapCount = 0; }, 1100);
+    });
+
+    const iniciarHold = () => {
+      shieldBtn.classList.add("armed");
+      holdTimer = setTimeout(() => {
+        shieldBtn.classList.remove("armed");
+        abrirModalAdmin();
+      }, 1400);
+    };
+
+    const cancelarHold = () => {
+      shieldBtn.classList.remove("armed");
+      clearTimeout(holdTimer);
+    };
+
+    shieldBtn.addEventListener("mousedown", iniciarHold);
+    shieldBtn.addEventListener("mouseup", cancelarHold);
+    shieldBtn.addEventListener("mouseleave", cancelarHold);
+    shieldBtn.addEventListener("touchstart", iniciarHold, { passive: true });
+    shieldBtn.addEventListener("touchend", cancelarHold);
+    shieldBtn.addEventListener("touchcancel", cancelarHold);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        abrirModalAdmin();
+      } else if (e.key === "Escape" && vaultModal.classList.contains("open")) {
+        cerrarModalAdmin();
+      }
+    });
+
+    closeVaultBtn.addEventListener("click", cerrarModalAdmin);
+    vaultModal.addEventListener("click", (e) => {
+      if (e.target === vaultModal) cerrarModalAdmin();
+    });
+
+    /* ============================================================
+       5. CONEXIÓN CON TU BACKEND EN VERCEL (/api/auth)
+       ============================================================ */
+    function mostrarFeedback(id, tipo, texto) {
+      const el = document.getElementById(id);
+      el.className = "feedback-msg";
+      el.textContent = texto || "";
+      if (tipo && texto) el.classList.add(tipo);
+    }
+
+    document.getElementById("empresaLoginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("btnIngresar");
+      const rut = rutInput.value.trim();
+      const clave = claveInput.value;
+
+      if (!rut || !clave) {
+        mostrarFeedback("loginFeedback", "error", "Completa tu RUT empresarial y clave de acceso.");
+        return;
+      }
+
+      btn.disabled = true;
+      mostrarFeedback("loginFeedback", "", "");
+
+      try {
+        const resp = await fetch(`${NEXUS_BRAND_CONFIG.apiBase}/auth/login-empresa`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rut, clave })
+        });
+        const data = await resp.json().catch(() => ({}));
+
+        if (!resp.ok || !data.ok) {
+          throw new Error(data.error || "Credenciales inválidas. Verifica tu RUT y clave.");
+        }
+
+        sessionStorage.setItem("nexus_custom_token", data.customToken || "");
+        sessionStorage.setItem("nexus_rut_empresa", data.rutEmpresa || rut);
+        sessionStorage.setItem("nexus_rol", data.rol || "empresa");
+
+        mostrarFeedback("loginFeedback", "success", "Acceso validado. Entrando a tu espacio de trabajo...");
+        setTimeout(() => {
+          window.location.href = NEXUS_BRAND_CONFIG.appRedirectUrl;
+        }, 550);
+      } catch (err) {
+        mostrarFeedback("loginFeedback", "error", err.message || "Error de conexión con el servidor.");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("adminLoginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("btnAdminEntrar");
+      const pin = adminPinInput.value.trim();
+
+      if (!pin) {
+        mostrarFeedback("adminFeedback", "error", "Ingresa la clave maestra.");
+        return;
+      }
+
+      btn.disabled = true;
+      mostrarFeedback("adminFeedback", "", "");
+
+      try {
+        const resp = await fetch(`${NEXUS_BRAND_CONFIG.apiBase}/auth/login-super-admin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin, clave: pin })
+        });
+        const data = await resp.json().catch(() => ({}));
+
+        if (!resp.ok || !data.ok) {
+          throw new Error(data.error || "Clave maestra incorrecta.");
+        }
+
+        sessionStorage.setItem("nexus_custom_token", data.customToken || "");
+        sessionStorage.setItem("nexus_rol", "superAdmin");
+
+        mostrarFeedback("adminFeedback", "success", "Sesión maestra verificada. Redirigiendo...");
+        setTimeout(() => {
+          window.location.href = `${NEXUS_BRAND_CONFIG.appRedirectUrl}?modo=master`;
+        }, 500);
+      } catch (err) {
+        mostrarFeedback("adminFeedback", "error", err.message || "No se pudo validar el acceso.");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
