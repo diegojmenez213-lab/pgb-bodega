@@ -76,6 +76,7 @@
     const FieldValue = firebase.firestore.FieldValue;
 
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+    const TODAS_PLATAFORMAS = ["Mercado Libre", "Falabella", "Lider", "Venta Directa"];
 
     // FECHA Y HORA OFICIAL DE CHILE (AMERICA/SANTIAGO)
     const fechaIsoChile = (ts = Date.now()) => {
@@ -112,7 +113,7 @@
       }
     };
 
-    // CIFRADO SHA-256 SINCRONIZADO CON EMPRESA-PANEL
+    // CIFRADO SHA-256 SINCRONIZADO CON EMPRESA-PANEL Y COMPRAS-FINANZAS
     const sha256Hex = async (texto) => {
       const str = String(texto || "").trim();
       if (window.crypto && window.crypto.subtle) {
@@ -164,6 +165,9 @@
       const [catalogo, setCatalogo] = useState([]);
       const [auditoriaInv, setAuditoriaInv] = useState([]);
 
+      // Evita sobrescribir comisionesForm si entra una venta mientras se edita
+      const comisionesInicializadasRef = useRef(false);
+
       // Bloqueo por clave de supervisor (en memoria React: al salir se vuelve a bloquear)
       const [desbloqueado, setDesbloqueado] = useState(false);
       const [pinInput, setPinInput] = useState("");
@@ -172,7 +176,7 @@
       // Controles de Gráfica Comparativa
       const [fechaDesde, setFechaDesde] = useState(() => isoHaceDiasChile(30));
       const [fechaHasta, setFechaHasta] = useState(() => fechaIsoChile());
-      const [canalesActivos, setCanalesActivos] = useState(["Mercado Libre", "Falabella", "Lider", "Venta Directa"]);
+      const [canalesActivos, setCanalesActivos] = useState([...TODAS_PLATAFORMAS]);
       const [modoSerie, setModoSerie] = useState("plataformas"); // plataformas | global
       const [tipoGrafica, setTipoGrafica] = useState("line"); // line | bar
 
@@ -207,8 +211,11 @@
             return;
           }
           setEmpresa(data);
-          if (data.comisionesCanales) {
-            setComisionesForm({ ...COMISIONES_DEFAULT, ...data.comisionesCanales });
+          if (!comisionesInicializadasRef.current) {
+            comisionesInicializadasRef.current = true;
+            if (data.comisionesCanales) {
+              setComisionesForm({ ...COMISIONES_DEFAULT, ...data.comisionesCanales });
+            }
           }
         });
 
@@ -235,6 +242,7 @@
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const tienePinPersonalizado = Boolean(empresa?.pinSupervisorHash || empresa?.pinSupervisor);
+      const hayFiltroParcialCanales = canalesActivos.length < TODAS_PLATAFORMAS.length;
 
       const validarAccesoSupervisor = async (e) => {
         e.preventDefault();
@@ -326,7 +334,7 @@
         let ordenesSinCosto = 0;
 
         const porCanal = {};
-        ["Mercado Libre", "Falabella", "Lider", "Venta Directa"].forEach((c) => {
+        TODAS_PLATAFORMAS.forEach((c) => {
           porCanal[c] = { bruto: 0, neto: 0, iva: 0, comision: 0, ordenes: 0, pctComision: Number(coms[c] ?? 0) };
         });
 
@@ -494,8 +502,12 @@
 
       // ================= RENDER GRÁFICA 2: DESGLOSE FINANCIERO PRIVADO =================
       useEffect(() => {
+        if (chartFinanzasInst.current) {
+          chartFinanzasInst.current.destroy();
+          chartFinanzasInst.current = null;
+        }
         if (!desbloqueado || tabSup !== "finanzas" || !chartFinanzasRef.current || !window.Chart) return;
-        if (chartFinanzasInst.current) chartFinanzasInst.current.destroy();
+        if (resumenFinanciero.ventasBrutas <= 0) return;
 
         const textColor = T.dark ? "#cbd5e1" : "#334155";
         const { gananciaNetaSinIva, ivaDebito, comisionesPagadas, costoMercaderiaNeto } = resumenFinanciero;
@@ -532,7 +544,10 @@
         });
 
         return () => {
-          if (chartFinanzasInst.current) chartFinanzasInst.current.destroy();
+          if (chartFinanzasInst.current) {
+            chartFinanzasInst.current.destroy();
+            chartFinanzasInst.current = null;
+          }
         };
       }, [desbloqueado, tabSup, resumenFinanciero, T.dark]);
 
@@ -704,7 +719,7 @@
                 <div className={`${T.card} rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`text-xs font-extrabold ${T.sub}`}>Plataformas:</span>
-                    {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
+                    {TODAS_PLATAFORMAS.map((c) => {
                       const on = canalesActivos.includes(c);
                       return (
                         <button
@@ -720,7 +735,7 @@
                       );
                     })}
                     <button
-                      onClick={() => setCanalesActivos(["Mercado Libre", "Falabella", "Lider", "Venta Directa"])}
+                      onClick={() => setCanalesActivos([...TODAS_PLATAFORMAS])}
                       className={`px-2.5 py-2 rounded-xl text-xs font-bold underline cursor-pointer ${T.sub}`}
                     >
                       Todas
@@ -768,7 +783,7 @@
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
+                  {TODAS_PLATAFORMAS.map((c) => {
                     const st = resumenFinanciero.porCanal[c];
                     const share = resumenFinanciero.ventasBrutas > 0 ? ((st.bruto / resumenFinanciero.ventasBrutas) * 100).toFixed(1) : "0.0";
                     return (
@@ -793,6 +808,24 @@
             {/* ================= TAB 2: FINANZAS PRIVADAS (GANANCIA NETA, IVA, COMISIONES) ================= */}
             {tabSup === "finanzas" && (
               <div className="space-y-4">
+                {hayFiltroParcialCanales && (
+                  <div className={`${T.card} rounded-2xl p-4 border-2 border-sky-500/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs`}>
+                    <div>
+                      <span className="font-extrabold text-sky-500 uppercase block">Filtro Parcial de Plataformas Activo</span>
+                      <p className={T.sub}>
+                        Las ventas e IVA Débito muestran solo: <strong>{canalesActivos.join(", ")}</strong>. El IVA Crédito incluye el 100% de tus facturas de compra, por lo que el Balance IVA F29 es parcial.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCanalesActivos([...TODAS_PLATAFORMAS])}
+                      className={`px-4 py-2 rounded-xl text-xs font-extrabold shrink-0 cursor-pointer ${T.btn}`}
+                    >
+                      Incluir todas las plataformas
+                    </button>
+                  </div>
+                )}
+
                 {resumenFinanciero.ordenesSinCosto > 0 && (
                   <div className={`${T.card} rounded-2xl p-4 border-2 border-amber-500/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs`}>
                     <div>
@@ -830,11 +863,25 @@
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                  <div className={`lg:col-span-5 ${T.card} rounded-2xl p-5`}>
+                  <div className={`lg:col-span-5 ${T.card} rounded-2xl p-5 flex flex-col`}>
                     <h2 className={`text-sm font-extrabold mb-3 ${T.main}`}>Distribución Real de cada Peso Vendido</h2>
-                    <div className="h-[300px]">
-                      <canvas ref={chartFinanzasRef}></canvas>
-                    </div>
+                    {resumenFinanciero.ventasBrutas <= 0 ? (
+                      <div className={`${T.muted} flex-1 min-h-[260px] rounded-2xl flex flex-col items-center justify-center p-6 text-center space-y-1.5`}>
+                        <p className={`text-xs font-extrabold ${T.main}`}>Sin ventas efectivas en este periodo</p>
+                        <p className={`text-[11px] ${T.sub}`}>Amplía el rango de fechas o selecciona todas las plataformas para visualizar la distribución.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="h-[300px]">
+                          <canvas ref={chartFinanzasRef}></canvas>
+                        </div>
+                        {resumenFinanciero.gananciaNetaSinIva < 0 && (
+                          <p className="text-[11px] font-semibold text-rose-500 text-center mt-2">
+                            Margen neto negativo en el periodo (${resumenFinanciero.gananciaNetaSinIva.toLocaleString("es-CL")}); el gráfico muestra la proporción de costos, IVA y comisiones.
+                          </p>
+                        )}
+                      </>
+                    )}
                   </div>
 
                   <div className={`lg:col-span-7 ${T.card} rounded-2xl p-5 space-y-3`}>
@@ -852,11 +899,12 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200/30">
-                          {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => {
+                          {TODAS_PLATAFORMAS.map((c) => {
                             const st = resumenFinanciero.porCanal[c];
                             const saldo = st.neto - st.comision;
+                            const ocultaPorFiltro = !canalesActivos.includes(c);
                             return (
-                              <tr key={c}>
+                              <tr key={c} className={ocultaPorFiltro ? "opacity-45" : ""}>
                                 <td className={`p-3 font-extrabold ${T.main}`}>{c}</td>
                                 <td className="p-3 text-right">${st.bruto.toLocaleString("es-CL")}</td>
                                 <td className="p-3 text-right font-bold">${st.neto.toLocaleString("es-CL")}</td>
@@ -881,10 +929,10 @@
               <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                 <div>
                   <h2 className={`text-sm font-extrabold ${T.main}`}>Registro de Modificaciones Autorizadas por Supervisor ({auditoriaInv.length})</h2>
-                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre, SKU o cuarentena con clave de supervisor, queda respaldado aquí.</p>
+                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre, SKU, cuarentena o se carga una factura de compra con clave de supervisor, queda respaldado aquí.</p>
                 </div>
                 {auditoriaInv.length === 0 ? (
-                  <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no se han registrado modificaciones manuales de inventario.</p>
+                  <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no se han registrado modificaciones autorizadas de inventario.</p>
                 ) : (
                   <div className="divide-y divide-slate-200/30">
                     {auditoriaInv.map((a) => (
@@ -906,7 +954,7 @@
               <form onSubmit={guardarSeguridadYComisiones} className={`${T.card} rounded-2xl p-6 space-y-5 max-w-2xl`}>
                 <div>
                   <h2 className={`text-base font-extrabold ${T.main}`}>Seguridad de Supervisor (SHA-256) y Comisiones por Canal</h2>
-                  <p className={`text-xs ${T.sub}`}>La clave se guarda cifrada (SHA-256) y se comparte con el panel principal para autorizar cambios críticos.</p>
+                  <p className={`text-xs ${T.sub}`}>La clave se guarda cifrada (SHA-256) y se comparte con el panel principal y recepción de compras para autorizar cambios críticos.</p>
                 </div>
 
                 <div className={`${T.muted} p-4 rounded-xl space-y-2`}>
@@ -923,7 +971,7 @@
                 <div className="space-y-2.5">
                   <h3 className={`text-xs font-extrabold uppercase ${T.sub}`}>Porcentaje de Comisión por Venta en cada Plataforma (%)</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {["Mercado Libre", "Falabella", "Lider", "Venta Directa"].map((c) => (
+                    {TODAS_PLATAFORMAS.map((c) => (
                       <div key={c} className={`${T.muted} p-3 rounded-xl flex items-center justify-between gap-2`}>
                         <span className={`text-xs font-extrabold ${T.main}`}>{c}</span>
                         <div className="flex items-center gap-1.5">
