@@ -3,6 +3,7 @@ const cors = require("cors");
 const { getDb } = require("../server/firebaseAdmin");
 const { createAuthRouter } = require("../server/routes/auth");
 const { createSiiRouter } = require("../server/routes/sii");
+const { createMarketplacesRouter } = require("../server/routes/marketplaces");
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -40,6 +41,12 @@ const siiRouter = createSiiRouter();
 app.use("/api/sii", siiRouter);
 app.use("/sii", siiRouter);
 
-// Paso 5 agregará: /api/marketplaces y /api/cron
+const marketplacesRouter = createMarketplacesRouter();
+app.use("/api/marketplaces", marketplacesRouter);
+app.use("/marketplaces", marketplacesRouter);
+app.use("/api/cron", (req, res, next) => {
+  req.url = req.url === "/" ? "/cron/sync" : `/cron${req.url}`;
+  return marketplacesRouter(req, res, next);
+});
 
 module.exports = app;
