@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { getDb } = require("../server/firebaseAdmin");
 const { createAuthRouter } = require("../server/routes/auth");
+const { createSiiRouter } = require("../server/routes/sii");
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -35,7 +36,10 @@ const authRouter = createAuthRouter();
 app.use("/api/auth", authRouter);
 app.use("/auth", authRouter);
 
-// Paso 4 agregará: /api/sii (Motor Universal SII)
+const siiRouter = createSiiRouter();
+app.use("/api/sii", siiRouter);
+app.use("/sii", siiRouter);
+
 // Paso 5 agregará: /api/marketplaces y /api/cron
 
 module.exports = app;
