@@ -69,6 +69,24 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
+    // VALIDADOR OFICIAL DE RUT CHILENO (MÓDULO 11)
+    const validarRutChileno = (rut) => {
+      const limpio = limpiarRut(rut);
+      if (limpio.length < 7 || limpio.length > 9) return false;
+      const cuerpo = limpio.slice(0, -1);
+      const dv = limpio.slice(-1);
+      if (!/^\d+$/.test(cuerpo)) return false;
+      let suma = 0;
+      let multiplo = 2;
+      for (let i = cuerpo.length - 1; i >= 0; i--) {
+        suma += parseInt(cuerpo.charAt(i), 10) * multiplo;
+        multiplo = multiplo < 7 ? multiplo + 1 : 2;
+      }
+      const dvEsperado = 11 - (suma % 11);
+      const dvCalc = dvEsperado === 11 ? "0" : dvEsperado === 10 ? "K" : String(dvEsperado);
+      return dv === dvCalc;
+    };
+
     const fechaIsoChile = (ts = Date.now()) => {
       try {
         return new Intl.DateTimeFormat("en-CA", {
@@ -105,15 +123,12 @@
             ctx.clearRect(0, 0, w, h);
             ctx.drawImage(img, 0, 0, w, h);
 
-            // 1. Intenta WebP (mantiene transparencia y pesa muy poco)
             let dataUrl = canvas.toDataURL("image/webp", 0.85);
 
-            // 2. Si el navegador no soporta WebP, usa PNG
             if (!dataUrl.startsWith("data:image/webp")) {
               dataUrl = canvas.toDataURL("image/png");
             }
 
-            // 3. Si aún pesa más de ~260 KB en Base64, comprime en JPEG con fondo blanco
             if (dataUrl.length > 350000) {
               const canvasJpg = document.createElement("canvas");
               canvasJpg.width = w;
@@ -244,6 +259,7 @@
       const [empresas, setEmpresas] = useState([]);
       const [seleccionadaId, setSeleccionadaId] = useState("");
       const [guardando, setGuardando] = useState(false);
+      const [creandoEmpresa, setCreandoEmpresa] = useState(false);
       const [logoInfoTxt, setLogoInfoTxt] = useState("");
       const [hayCambiosSinGuardar, setHayCambiosSinGuardar] = useState(false);
 
@@ -332,28 +348,62 @@
         }
       };
 
+      // BLOQUEA SOBRESCRITURA ACCIDENTAL SI EL RUT YA EXISTE EN FIRESTORE
       const crearNuevaEmpresa = async (e) => {
         e.preventDefault();
         const rutLimpio = limpiarRut(nuevoRut);
-        if (rutLimpio.length < 7 || !nuevoNombre.trim()) return alert("Completa nombre y RUT válido.");
-        const ahora = Date.now();
-        await db.collection("saas_empresas").doc(rutLimpio).set({
-          nombre: nuevoNombre.trim().toUpperCase(),
-          rut: formatearRut(rutLimpio),
-          rubro: nuevoRubro.trim(),
-          claveAcceso: nuevaClave.trim(),
-          activa: true,
-          temaVisual: "claro_retail",
-          modulosActivos: { ...MODULOS_DEFAULT },
-          fechaCreacion: fechaIsoChile(ahora),
-          creadoTs: ahora
-        }, { merge: true });
-        ultimoIdCargadoRef.current = "";
-        setSeleccionadaId(rutLimpio);
-        setCrearAbierto(false);
-        setNuevoNombre("");
-        setNuevoRut("");
-        setNuevaClave("");
+        if (rutLimpio.length < 7 || !nuevoNombre.trim()) {
+          return alert("Completa Razón Social y un RUT válido.");
+        }
+
+        if (!validarRutChileno(rutLimpio)) {
+          const continuarInvalido = confirm(
+            `El RUT ${formatearRut(rutLimpio)} no pasa la validación Módulo 11 del SII.\n\n¿Deseas crearlo de todas formas (solo recomendado para pruebas)?`
+          );
+          if (!continuarInvalido) return;
+        }
+
+        setCreandoEmpresa(true);
+        try {
+          const docRef = db.collection("saas_empresas").doc(rutLimpio);
+          const snapExistente = await docRef.get();
+
+          if (snapExistente.exists) {
+            const datosExist = snapExistente.data() || {};
+            alert(
+              `RUT DUPLICADO BLOQUEADO: El RUT ${formatearRut(rutLimpio)} ya está registrado bajo "${datosExist.nombre || rutLimpio}".\n\n` +
+              `No se modificaron sus datos ni sus 18 switches. Se abrirá su ficha existente para editar.`
+            );
+            ultimoIdCargadoRef.current = "";
+            setSeleccionadaId(rutLimpio);
+            setCrearAbierto(false);
+            setCreandoEmpresa(false);
+            return;
+          }
+
+          const ahora = Date.now();
+          await docRef.set({
+            nombre: nuevoNombre.trim().toUpperCase(),
+            rut: formatearRut(rutLimpio),
+            rubro: nuevoRubro.trim(),
+            claveAcceso: nuevaClave.trim(),
+            activa: true,
+            temaVisual: "claro_retail",
+            modulosActivos: { ...MODULOS_DEFAULT },
+            fechaCreacion: fechaIsoChile(ahora),
+            creadoTs: ahora
+          });
+
+          ultimoIdCargadoRef.current = "";
+          setSeleccionadaId(rutLimpio);
+          setCrearAbierto(false);
+          setNuevoNombre("");
+          setNuevoRut("");
+          setNuevaClave("");
+        } catch (err) {
+          alert("Error al crear empresa: " + err.message);
+        }
+        setCreandoEmpresa(false);
       };
 
       const subirLogoEmpresa = async (e) => {
@@ -462,6 +512,9 @@
         );
       }
 
+      const rutNuevoLimpio = limpiarRut(nuevoRut);
+      const rutNuevoYaExiste = rutNuevoLimpio.length >= 7 && empresas.some((emp) => emp.id === rutNuevoLimpio);
+
       return (
         <div className="max-w-4xl mx-auto px-4 pt-5 pb-24 space-y-4">
           {/* CABECERA */}
@@ -485,18 +538,33 @@
             </div>
           </div>
 
-          {/* CREAR NUEVA EMPRESA */}
+          {/* CREAR NUEVA EMPRESA (CON ESCUDO ANTI-DUPLICADOS Y VALIDADOR MÓDULO 11) */}
           {crearAbierto && (
             <form onSubmit={crearNuevaEmpresa} className="bg-white border-2 border-blue-600 rounded-2xl p-5 space-y-3 shadow-md">
               <h2 className="text-sm font-extrabold text-slate-900">Registrar Nueva Empresa Cliente</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Razón Social *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                <input type="text" value={nuevoRut} onChange={(e) => setNuevoRut(formatearRut(e.target.value))} placeholder="RUT Empresa (Ej: 77.528.042-5) *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
+                <div>
+                  <input type="text" value={nuevoRut} onChange={(e) => setNuevoRut(formatearRut(e.target.value))} placeholder="RUT Empresa (Ej: 77.528.042-5) *" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
+                  {rutNuevoLimpio.length >= 7 && (
+                    <p className={`text-[10px] font-bold mt-1 ${rutNuevoYaExiste ? "text-rose-600" : validarRutChileno(rutNuevoLimpio) ? "text-emerald-600" : "text-amber-600"}`}>
+                      {rutNuevoYaExiste
+                        ? "✕ Este RUT ya existe en el sistema (no se sobrescribirá)"
+                        : validarRutChileno(rutNuevoLimpio)
+                          ? "✓ RUT chileno válido (Módulo 11)"
+                          : "⚠️ Dígito verificador no coincide con Módulo 11"}
+                    </p>
+                  )}
+                </div>
                 <input type="text" value={nuevoRubro} onChange={(e) => setNuevoRubro(e.target.value)} placeholder="Rubro" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
                 <input type="text" value={nuevaClave} onChange={(e) => setNuevaClave(e.target.value)} placeholder="Clave de Acceso (Opcional)" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
               </div>
-              <button type="submit" className="w-full bg-blue-700 hover:bg-blue-800 text-white font-extrabold py-3 rounded-xl text-xs cursor-pointer">
-                Crear Empresa en Firestore
+              <button
+                type="submit"
+                disabled={creandoEmpresa || rutNuevoYaExiste}
+                className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-40 text-white font-extrabold py-3 rounded-xl text-xs cursor-pointer"
+              >
+                {creandoEmpresa ? "Verificando y Creando..." : rutNuevoYaExiste ? "RUT ya registrado — Selecciónalo abajo" : "Crear Empresa en Firestore"}
               </button>
             </form>
           )}
