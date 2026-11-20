@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
-  <title>NEXUS ERP • Recepción XML SII, Cuadratura IVA & Archivo Compras</title>
+  <title>NEXUS ERP • Recepción XML SII, Carga por Foto, Cuadratura IVA & Archivo</title>
   <script>
     // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE ENTRE EMPRESAS)
     (function () {
@@ -37,8 +37,18 @@
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
   </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
 </head>
 <body class="min-h-screen">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
@@ -56,6 +66,7 @@
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
+    const FieldValue = firebase.firestore.FieldValue;
 
     const RUT_PGB = "769497226";
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
@@ -63,6 +74,33 @@
       const c = limpiarRut(r);
       if (c.length < 2) return c;
       return `${c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}-${c.slice(-1)}`;
+    };
+
+    // FECHA Y HORA LOCAL OFICIAL DE CHILE (AMERICA/SANTIAGO)
+    const fechaIsoChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date(ts));
+      } catch (e) {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+
+    const fechaLegibleChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("es-CL", {
+          timeZone: "America/Santiago",
+          dateStyle: "short",
+          timeStyle: "short"
+        }).format(new Date(ts));
+      } catch (e) {
+        return new Date(ts).toLocaleString("es-CL");
+      }
     };
 
     const TEMAS = {
@@ -84,8 +122,9 @@
       const [folioFactura, setFolioFactura] = useState("");
       const [timbreScan, setTimbreScan] = useState("");
 
-      // Pre-visualización editable antes de confirmar
+      // Pre-visualización editable + foto de referencia local (no pesa en Firestore)
       const [vistaPreviaFactura, setVistaPreviaFactura] = useState(null);
+      const [fotoReferenciaUrl, setFotoReferenciaUrl] = useState("");
       const [guardando, setGuardando] = useState(false);
 
       // Nuevo ítem manual en la pre-visualización
@@ -93,12 +132,19 @@
       const [itemNom, setItemNom] = useState("");
       const [itemCant, setItemCant] = useState(1);
       const [itemNetoUnit, setItemNetoUnit] = useState(0);
+      const [itemExento, setItemExento] = useState(false);
 
       // Archivo Histórico Infinito de Compras
       const [busquedaArchivo, setBusquedaArchivo] = useState("");
       const [fechaDesdeArchivo, setFechaDesdeArchivo] = useState("");
       const [fechaHastaArchivo, setFechaHastaArchivo] = useState("");
       const [facturaAuditando, setFacturaAuditando] = useState(null);
+
+      useEffect(() => {
+        return () => {
+          if (fotoReferenciaUrl) URL.revokeObjectURL(fotoReferenciaUrl);
+        };
+      }, [fotoReferenciaUrl]);
 
       useEffect(() => {
         if (!rutActivo) {
@@ -114,6 +160,11 @@
             return;
           }
           const data = { id: doc.id, ...doc.data() };
+          if (data.activa === false) {
+            localStorage.removeItem("nexus_empresa_rut");
+            window.location.replace("index.html");
+            return;
+          }
           const m = data.modulosActivos || {};
           if (rutActivo !== RUT_PGB && !m.m17_compras_prov && !m.m18_finanzas_bi) {
             window.location.replace("empresa-panel.html");
@@ -124,7 +175,9 @@
 
         const colCat = rutActivo === RUT_PGB ? db.collection("catalogo_productos") : empRef.collection("catalogo");
         const u2 = colCat.onSnapshot((snap) => {
-          setCatalogo(snap.docs.map((d) => ({ id: d.id, stockOnline: 0, ...d.data() })));
+          const lista = snap.docs.map((d) => ({ id: d.id, stockOnline: 0, ...d.data() }));
+          lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+          setCatalogo(lista);
         });
 
         const u3 = empRef.collection("compras_proveedores").onSnapshot((snap) => {
@@ -143,7 +196,13 @@
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const catRef = () => (rutActivo === RUT_PGB ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
 
-      // ================= LECTURA XML DTE (SIN IMPACTAR STOCK HASTA CONFIRMAR) =================
+      const limpiarVistaPrevia = () => {
+        if (fotoReferenciaUrl) URL.revokeObjectURL(fotoReferenciaUrl);
+        setFotoReferenciaUrl("");
+        setVistaPreviaFactura(null);
+      };
+
+      // ================= LECTURA XML DTE (CON SOPORTE PARA DESCUENTOS Y EXENTOS DE IVA) =================
       const procesarArchivoXml = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -159,8 +218,9 @@
           const rutProv = getTag(xml, "RUTEmisor") || "S/I";
           const razonProv = getTag(xml, "RznSoc") || `PROVEEDOR ${rutProv}`;
           const folio = getTag(xml, "Folio") || String(Date.now()).slice(-6);
-          const fchEmis = getTag(xml, "FchEmis") || new Date().toISOString().slice(0, 10);
+          const fchEmis = getTag(xml, "FchEmis") || fechaIsoChile();
           const mntNetoXml = Number(getTag(xml, "MntNeto") || 0);
+          const mntExeXml = Number(getTag(xml, "MntExe") || 0);
           const ivaXml = Number(getTag(xml, "IVA") || 0);
           const mntTotalXml = Number(getTag(xml, "MntTotal") || 0);
 
@@ -169,20 +229,27 @@
             const cod = (getTag(det, "VlrCodigo") || "").toUpperCase();
             const nom = (getTag(det, "NmbItem") || "ARTICULO XML").toUpperCase();
             const cant = Math.max(1, Number(getTag(det, "QtyItem") || 1));
+            const indExe = getTag(det, "IndExe") === "1";
+
+            // Prioriza MontoItem (neto real de línea tras descuentos) sobre PrcItem bruto
             const montoNetoLinea = Number(getTag(det, "MontoItem") || 0);
             const precioUnitXml = Number(getTag(det, "PrcItem") || 0);
-            const netoUnitario = precioUnitXml > 0 ? Math.round(precioUnitXml) : Math.round(montoNetoLinea / cant);
+            const netoUnitario = montoNetoLinea > 0
+              ? Math.round(montoNetoLinea / cant)
+              : Math.round(precioUnitXml);
 
             return {
               uid: `${Date.now()}_${idx}`,
               codigo: cod,
               nombre: nom,
               cantidad: cant,
-              netoUnitario,
+              netoUnitario: Math.max(0, netoUnitario),
+              exentoIva: indExe,
               sumarAlStock: true
             };
           });
 
+          limpiarVistaPrevia();
           setVistaPreviaFactura({
             origen: "Archivo XML DTE SII",
             rutProveedor: formatearRut(rutProv),
@@ -190,6 +257,7 @@
             folio,
             fecha: fchEmis,
             netoDeclaradoXml: mntNetoXml,
+            exentoDeclaradoXml: mntExeXml,
             ivaDeclaradoXml: ivaXml,
             totalDeclaradoXml: mntTotalXml,
             items
@@ -200,17 +268,42 @@
         e.target.value = "";
       };
 
+      const abrirCargaManualDesdeFoto = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (fotoReferenciaUrl) URL.revokeObjectURL(fotoReferenciaUrl);
+        const url = URL.createObjectURL(file);
+        setFotoReferenciaUrl(url);
+        if (!vistaPreviaFactura) {
+          setVistaPreviaFactura({
+            origen: "Carga Manual desde Foto / Comprobante",
+            rutProveedor: rutEmisor.trim() ? formatearRut(rutEmisor) : "",
+            proveedor: "",
+            folio: folioFactura.trim() || "",
+            fecha: fechaIsoChile(),
+            netoDeclaradoXml: 0,
+            exentoDeclaradoXml: 0,
+            ivaDeclaradoXml: 0,
+            totalDeclaradoXml: 0,
+            items: []
+          });
+        }
+        e.target.value = "";
+      };
+
       const consultarPorFolioApi = (e) => {
         e.preventDefault();
         if (!rutEmisor.trim() || !folioFactura.trim()) return;
         const tieneKey = Boolean(empresa?.apis?.siiApiKey);
+        limpiarVistaPrevia();
         setVistaPreviaFactura({
-          origen: tieneKey ? "Consulta API OpenFactura SII" : "Ingreso Manual por Folio",
+          origen: tieneKey ? "Consulta / Carga Manual por Folio" : "Ingreso Manual por Folio",
           rutProveedor: formatearRut(rutEmisor),
           proveedor: `PROVEEDOR ${formatearRut(rutEmisor)}`,
           folio: folioFactura.trim(),
-          fecha: new Date().toISOString().slice(0, 10),
+          fecha: fechaIsoChile(),
           netoDeclaradoXml: 0,
+          exentoDeclaradoXml: 0,
           ivaDeclaradoXml: 0,
           totalDeclaradoXml: 0,
           items: []
@@ -226,13 +319,15 @@
           const feMatch = val.match(/<FE>(.*?)<\/FE>/);
           const tot = mMatch ? Number(mMatch[1]) : 0;
           const netoEst = Math.round(tot / 1.19);
+          limpiarVistaPrevia();
           setVistaPreviaFactura({
             origen: "Escaneo Timbre PDF417 SII",
             rutProveedor: reMatch ? formatearRut(reMatch[1]) : "S/I",
             proveedor: reMatch ? `PROVEEDOR ${formatearRut(reMatch[1])}` : "PROVEEDOR SII",
             folio: fMatch ? fMatch[1] : "S/N",
-            fecha: feMatch ? feMatch[1] : new Date().toISOString().slice(0, 10),
+            fecha: feMatch ? feMatch[1] : fechaIsoChile(),
             netoDeclaradoXml: netoEst,
+            exentoDeclaradoXml: 0,
             ivaDeclaradoXml: tot - netoEst,
             totalDeclaradoXml: tot,
             items: []
@@ -249,7 +344,7 @@
             if (it.uid !== uid) return it;
             if (campo === "cantidad") return { ...it, cantidad: Math.max(0, Number(valor)) };
             if (campo === "netoUnitario") return { ...it, netoUnitario: Math.max(0, Number(valor)) };
-            if (campo === "sumarAlStock") return { ...it, sumarAlStock: Boolean(valor) };
+            if (campo === "sumarAlStock" || campo === "exentoIva") return { ...it, [campo]: Boolean(valor) };
             return { ...it, [campo]: String(valor).toUpperCase() };
           });
           return { ...prev, items: itemsAct };
@@ -272,6 +367,7 @@
           nombre: itemNom.trim().toUpperCase(),
           cantidad: Math.max(1, Number(itemCant)),
           netoUnitario: Math.max(0, Number(itemNetoUnit)),
+          exentoIva: Boolean(itemExento),
           sumarAlStock: true
         };
         setVistaPreviaFactura({
@@ -282,21 +378,29 @@
         setItemNom("");
         setItemCant(1);
         setItemNetoUnit(0);
+        setItemExento(false);
       };
 
-      // Cuadratura automática Neto + IVA 19% + Total de la vista previa
+      // Cuadratura automática Neto Afecto + Exento + IVA 19% + Total
       const cuadraturaPrevia = useMemo(() => {
-        if (!vistaPreviaFactura) return { neto: 0, iva: 0, total: 0, diferenciaXml: 0, cuadraConXml: true };
-        const neto = vistaPreviaFactura.items.reduce(
-          (acc, it) => acc + Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0)),
-          0
-        );
-        const iva = Math.round(neto * 0.19);
-        const total = neto + iva;
+        if (!vistaPreviaFactura) return { netoAfecto: 0, exento: 0, netoTotal: 0, iva: 0, total: 0, diferenciaXml: 0, cuadraConXml: true };
+        let netoAfecto = 0;
+        let exento = 0;
+
+        vistaPreviaFactura.items.forEach((it) => {
+          const linea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
+          if (it.exentoIva) exento += linea;
+          else netoAfecto += linea;
+        });
+
+        const iva = Math.round(netoAfecto * 0.19);
+        const total = netoAfecto + exento + iva;
         const totXml = Number(vistaPreviaFactura.totalDeclaradoXml || 0);
         const diferenciaXml = totXml > 0 ? total - totXml : 0;
         return {
-          neto,
+          netoAfecto,
+          exento,
+          netoTotal: netoAfecto + exento,
           iva,
           total,
           diferenciaXml,
@@ -304,14 +408,16 @@
         };
       }, [vistaPreviaFactura]);
 
-      // ================= CONFIRMACIÓN FINAL: IMPACTA STOCK Y ARCHIVA EN HISTORIAL INFINITO =================
+      // ================= CONFIRMACIÓN ATÓMICA (AGRUPA SKUS REPETIDOS + FIELDVALUE.INCREMENT) =================
       const confirmarYSumarStock = async () => {
         if (!vistaPreviaFactura) return;
         if (vistaPreviaFactura.items.length === 0) {
           return alert("La factura debe tener al menos un producto para confirmar.");
         }
+        if (!vistaPreviaFactura.folio.trim() || !vistaPreviaFactura.proveedor.trim()) {
+          return alert("Completa el Proveedor y el N° de Folio de la factura antes de confirmar.");
+        }
 
-        // Verificar si esta misma factura (mismo RUT proveedor + mismo folio) ya fue cargada antes
         const duplicada = compras.find(
           (c) =>
             limpiarRut(c.rutProveedor) === limpiarRut(vistaPreviaFactura.rutProveedor) &&
@@ -319,7 +425,7 @@
         );
         if (duplicada) {
           const seguir = confirm(
-            `⚠️ ADVERTENCIA: La Factura #${vistaPreviaFactura.folio} de ${vistaPreviaFactura.proveedor} ya fue cargada el ${duplicada.fecha}.\n\n¿Seguro que deseas cargarla nuevamente?`
+            `ADVERTENCIA: La Factura #${vistaPreviaFactura.folio} de ${vistaPreviaFactura.proveedor} ya fue cargada el ${duplicada.fecha}.\n\n¿Seguro que deseas cargarla nuevamente?`
           );
           if (!seguir) return;
         }
@@ -330,42 +436,61 @@
           const porNombre = new Map(catalogo.map((p) => [String(p.nombre || "").trim().toUpperCase(), p]));
           const porSku = new Map(catalogo.filter((p) => p.codigo).map((p) => [String(p.codigo || "").trim().toUpperCase(), p]));
 
+          // Acumuladores para evitar pisar stock o duplicar fichas si un SKU viene repetido en el XML
+          const deltasExistentes = new Map(); // docId -> { cant, ultimoCostoNeto, ultimoCostoBruto }
+          const nuevosCatalogo = new Map();   // key -> { codigo, nombre, proveedor, stockOnline, ultimoCostoNeto, ultimoCostoBruto }
           let lineasSumadas = 0;
 
           const itemsGuardados = vistaPreviaFactura.items.map((it) => {
-            const netoLinea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
-            const ivaLinea = Math.round(netoLinea * 0.19);
+            const cant = Math.max(0, Number(it.cantidad || 0));
+            const netoUnit = Math.max(0, Number(it.netoUnitario || 0));
+            const netoLinea = Math.round(cant * netoUnit);
+            const ivaLinea = it.exentoIva ? 0 : Math.round(netoLinea * 0.19);
             const totalLinea = netoLinea + ivaLinea;
-            const unitConIva = it.cantidad > 0 ? Math.round(totalLinea / it.cantidad) : 0;
+            const unitConIva = it.exentoIva ? netoUnit : Math.round(netoUnit * 1.19);
 
-            if (it.sumarAlStock && Number(it.cantidad) > 0) {
+            if (it.sumarAlStock && cant > 0) {
               lineasSumadas++;
-              const existente = (it.codigo && porSku.get(it.codigo)) || porNombre.get(it.nombre);
+              const skuKey = String(it.codigo || "").trim().toUpperCase();
+              const nomKey = String(it.nombre || "").trim().toUpperCase();
+              const existente = (skuKey && porSku.get(skuKey)) || porNombre.get(nomKey);
+
               if (existente) {
-                const nuevoStock = (Number(existente.stockOnline) || 0) + Number(it.cantidad);
-                batch.update(catRef().doc(existente.id), {
-                  stockOnline: nuevoStock,
-                  ultimoCostoNeto: Number(it.netoUnitario || 0),
-                  ultimoCostoBruto: unitConIva
+                const prev = deltasExistentes.get(existente.id) || { cant: 0, ultimoCostoNeto: 0, ultimoCostoBruto: 0 };
+                deltasExistentes.set(existente.id, {
+                  cant: prev.cant + cant,
+                  ultimoCostoNeto: netoUnit > 0 ? netoUnit : prev.ultimoCostoNeto,
+                  ultimoCostoBruto: unitConIva > 0 ? unitConIva : prev.ultimoCostoBruto
                 });
               } else {
-                batch.set(catRef().doc(), {
-                  codigo: it.codigo || "",
-                  nombre: it.nombre,
-                  proveedor: vistaPreviaFactura.proveedor || "",
-                  stockOnline: Number(it.cantidad),
-                  ultimoCostoNeto: Number(it.netoUnitario || 0),
-                  ultimoCostoBruto: unitConIva
-                });
+                const nuevaKey = skuKey || nomKey;
+                const prevNuevo = nuevosCatalogo.get(nuevaKey);
+                if (prevNuevo) {
+                  prevNuevo.stockOnline += cant;
+                  if (netoUnit > 0) {
+                    prevNuevo.ultimoCostoNeto = netoUnit;
+                    prevNuevo.ultimoCostoBruto = unitConIva;
+                  }
+                } else {
+                  nuevosCatalogo.set(nuevaKey, {
+                    codigo: skuKey,
+                    nombre: nomKey,
+                    proveedor: vistaPreviaFactura.proveedor.trim().toUpperCase(),
+                    stockOnline: cant,
+                    ultimoCostoNeto: netoUnit,
+                    ultimoCostoBruto: unitConIva
+                  });
+                }
               }
             }
 
             return {
               codigo: it.codigo || "",
               nombre: it.nombre,
-              cantidad: Number(it.cantidad || 0),
-              netoUnitario: Number(it.netoUnitario || 0),
+              cantidad: cant,
+              netoUnitario: netoUnit,
               unitConIva,
+              exentoIva: Boolean(it.exentoIva),
               netoLinea,
               ivaLinea,
               totalLinea,
@@ -373,15 +498,32 @@
             };
           });
 
+          // Aplica 1 solo incremento atómico por cada documento existente
+          deltasExistentes.forEach((info, docId) => {
+            const updateObj = { stockOnline: FieldValue.increment(info.cant) };
+            if (info.ultimoCostoNeto > 0) {
+              updateObj.ultimoCostoNeto = info.ultimoCostoNeto;
+              updateObj.ultimoCostoBruto = info.ultimoCostoBruto;
+            }
+            batch.update(catRef().doc(docId), updateObj);
+          });
+
+          // Crea 1 sola ficha nueva por cada SKU/producto nuevo consolidado
+          nuevosCatalogo.forEach((nuevoProd) => {
+            batch.set(catRef().doc(), nuevoProd);
+          });
+
           const ahora = Date.now();
           batch.set(empRef().collection("compras_proveedores").doc(), {
             origen: vistaPreviaFactura.origen,
-            rutProveedor: vistaPreviaFactura.rutProveedor,
-            proveedor: vistaPreviaFactura.proveedor,
-            folio: vistaPreviaFactura.folio,
-            fecha: vistaPreviaFactura.fecha,
-            fechaCargaLegible: new Date(ahora).toLocaleString("es-CL"),
-            netoClp: cuadraturaPrevia.neto,
+            rutProveedor: vistaPreviaFactura.rutProveedor ? formatearRut(vistaPreviaFactura.rutProveedor) : "S/I",
+            proveedor: vistaPreviaFactura.proveedor.trim().toUpperCase(),
+            folio: vistaPreviaFactura.folio.trim(),
+            fecha: vistaPreviaFactura.fecha || fechaIsoChile(ahora),
+            fechaCargaLegible: fechaLegibleChile(ahora),
+            netoClp: cuadraturaPrevia.netoTotal,
+            netoAfectoClp: cuadraturaPrevia.netoAfecto,
+            exentoClp: cuadraturaPrevia.exento,
             ivaClp: cuadraturaPrevia.iva,
             totalClp: cuadraturaPrevia.total,
             items: itemsGuardados,
@@ -390,11 +532,11 @@
 
           await batch.commit();
           alert(
-            `✅ Factura #${vistaPreviaFactura.folio} confirmada y archivada.\n` +
-            `• Neto: $${cuadraturaPrevia.neto.toLocaleString("es-CL")} | IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")} | Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")}\n` +
-            `• ${lineasSumadas} producto(s) sumados al stock del catálogo.`
+            `Factura #${vistaPreviaFactura.folio} confirmada y archivada.\n` +
+            `• Neto/Exento: $${cuadraturaPrevia.netoTotal.toLocaleString("es-CL")} | IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")} | Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")}\n` +
+            `• ${lineasSumadas} línea(s) sumadas de forma atómica al inventario.`
           );
-          setVistaPreviaFactura(null);
+          limpiarVistaPrevia();
           setRutEmisor("");
           setFolioFactura("");
           setTab("historial");
@@ -424,11 +566,12 @@
       }, [compras, busquedaArchivo, fechaDesdeArchivo, fechaHastaArchivo]);
 
       const totalesFinancieros = useMemo(() => {
-        const ingresosBrutos = ventas.reduce((a, b) => a + Number(b.totalClp || 0), 0);
-        const comprasNeto = compras.reduce((a, b) => a + Number(b.netoClp || Math.round((b.totalClp || 0) / 1.19)), 0);
-        const comprasIva = compras.reduce((a, b) => a + Number(b.ivaClp || ((b.totalClp || 0) - Math.round((b.totalClp || 0) / 1.19))), 0);
+        const ventasValidas = ventas.filter((v) => v.timbradoSii && !v.anuladaPorNc61 && !v.devolucionInfo);
+        const ingresosBrutos = ventasValidas.reduce((a, b) => a + Number(b.totalClp || 0), 0);
+        const comprasNeto = compras.reduce((a, b) => a + Number(b.netoClp !== undefined ? b.netoClp : Math.round((b.totalClp || 0) / 1.19)), 0);
+        const comprasIva = compras.reduce((a, b) => a + Number(b.ivaClp !== undefined ? b.ivaClp : ((b.totalClp || 0) - Math.round((b.totalClp || 0) / 1.19))), 0);
         const comprasTotal = compras.reduce((a, b) => a + Number(b.totalClp || 0), 0);
-        return { ingresosBrutos, comprasNeto, comprasIva, comprasTotal };
+        return { ingresosBrutos, ventasValidasCount: ventasValidas.length, comprasNeto, comprasIva, comprasTotal };
       }, [ventas, compras]);
 
       if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Cargando módulo SII y Compras...</div>;
@@ -459,18 +602,17 @@
                   </button>
                 </div>
 
-                {/* DESGLOSE TRIBUTARIO DE LA FACTURA */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className={`${T.muted} p-3.5 rounded-xl`}>
-                    <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Monto Neto</span>
+                    <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Neto / Exento</span>
                     <p className={`text-base font-extrabold mt-0.5 ${T.main}`}>
-                      ${Number(facturaAuditando.netoClp || Math.round((facturaAuditando.totalClp || 0) / 1.19)).toLocaleString("es-CL")}
+                      ${Number(facturaAuditando.netoClp !== undefined ? facturaAuditando.netoClp : Math.round((facturaAuditando.totalClp || 0) / 1.19)).toLocaleString("es-CL")}
                     </p>
                   </div>
                   <div className={`${T.muted} p-3.5 rounded-xl`}>
                     <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>IVA Crédito (19%)</span>
                     <p className="text-base font-extrabold text-amber-500 mt-0.5">
-                      ${Number(facturaAuditando.ivaClp || ((facturaAuditando.totalClp || 0) - Math.round((facturaAuditando.totalClp || 0) / 1.19))).toLocaleString("es-CL")}
+                      ${Number(facturaAuditando.ivaClp !== undefined ? facturaAuditando.ivaClp : ((facturaAuditando.totalClp || 0) - Math.round((facturaAuditando.totalClp || 0) / 1.19))).toLocaleString("es-CL")}
                     </p>
                   </div>
                   <div className={`${T.muted} p-3.5 rounded-xl`}>
@@ -481,7 +623,6 @@
                   </div>
                 </div>
 
-                {/* TABLA DE PRODUCTOS QUE ENTRARON EN ESA FACTURA */}
                 <div className="overflow-x-auto border border-slate-200/40 rounded-2xl">
                   <table className="w-full text-left text-xs">
                     <thead className={`${T.muted} uppercase text-[10px]`}>
@@ -490,16 +631,16 @@
                         <th className="p-3">Producto</th>
                         <th className="p-3 text-center">Cant.</th>
                         <th className="p-3 text-right">Unit. Neto</th>
-                        <th className="p-3 text-right">Unit. c/IVA</th>
-                        <th className="p-3 text-right">Subtotal Neto</th>
-                        <th className="p-3 text-center">Stock</th>
+                        <th className="p-3 text-right">Unit. Final</th>
+                        <th className="p-3 text-right">Subtotal</th>
+                        <th className="p-3 text-center">IVA / Stock</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200/30">
                       {(facturaAuditando.items || []).map((it, i) => {
-                        const unitNeto = Number(it.netoUnitario || (it.cantidad > 0 ? Math.round((it.costoTotal || 0) / it.cantidad) : 0));
-                        const unitBruto = it.unitConIva || Math.round(unitNeto * 1.19);
-                        const subNeto = it.netoLinea || unitNeto * Number(it.cantidad || 1);
+                        const unitNeto = Number(it.netoUnitario || 0);
+                        const unitBruto = it.unitConIva !== undefined ? it.unitConIva : (it.exentoIva ? unitNeto : Math.round(unitNeto * 1.19));
+                        const subNeto = it.netoLinea !== undefined ? it.netoLinea : unitNeto * Number(it.cantidad || 1);
                         return (
                           <tr key={i}>
                             <td className="p-3 font-mono">{it.codigo || "-"}</td>
@@ -508,9 +649,10 @@
                             <td className="p-3 text-right">${unitNeto.toLocaleString("es-CL")}</td>
                             <td className="p-3 text-right font-semibold">${unitBruto.toLocaleString("es-CL")}</td>
                             <td className="p-3 text-right font-extrabold">${subNeto.toLocaleString("es-CL")}</td>
-                            <td className="p-3 text-center">
+                            <td className="p-3 text-center space-x-1">
+                              {it.exentoIva && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">Exento</span>}
                               {it.sumadoAlStock !== false ? (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">Sumado</span>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">Stock +</span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">Solo Gasto</span>
                               )}
@@ -525,9 +667,9 @@
             </div>
           )}
 
-          <div className="max-w-6xl mx-auto px-4 pt-5 space-y-4">
+          <div className="max-w-6xl mx-auto px-3 sm:px-4 pt-4 sm:pt-5 space-y-4">
             {/* CABECERA */}
-            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
+            <div className={`${T.card} rounded-2xl p-4 sm:p-5 border-t-4 ${T.top} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <button onClick={() => window.location.replace(urlVolver)} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
@@ -537,15 +679,15 @@
                     {empresa.nombre} • {empresa.rut}
                   </span>
                 </div>
-                <h1 className={`text-xl font-extrabold ${T.main}`}>Recepción XML SII, Cuadratura de Costos & IVA</h1>
-                <p className={`text-xs ${T.sub}`}>Audita y edita cada producto antes de sumarlo al inventario, cuadra Neto/IVA y archiva todas tus compras.</p>
+                <h1 className={`text-lg sm:text-xl font-extrabold ${T.main}`}>Recepción XML SII, Carga por Foto & Cuadratura IVA</h1>
+                <p className={`text-xs ${T.sub}`}>Audita y edita cada producto antes de sumarlo al inventario, cuadra Neto/Exento/IVA y archiva todas tus compras.</p>
               </div>
             </div>
 
             {/* KPI TRIBUTARIOS Y DE CAJA */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className={`${T.card} rounded-2xl p-4`}>
-                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Compras Netas</span>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Compras Netas / Exentas</span>
                 <p className={`text-lg font-extrabold mt-1 ${T.main}`}>${totalesFinancieros.comprasNeto.toLocaleString("es-CL")}</p>
                 <span className={`text-[11px] ${T.sub}`}>Costo mercadería sin IVA</span>
               </div>
@@ -560,28 +702,27 @@
                 <span className={`text-[11px] ${T.sub}`}>{compras.length} facturas archivadas</span>
               </div>
               <div className={`${T.card} rounded-2xl p-4`}>
-                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ventas Brutas Registradas</span>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ventas Efectivas Brutas</span>
                 <p className="text-lg font-extrabold text-emerald-600 mt-1">${totalesFinancieros.ingresosBrutos.toLocaleString("es-CL")}</p>
-                <span className={`text-[11px] ${T.sub}`}>{ventas.length} órdenes emitidas</span>
+                <span className={`text-[11px] ${T.sub}`}>{totalesFinancieros.ventasValidasCount} órdenes válidas</span>
               </div>
             </div>
 
             {/* NAVEGACIÓN PRINCIPAL */}
             <div className={`${T.card} rounded-2xl p-1.5 grid grid-cols-2 gap-1.5`}>
               <button onClick={() => setTab("lector")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "lector" ? T.btn : T.sec}`}>
-                1. Cargar y Auditar Factura XML
+                1. Cargar y Auditar Factura (XML / Foto)
               </button>
               <button onClick={() => setTab("historial")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "historial" ? T.btn : T.sec}`}>
                 2. Archivo Histórico de Facturas ({compras.length})
               </button>
             </div>
 
-            {/* ================= TAB 1: LECTOR CON PRE-VISUALIZACIÓN EDITABLE Y CUADRATURA ================= */}
+            {/* ================= TAB 1: LECTOR CON PRE-VISUALIZACIÓN EDITABLE, FOTO Y CUADRATURA ================= */}
             {tab === "lector" && (
               <div className="space-y-4">
                 {vistaPreviaFactura ? (
-                  <div className={`${T.card} rounded-2xl p-5 sm:p-6 space-y-5 border-2 border-blue-600`}>
-                    {/* CABECERA EDITABLE DE LA FACTURA */}
+                  <div className={`${T.card} rounded-2xl p-4 sm:p-6 space-y-5 border-2 border-blue-600`}>
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/30 pb-4">
                       <div>
                         <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${T.tag}`}>
@@ -591,57 +732,99 @@
                           {vistaPreviaFactura.origen}
                         </h2>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setVistaPreviaFactura(null)}
-                        className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0 ${T.sec}`}
-                      >
-                        Descartar y Volver
-                      </button>
+                      <div className="flex flex-wrap gap-2 shrink-0">
+                        <label className={`text-xs font-bold px-3 py-2 rounded-xl cursor-pointer ${T.sec}`}>
+                          {fotoReferenciaUrl ? "Cambiar Foto" : "Adjuntar Foto Referencia"}
+                          <input type="file" accept="image/*" onChange={abrirCargaManualDesdeFoto} className="hidden" />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={limpiarVistaPrevia}
+                          className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer ${T.sec}`}
+                        >
+                          Descartar y Volver
+                        </button>
+                      </div>
                     </div>
+
+                    {/* VISOR DE FOTO DE FACTURA (SI EL USUARIO SUBIÓ UNA IMAGEN) */}
+                    {fotoReferenciaUrl && (
+                      <div className={`${T.muted} rounded-2xl p-3 space-y-2`}>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={`font-extrabold ${T.main}`}>Foto de Factura de Referencia (Solo visual — no consume almacenamiento)</span>
+                          <button
+                            type="button"
+                            onClick={() => { URL.revokeObjectURL(fotoReferenciaUrl); setFotoReferenciaUrl(""); }}
+                            className="text-xs font-bold text-rose-500 cursor-pointer"
+                          >
+                            Ocultar Foto
+                          </button>
+                        </div>
+                        <div className="max-h-72 overflow-auto rounded-xl border border-slate-300/40 bg-black/5 flex justify-center">
+                          <img src={fotoReferenciaUrl} alt="Factura referencia" className="max-h-72 object-contain" />
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       <div className="sm:col-span-2">
-                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Proveedor / Razón Social</label>
+                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Proveedor / Razón Social *</label>
                         <input
                           type="text"
                           value={vistaPreviaFactura.proveedor}
                           onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, proveedor: e.target.value.toUpperCase() })}
+                          placeholder="Ej: DISTRIBUIDORA IMPORTADORA SPA"
                           className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
                         />
                       </div>
                       <div>
-                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>N° Folio Factura</label>
+                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>RUT Proveedor</label>
                         <input
                           type="text"
-                          value={vistaPreviaFactura.folio}
-                          onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, folio: e.target.value })}
+                          value={vistaPreviaFactura.rutProveedor}
+                          onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, rutProveedor: formatearRut(e.target.value) })}
+                          placeholder="76.123.456-7"
                           className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
                         />
                       </div>
-                      <div>
-                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha Emisión</label>
-                        <input
-                          type="date"
-                          value={vistaPreviaFactura.fecha}
-                          onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, fecha: e.target.value })}
-                          className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
-                        />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>N° Folio *</label>
+                          <input
+                            type="text"
+                            value={vistaPreviaFactura.folio}
+                            onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, folio: e.target.value })}
+                            placeholder="4521"
+                            className={`w-full rounded-xl px-2.5 py-2 text-xs font-bold ${T.input}`}
+                          />
+                        </div>
+                        <div>
+                          <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha</label>
+                          <input
+                            type="date"
+                            value={vistaPreviaFactura.fecha}
+                            onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, fecha: e.target.value })}
+                            className={`w-full rounded-xl px-2 py-2 text-xs font-bold ${T.input}`}
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    {/* CUADRATURA TRIBUTARIA EN VIVO (NETO / IVA 19% / TOTAL) */}
+                    {/* CUADRATURA TRIBUTARIA EN VIVO (AFECTO / EXENTO / IVA 19% / TOTAL) */}
                     <div className={`${T.muted} rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 items-center`}>
                       <div>
-                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Subtotal Neto Calculado</span>
-                        <p className={`text-base font-extrabold ${T.main}`}>${cuadraturaPrevia.neto.toLocaleString("es-CL")}</p>
+                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Neto Afecto {cuadraturaPrevia.exento > 0 ? "/ Exento" : ""}</span>
+                        <p className={`text-base font-extrabold ${T.main}`}>${cuadraturaPrevia.netoTotal.toLocaleString("es-CL")}</p>
+                        {cuadraturaPrevia.exento > 0 && (
+                          <span className={`text-[10px] ${T.sub}`}>Exento: ${cuadraturaPrevia.exento.toLocaleString("es-CL")}</span>
+                        )}
                       </div>
                       <div>
-                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>IVA (19%)</span>
+                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>IVA (19% Afecto)</span>
                         <p className="text-base font-extrabold text-amber-500">${cuadraturaPrevia.iva.toLocaleString("es-CL")}</p>
                       </div>
                       <div>
-                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Total con IVA</span>
+                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Total Factura</span>
                         <p className="text-base font-extrabold text-emerald-500">${cuadraturaPrevia.total.toLocaleString("es-CL")}</p>
                       </div>
                       <div>
@@ -660,31 +843,30 @@
 
                     {/* TABLA EDITABLE DE PRODUCTOS DE LA FACTURA */}
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.main}`}>
-                          Productos Detectados ({vistaPreviaFactura.items.length}) — Edita cantidades, nombres o costos antes de confirmar
-                        </h3>
-                      </div>
+                      <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.main}`}>
+                        Productos ({vistaPreviaFactura.items.length}) — Edita cantidades, nombres, exento o costos antes de confirmar
+                      </h3>
 
                       <div className="overflow-x-auto border border-slate-200/40 rounded-2xl">
                         <table className="w-full text-left text-xs">
                           <thead className={`${T.muted} uppercase text-[10px]`}>
                             <tr>
-                              <th className="p-2.5 text-center w-14" title="Marcar para sumar al inventario">Stock</th>
-                              <th className="p-2.5 w-28">SKU / Cód.</th>
-                              <th className="p-2.5 min-w-[200px]">Nombre Producto</th>
-                              <th className="p-2.5 text-center w-24">Cantidad</th>
+                              <th className="p-2.5 text-center w-12" title="Sumar al inventario">Stock</th>
+                              <th className="p-2.5 text-center w-12" title="Marcar si la línea es Exenta de IVA (0%)">Exe.</th>
+                              <th className="p-2.5 w-24">SKU</th>
+                              <th className="p-2.5 min-w-[180px]">Nombre Producto</th>
+                              <th className="p-2.5 text-center w-20">Cant.</th>
                               <th className="p-2.5 text-right w-28">Costo Unit. Neto</th>
-                              <th className="p-2.5 text-right w-28">Unit. c/IVA</th>
-                              <th className="p-2.5 text-right w-28">Total Línea</th>
-                              <th className="p-2.5 text-center w-12"></th>
+                              <th className="p-2.5 text-right w-24">Unit. Final</th>
+                              <th className="p-2.5 text-right w-24">Total Línea</th>
+                              <th className="p-2.5 text-center w-10"></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200/30">
                             {vistaPreviaFactura.items.map((it) => {
                               const netoLinea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
-                              const totalLinea = Math.round(netoLinea * 1.19);
-                              const unitConIva = Math.round(Number(it.netoUnitario || 0) * 1.19);
+                              const totalLinea = it.exentoIva ? netoLinea : Math.round(netoLinea * 1.19);
+                              const unitFinal = it.exentoIva ? Number(it.netoUnitario || 0) : Math.round(Number(it.netoUnitario || 0) * 1.19);
                               return (
                                 <tr key={it.uid} className={!it.sumarAlStock ? "opacity-50" : ""}>
                                   <td className="p-2 text-center">
@@ -693,7 +875,14 @@
                                       checked={it.sumarAlStock}
                                       onChange={(e) => actualizarItemPrevia(it.uid, "sumarAlStock", e.target.checked)}
                                       className="w-4 h-4 cursor-pointer"
-                                      title="Sumar al stock del catálogo"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(it.exentoIva)}
+                                      onChange={(e) => actualizarItemPrevia(it.uid, "exentoIva", e.target.checked)}
+                                      className="w-4 h-4 cursor-pointer"
                                     />
                                   </td>
                                   <td className="p-2">
@@ -732,7 +921,7 @@
                                     />
                                   </td>
                                   <td className={`p-2 text-right font-semibold ${T.sub}`}>
-                                    ${unitConIva.toLocaleString("es-CL")}
+                                    ${unitFinal.toLocaleString("es-CL")}
                                   </td>
                                   <td className={`p-2 text-right font-extrabold ${T.main}`}>
                                     ${totalLinea.toLocaleString("es-CL")}
@@ -742,7 +931,6 @@
                                       type="button"
                                       onClick={() => eliminarItemPrevia(it.uid)}
                                       className="text-rose-500 hover:text-rose-700 font-extrabold px-2 py-1 cursor-pointer"
-                                      title="Quitar línea"
                                     >
                                       ✕
                                     </button>
@@ -754,26 +942,47 @@
                         </table>
                       </div>
 
-                      {/* AGREGAR LÍNEA MANUAL ADICIONAL */}
-                      <form onSubmit={agregarItemVistaPrevia} className="grid grid-cols-1 sm:grid-cols-6 gap-2 pt-2">
+                      {/* AGREGAR LÍNEA MANUAL CON AUTOCOMPLETADO DEL CATÁLOGO */}
+                      <form onSubmit={agregarItemVistaPrevia} className="grid grid-cols-1 sm:grid-cols-7 gap-2 pt-2">
                         <input type="text" value={itemCod} onChange={(e) => setItemCod(e.target.value)} placeholder="SKU" className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
-                        <input type="text" value={itemNom} onChange={(e) => setItemNom(e.target.value)} placeholder="Agregar producto adicional *" className={`sm:col-span-2 rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                        <div className="sm:col-span-2">
+                          <input
+                            type="text"
+                            list="catalogo-productos-dl"
+                            value={itemNom}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setItemNom(val);
+                              const match = catalogo.find((p) => (p.nombre || "").toUpperCase() === val.trim().toUpperCase());
+                              if (match && match.codigo && !itemCod) setItemCod(match.codigo);
+                            }}
+                            placeholder="Agregar producto *"
+                            className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                            required
+                          />
+                          <datalist id="catalogo-productos-dl">
+                            {catalogo.map((p) => <option key={p.id} value={p.nombre} />)}
+                          </datalist>
+                        </div>
                         <input type="number" min="1" value={itemCant} onChange={(e) => setItemCant(e.target.value)} placeholder="Cant." className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
                         <input type="number" min="0" value={itemNetoUnit} onChange={(e) => setItemNetoUnit(e.target.value)} placeholder="Costo Neto Unit." className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
-                        <button type="submit" className={`rounded-xl px-3 py-2 text-xs font-extrabold cursor-pointer ${T.sec}`}>+ Agregar Línea</button>
+                        <label className={`${T.muted} rounded-xl px-2.5 py-2 flex items-center justify-center gap-1.5 text-[11px] font-bold cursor-pointer`}>
+                          <input type="checkbox" checked={itemExento} onChange={(e) => setItemExento(e.target.checked)} className="w-3.5 h-3.5" />
+                          <span>Exento</span>
+                        </label>
+                        <button type="submit" className={`rounded-xl px-3 py-2 text-xs font-extrabold cursor-pointer ${T.sec}`}>+ Línea</button>
                       </form>
                     </div>
 
-                    {/* BOTÓN DE CONFIRMACIÓN DEFINITIVA */}
                     <button
                       type="button"
                       onClick={confirmarYSumarStock}
                       disabled={guardando || vistaPreviaFactura.items.length === 0}
-                      className={`w-full font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg cursor-pointer ${T.btn}`}
+                      className={`w-full font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg cursor-pointer disabled:opacity-40 ${T.btn}`}
                     >
                       {guardando
                         ? "Confirmando, Cuadrando IVA y Sumando Stock..."
-                        : `Confirmar Factura #${vistaPreviaFactura.folio}, Cuadrar IVA ($${cuadraturaPrevia.iva.toLocaleString("es-CL")}) y Sumar Stock`}
+                        : `Confirmar Factura #${vistaPreviaFactura.folio || "---"}, Cuadrar IVA ($${cuadraturaPrevia.iva.toLocaleString("es-CL")}) y Sumar Stock`}
                     </button>
                   </div>
                 ) : (
@@ -782,7 +991,7 @@
                       <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Carga Automática con Pre-Auditoría</span>
                       <h2 className={`text-base font-extrabold ${T.main}`}>Subir Archivo XML de Factura SII (.xml)</h2>
                       <p className={`text-xs ${T.sub}`}>
-                        Extrae automáticamente proveedor, folio, productos y costos netos. Te mostrará toda la tabla editable para que revises y confirmes antes de modificar tu stock.
+                        Extrae proveedor, folio, productos, descuentos e ítems exentos. Muestra la tabla editable antes de modificar tu inventario.
                       </p>
                       <label className={`block w-full text-center font-extrabold py-4 rounded-xl text-xs cursor-pointer shadow-sm ${T.btn}`}>
                         Seleccionar Archivo XML (.xml)
@@ -800,20 +1009,28 @@
                       </div>
                     </div>
 
-                    <form onSubmit={consultarPorFolioApi} className={`${T.card} rounded-2xl p-6 space-y-3`}>
-                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Consulta por RUT y Folio</span>
-                      <h2 className={`text-base font-extrabold ${T.main}`}>Ingresar o Consultar Factura por Folio</h2>
-                      <p className={`text-xs ${T.sub}`}>
-                        Ingresa el RUT del proveedor y el N° de folio para abrir la tabla de pre-carga y cuadrar costos e IVA.
-                      </p>
-                      <div className="space-y-2.5">
-                        <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor (Ej: 76.123.456-7) *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
-                        <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
-                      </div>
-                      <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                        Abrir Pre-Carga de Factura →
-                      </button>
-                    </form>
+                    <div className={`${T.card} rounded-2xl p-6 space-y-4`}>
+                      <form onSubmit={consultarPorFolioApi} className="space-y-3">
+                        <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Carga Manual o desde Foto</span>
+                        <h2 className={`text-base font-extrabold ${T.main}`}>Ingresar Factura Manual / Con Foto</h2>
+                        <p className={`text-xs ${T.sub}`}>
+                          Si solo tienes una foto o factura en papel, adjunta la imagen para verla en pantalla mientras ingresas los productos y cuadras el 19% de IVA.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                          <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <button type="submit" className={`w-full font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                            Abrir Carga Manual →
+                          </button>
+                          <label className={`w-full text-center font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.sec}`}>
+                            Cargar desde Foto
+                            <input type="file" accept="image/*" onChange={abrirCargaManualDesdeFoto} className="hidden" />
+                          </label>
+                        </div>
+                      </form>
+                    </div>
                   </div>
                 )}
               </div>
@@ -829,7 +1046,6 @@
                   </p>
                 </div>
 
-                {/* BUSCADOR Y FILTRO DE FECHAS DESDE / HASTA */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div className="sm:col-span-2">
                     <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Buscar por N° Folio, Proveedor, RUT o Producto</label>
@@ -843,21 +1059,11 @@
                   </div>
                   <div>
                     <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha Desde</label>
-                    <input
-                      type="date"
-                      value={fechaDesdeArchivo}
-                      onChange={(e) => setFechaDesdeArchivo(e.target.value)}
-                      className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
-                    />
+                    <input type="date" value={fechaDesdeArchivo} onChange={(e) => setFechaDesdeArchivo(e.target.value)} className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`} />
                   </div>
                   <div>
                     <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha Hasta</label>
-                    <input
-                      type="date"
-                      value={fechaHastaArchivo}
-                      onChange={(e) => setFechaHastaArchivo(e.target.value)}
-                      className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
-                    />
+                    <input type="date" value={fechaHastaArchivo} onChange={(e) => setFechaHastaArchivo(e.target.value)} className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`} />
                   </div>
                 </div>
 
@@ -876,13 +1082,13 @@
                 {comprasFiltradas.length === 0 ? (
                   <div className={`${T.muted} rounded-xl p-8 text-center space-y-1`}>
                     <p className={`text-xs font-bold ${T.main}`}>No hay facturas de compra registradas con ese filtro</p>
-                    <p className={`text-[11px] ${T.sub}`}>Sube un archivo XML en la primera pestaña para auditarlo y guardarlo aquí.</p>
+                    <p className={`text-[11px] ${T.sub}`}>Sube un archivo XML o carga desde foto en la primera pestaña para auditarlo y guardarlo aquí.</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-200/40">
                     {comprasFiltradas.map((c) => {
-                      const neto = Number(c.netoClp || Math.round((c.totalClp || 0) / 1.19));
-                      const iva = Number(c.ivaClp || ((c.totalClp || 0) - neto));
+                      const neto = Number(c.netoClp !== undefined ? c.netoClp : Math.round((c.totalClp || 0) / 1.19));
+                      const iva = Number(c.ivaClp !== undefined ? c.ivaClp : ((c.totalClp || 0) - neto));
                       const total = Number(c.totalClp || 0);
                       return (
                         <div
@@ -897,7 +1103,7 @@
                               <span className={`text-[11px] ${T.sub}`}>Fecha: {c.fecha}</span>
                             </div>
                             <p className={`mt-1 ${T.sub}`}>
-                              {(c.items || []).length} producto(s) • Neto: <strong>${neto.toLocaleString("es-CL")}</strong> + IVA: <strong>${iva.toLocaleString("es-CL")}</strong>
+                              {(c.items || []).length} producto(s) • Neto/Exento: <strong>${neto.toLocaleString("es-CL")}</strong> + IVA: <strong>${iva.toLocaleString("es-CL")}</strong>
                             </p>
                           </div>
 
