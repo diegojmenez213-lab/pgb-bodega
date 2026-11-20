@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
-  <title>NEXUS ERP • Recepción Automática SII, Compras & Finanzas</title>
+  <title>NEXUS ERP • Recepción XML SII, Cuadratura IVA & Archivo Compras</title>
   <script>
+    // GUARDIA DE SEGURIDAD INMEDIATO (BLOQUEA RETROCESO / BFCACHE ENTRE EMPRESAS)
     (function () {
       var limpiar = function (r) { return String(r || "").replace(/[^0-9kK]/g, "").toUpperCase(); };
       var rutInicial = limpiar(localStorage.getItem("nexus_empresa_rut"));
@@ -65,9 +66,9 @@
     };
 
     const TEMAS = {
-      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
+      claro_retail: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-slate-50 border border-slate-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-blue-700 hover:bg-blue-800 text-white", sec: "bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200", tag: "bg-blue-50 text-blue-800", top: "border-blue-700" },
       claro_ejecutivo: { page: "bg-slate-100 text-slate-900", card: "bg-white border border-slate-300 shadow-sm", muted: "bg-slate-100 border border-slate-200", main: "text-slate-900", sub: "text-slate-600", input: "bg-white border border-slate-300 text-slate-900", btn: "bg-slate-900 hover:bg-slate-800 text-white", sec: "bg-slate-200 text-slate-800", tag: "bg-slate-200 text-slate-800", top: "border-slate-900" },
-      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", muted: "bg-slate-950 border border-slate-800", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
+      oscuro_obsidian: { page: "bg-slate-950 text-slate-100", card: "bg-slate-900 border border-slate-800 shadow-lg", muted: "bg-slate-950 border border-slate-800", main: "text-white", sub: "text-slate-400", input: "bg-slate-950 border border-slate-700 text-white", btn: "bg-indigo-600 hover:bg-indigo-500 text-white", sec: "bg-slate-800 text-slate-200 border border-slate-700", tag: "bg-indigo-950 text-indigo-300", top: "border-indigo-500" },
       claro_esmeralda: { page: "bg-slate-50 text-slate-900", card: "bg-white border border-slate-200 shadow-sm", muted: "bg-emerald-50/40 border border-emerald-200", main: "text-slate-900", sub: "text-slate-500", input: "bg-slate-50 border border-slate-300 text-slate-900", btn: "bg-emerald-700 hover:bg-emerald-800 text-white", sec: "bg-slate-100 text-slate-800", tag: "bg-emerald-50 text-emerald-800", top: "border-emerald-700" }
     };
 
@@ -82,14 +83,22 @@
       const [rutEmisor, setRutEmisor] = useState("");
       const [folioFactura, setFolioFactura] = useState("");
       const [timbreScan, setTimbreScan] = useState("");
+
+      // Pre-visualización editable antes de confirmar
       const [vistaPreviaFactura, setVistaPreviaFactura] = useState(null);
       const [guardando, setGuardando] = useState(false);
 
-      // Carga manual rápida de ítem en vista previa
+      // Nuevo ítem manual en la pre-visualización
       const [itemCod, setItemCod] = useState("");
       const [itemNom, setItemNom] = useState("");
       const [itemCant, setItemCant] = useState(1);
-      const [itemCosto, setItemCosto] = useState(0);
+      const [itemNetoUnit, setItemNetoUnit] = useState(0);
+
+      // Archivo Histórico Infinito de Compras
+      const [busquedaArchivo, setBusquedaArchivo] = useState("");
+      const [fechaDesdeArchivo, setFechaDesdeArchivo] = useState("");
+      const [fechaHastaArchivo, setFechaHastaArchivo] = useState("");
+      const [facturaAuditando, setFacturaAuditando] = useState(null);
 
       useEffect(() => {
         if (!rutActivo) {
@@ -134,21 +143,7 @@
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const catRef = () => (rutActivo === RUT_PGB ? db.collection("catalogo_productos") : empRef().collection("catalogo"));
 
-      const consultarPorFolioApi = (e) => {
-        e.preventDefault();
-        if (!rutEmisor.trim() || !folioFactura.trim()) return;
-        const tieneKey = Boolean(empresa?.apis?.siiApiKey);
-        setVistaPreviaFactura({
-          origen: tieneKey ? "API OpenFactura SII" : "Consulta Preliminar",
-          rutProveedor: formatearRut(rutEmisor),
-          proveedor: `PROVEEDOR ${formatearRut(rutEmisor)}`,
-          folio: folioFactura.trim(),
-          fecha: new Date().toISOString().slice(0, 10),
-          totalClp: 0,
-          items: []
-        });
-      };
-
+      // ================= LECTURA XML DTE (SIN IMPACTAR STOCK HASTA CONFIRMAR) =================
       const procesarArchivoXml = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -165,15 +160,27 @@
           const razonProv = getTag(xml, "RznSoc") || `PROVEEDOR ${rutProv}`;
           const folio = getTag(xml, "Folio") || String(Date.now()).slice(-6);
           const fchEmis = getTag(xml, "FchEmis") || new Date().toISOString().slice(0, 10);
-          const mntTotal = Number(getTag(xml, "MntTotal") || 0);
+          const mntNetoXml = Number(getTag(xml, "MntNeto") || 0);
+          const ivaXml = Number(getTag(xml, "IVA") || 0);
+          const mntTotalXml = Number(getTag(xml, "MntTotal") || 0);
 
           const detalles = Array.from(xml.getElementsByTagName("Detalle"));
-          const items = detalles.map((det) => {
-            const cod = getTag(det, "VlrCodigo") || "";
+          const items = detalles.map((det, idx) => {
+            const cod = (getTag(det, "VlrCodigo") || "").toUpperCase();
             const nom = (getTag(det, "NmbItem") || "ARTICULO XML").toUpperCase();
             const cant = Math.max(1, Number(getTag(det, "QtyItem") || 1));
-            const monto = Number(getTag(det, "MontoItem") || 0);
-            return { codigo: cod.toUpperCase(), nombre: nom, cantidad: cant, costoTotal: monto };
+            const montoNetoLinea = Number(getTag(det, "MontoItem") || 0);
+            const precioUnitXml = Number(getTag(det, "PrcItem") || 0);
+            const netoUnitario = precioUnitXml > 0 ? Math.round(precioUnitXml) : Math.round(montoNetoLinea / cant);
+
+            return {
+              uid: `${Date.now()}_${idx}`,
+              codigo: cod,
+              nombre: nom,
+              cantidad: cant,
+              netoUnitario,
+              sumarAlStock: true
+            };
           });
 
           setVistaPreviaFactura({
@@ -182,13 +189,32 @@
             proveedor: razonProv.toUpperCase(),
             folio,
             fecha: fchEmis,
-            totalClp: mntTotal || items.reduce((a, b) => a + b.costoTotal, 0),
+            netoDeclaradoXml: mntNetoXml,
+            ivaDeclaradoXml: ivaXml,
+            totalDeclaradoXml: mntTotalXml,
             items
           });
         } catch (err) {
           alert("No se pudo leer el archivo XML: " + err.message);
         }
         e.target.value = "";
+      };
+
+      const consultarPorFolioApi = (e) => {
+        e.preventDefault();
+        if (!rutEmisor.trim() || !folioFactura.trim()) return;
+        const tieneKey = Boolean(empresa?.apis?.siiApiKey);
+        setVistaPreviaFactura({
+          origen: tieneKey ? "Consulta API OpenFactura SII" : "Ingreso Manual por Folio",
+          rutProveedor: formatearRut(rutEmisor),
+          proveedor: `PROVEEDOR ${formatearRut(rutEmisor)}`,
+          folio: folioFactura.trim(),
+          fecha: new Date().toISOString().slice(0, 10),
+          netoDeclaradoXml: 0,
+          ivaDeclaradoXml: 0,
+          totalDeclaradoXml: 0,
+          items: []
+        });
       };
 
       const procesarTimbrePdf417 = (val) => {
@@ -198,93 +224,310 @@
           const fMatch = val.match(/<F>(.*?)<\/F>/);
           const mMatch = val.match(/<MNT>(.*?)<\/MNT>/);
           const feMatch = val.match(/<FE>(.*?)<\/FE>/);
+          const tot = mMatch ? Number(mMatch[1]) : 0;
+          const netoEst = Math.round(tot / 1.19);
           setVistaPreviaFactura({
             origen: "Escaneo Timbre PDF417 SII",
             rutProveedor: reMatch ? formatearRut(reMatch[1]) : "S/I",
             proveedor: reMatch ? `PROVEEDOR ${formatearRut(reMatch[1])}` : "PROVEEDOR SII",
             folio: fMatch ? fMatch[1] : "S/N",
             fecha: feMatch ? feMatch[1] : new Date().toISOString().slice(0, 10),
-            totalClp: mMatch ? Number(mMatch[1]) : 0,
+            netoDeclaradoXml: netoEst,
+            ivaDeclaradoXml: tot - netoEst,
+            totalDeclaradoXml: tot,
             items: []
           });
           setTimbreScan("");
         }
       };
 
+      // ================= EDICIÓN EN TIEMPO REAL DE LA PRE-VISUALIZACIÓN =================
+      const actualizarItemPrevia = (uid, campo, valor) => {
+        setVistaPreviaFactura((prev) => {
+          if (!prev) return null;
+          const itemsAct = prev.items.map((it) => {
+            if (it.uid !== uid) return it;
+            if (campo === "cantidad") return { ...it, cantidad: Math.max(0, Number(valor)) };
+            if (campo === "netoUnitario") return { ...it, netoUnitario: Math.max(0, Number(valor)) };
+            if (campo === "sumarAlStock") return { ...it, sumarAlStock: Boolean(valor) };
+            return { ...it, [campo]: String(valor).toUpperCase() };
+          });
+          return { ...prev, items: itemsAct };
+        });
+      };
+
+      const eliminarItemPrevia = (uid) => {
+        setVistaPreviaFactura((prev) => {
+          if (!prev) return null;
+          return { ...prev, items: prev.items.filter((it) => it.uid !== uid) };
+        });
+      };
+
       const agregarItemVistaPrevia = (e) => {
         e.preventDefault();
         if (!itemNom.trim() || !vistaPreviaFactura) return;
-        const nuevoItem = {
+        const nuevo = {
+          uid: `${Date.now()}_man`,
           codigo: itemCod.trim().toUpperCase(),
           nombre: itemNom.trim().toUpperCase(),
           cantidad: Math.max(1, Number(itemCant)),
-          costoTotal: Number(itemCosto)
+          netoUnitario: Math.max(0, Number(itemNetoUnit)),
+          sumarAlStock: true
         };
-        const itemsAct = [...vistaPreviaFactura.items, nuevoItem];
         setVistaPreviaFactura({
           ...vistaPreviaFactura,
-          items: itemsAct,
-          totalClp: vistaPreviaFactura.totalClp || itemsAct.reduce((a, b) => a + b.costoTotal, 0)
+          items: [...vistaPreviaFactura.items, nuevo]
         });
         setItemCod("");
         setItemNom("");
         setItemCant(1);
-        setItemCosto(0);
+        setItemNetoUnit(0);
       };
 
+      // Cuadratura automática Neto + IVA 19% + Total de la vista previa
+      const cuadraturaPrevia = useMemo(() => {
+        if (!vistaPreviaFactura) return { neto: 0, iva: 0, total: 0, diferenciaXml: 0, cuadraConXml: true };
+        const neto = vistaPreviaFactura.items.reduce(
+          (acc, it) => acc + Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0)),
+          0
+        );
+        const iva = Math.round(neto * 0.19);
+        const total = neto + iva;
+        const totXml = Number(vistaPreviaFactura.totalDeclaradoXml || 0);
+        const diferenciaXml = totXml > 0 ? total - totXml : 0;
+        return {
+          neto,
+          iva,
+          total,
+          diferenciaXml,
+          cuadraConXml: totXml === 0 || Math.abs(diferenciaXml) <= 5
+        };
+      }, [vistaPreviaFactura]);
+
+      // ================= CONFIRMACIÓN FINAL: IMPACTA STOCK Y ARCHIVA EN HISTORIAL INFINITO =================
       const confirmarYSumarStock = async () => {
         if (!vistaPreviaFactura) return;
+        if (vistaPreviaFactura.items.length === 0) {
+          return alert("La factura debe tener al menos un producto para confirmar.");
+        }
+
+        // Verificar si esta misma factura (mismo RUT proveedor + mismo folio) ya fue cargada antes
+        const duplicada = compras.find(
+          (c) =>
+            limpiarRut(c.rutProveedor) === limpiarRut(vistaPreviaFactura.rutProveedor) &&
+            String(c.folio || "").trim() === String(vistaPreviaFactura.folio || "").trim()
+        );
+        if (duplicada) {
+          const seguir = confirm(
+            `⚠️ ADVERTENCIA: La Factura #${vistaPreviaFactura.folio} de ${vistaPreviaFactura.proveedor} ya fue cargada el ${duplicada.fecha}.\n\n¿Seguro que deseas cargarla nuevamente?`
+          );
+          if (!seguir) return;
+        }
+
         setGuardando(true);
         try {
           const batch = db.batch();
           const porNombre = new Map(catalogo.map((p) => [String(p.nombre || "").trim().toUpperCase(), p]));
           const porSku = new Map(catalogo.filter((p) => p.codigo).map((p) => [String(p.codigo || "").trim().toUpperCase(), p]));
 
-          vistaPreviaFactura.items.forEach((it) => {
-            const existente = (it.codigo && porSku.get(it.codigo)) || porNombre.get(it.nombre);
-            if (existente) {
-              const nuevoStock = (Number(existente.stockOnline) || 0) + Number(it.cantidad || 0);
-              batch.update(catRef().doc(existente.id), { stockOnline: nuevoStock });
-            } else {
-              batch.set(catRef().doc(), {
-                codigo: it.codigo || "",
-                nombre: it.nombre,
-                proveedor: vistaPreviaFactura.proveedor || "",
-                stockOnline: Number(it.cantidad || 0)
-              });
+          let lineasSumadas = 0;
+
+          const itemsGuardados = vistaPreviaFactura.items.map((it) => {
+            const netoLinea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
+            const ivaLinea = Math.round(netoLinea * 0.19);
+            const totalLinea = netoLinea + ivaLinea;
+            const unitConIva = it.cantidad > 0 ? Math.round(totalLinea / it.cantidad) : 0;
+
+            if (it.sumarAlStock && Number(it.cantidad) > 0) {
+              lineasSumadas++;
+              const existente = (it.codigo && porSku.get(it.codigo)) || porNombre.get(it.nombre);
+              if (existente) {
+                const nuevoStock = (Number(existente.stockOnline) || 0) + Number(it.cantidad);
+                batch.update(catRef().doc(existente.id), {
+                  stockOnline: nuevoStock,
+                  ultimoCostoNeto: Number(it.netoUnitario || 0),
+                  ultimoCostoBruto: unitConIva
+                });
+              } else {
+                batch.set(catRef().doc(), {
+                  codigo: it.codigo || "",
+                  nombre: it.nombre,
+                  proveedor: vistaPreviaFactura.proveedor || "",
+                  stockOnline: Number(it.cantidad),
+                  ultimoCostoNeto: Number(it.netoUnitario || 0),
+                  ultimoCostoBruto: unitConIva
+                });
+              }
             }
+
+            return {
+              codigo: it.codigo || "",
+              nombre: it.nombre,
+              cantidad: Number(it.cantidad || 0),
+              netoUnitario: Number(it.netoUnitario || 0),
+              unitConIva,
+              netoLinea,
+              ivaLinea,
+              totalLinea,
+              sumadoAlStock: Boolean(it.sumarAlStock)
+            };
           });
 
-          const totalFinal = Number(vistaPreviaFactura.totalClp) || vistaPreviaFactura.items.reduce((a, b) => a + Number(b.costoTotal || 0), 0);
+          const ahora = Date.now();
           batch.set(empRef().collection("compras_proveedores").doc(), {
-            ...vistaPreviaFactura,
-            totalClp: totalFinal,
-            timestamp: Date.now()
+            origen: vistaPreviaFactura.origen,
+            rutProveedor: vistaPreviaFactura.rutProveedor,
+            proveedor: vistaPreviaFactura.proveedor,
+            folio: vistaPreviaFactura.folio,
+            fecha: vistaPreviaFactura.fecha,
+            fechaCargaLegible: new Date(ahora).toLocaleString("es-CL"),
+            netoClp: cuadraturaPrevia.neto,
+            ivaClp: cuadraturaPrevia.iva,
+            totalClp: cuadraturaPrevia.total,
+            items: itemsGuardados,
+            timestamp: ahora
           });
 
           await batch.commit();
-          alert(`Factura #${vistaPreviaFactura.folio} registrada y stock sincronizado en el catálogo.`);
+          alert(
+            `✅ Factura #${vistaPreviaFactura.folio} confirmada y archivada.\n` +
+            `• Neto: $${cuadraturaPrevia.neto.toLocaleString("es-CL")} | IVA: $${cuadraturaPrevia.iva.toLocaleString("es-CL")} | Total: $${cuadraturaPrevia.total.toLocaleString("es-CL")}\n` +
+            `• ${lineasSumadas} producto(s) sumados al stock del catálogo.`
+          );
           setVistaPreviaFactura(null);
           setRutEmisor("");
           setFolioFactura("");
+          setTab("historial");
         } catch (err) {
-          alert("Error al sincronizar: " + err.message);
+          alert("Error al confirmar factura: " + err.message);
         }
         setGuardando(false);
       };
 
-      const ingresosTotales = useMemo(() => ventas.reduce((a, b) => a + Number(b.totalClp || 0), 0), [ventas]);
-      const egresosTotales = useMemo(() => compras.reduce((a, b) => a + Number(b.totalClp || 0), 0), [compras]);
+      // ================= FILTRO ARCHIVO HISTÓRICO INFINITO DE COMPRAS =================
+      const comprasFiltradas = useMemo(() => {
+        const q = busquedaArchivo.trim().toLowerCase();
+        return compras.filter((c) => {
+          const fDoc = c.fecha || "";
+          if (fechaDesdeArchivo && fDoc && fDoc < fechaDesdeArchivo) return false;
+          if (fechaHastaArchivo && fDoc && fDoc > fechaHastaArchivo) return false;
+          if (!q) return true;
+          const coincideCabecera =
+            String(c.folio || "").toLowerCase().includes(q) ||
+            (c.proveedor || "").toLowerCase().includes(q) ||
+            (c.rutProveedor || "").toLowerCase().includes(q);
+          const coincideProducto = (c.items || []).some(
+            (it) => (it.nombre || "").toLowerCase().includes(q) || (it.codigo || "").toLowerCase().includes(q)
+          );
+          return coincideCabecera || coincideProducto;
+        });
+      }, [compras, busquedaArchivo, fechaDesdeArchivo, fechaHastaArchivo]);
 
-      if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Cargando módulo SII...</div>;
+      const totalesFinancieros = useMemo(() => {
+        const ingresosBrutos = ventas.reduce((a, b) => a + Number(b.totalClp || 0), 0);
+        const comprasNeto = compras.reduce((a, b) => a + Number(b.netoClp || Math.round((b.totalClp || 0) / 1.19)), 0);
+        const comprasIva = compras.reduce((a, b) => a + Number(b.ivaClp || ((b.totalClp || 0) - Math.round((b.totalClp || 0) / 1.19))), 0);
+        const comprasTotal = compras.reduce((a, b) => a + Number(b.totalClp || 0), 0);
+        return { ingresosBrutos, comprasNeto, comprasIva, comprasTotal };
+      }, [ventas, compras]);
+
+      if (!empresa) return <div className="min-h-screen flex items-center justify-center text-xs font-bold">Cargando módulo SII y Compras...</div>;
 
       const T = TEMAS[empresa.temaVisual || "claro_retail"] || TEMAS.claro_retail;
       const urlVolver = rutActivo === RUT_PGB ? "pgb-operacion.html" : "empresa-panel.html";
 
       return (
-        <div className={`min-h-screen pb-20 ${T.page}`}>
-          <div className="max-w-4xl mx-auto px-4 pt-5 space-y-4">
-            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex items-center justify-between gap-3`}>
+        <div className={`min-h-screen pb-24 ${T.page}`}>
+          {/* MODAL AUDITORÍA DETALLADA DE FACTURA HISTÓRICA */}
+          {facturaAuditando && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 overflow-y-auto">
+              <div className={`${T.card} rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto`}>
+                <div className="flex items-start justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${T.tag}`}>
+                      Auditoría de Factura Archivada
+                    </span>
+                    <h2 className={`text-lg font-extrabold mt-1 ${T.main}`}>
+                      Factura Compra N° {facturaAuditando.folio} • {facturaAuditando.proveedor}
+                    </h2>
+                    <p className={`text-xs ${T.sub}`}>
+                      RUT Emisor: {facturaAuditando.rutProveedor} • Fecha Emisión: {facturaAuditando.fecha} • Registrada: {facturaAuditando.fechaCargaLegible || facturaAuditando.fecha}
+                    </p>
+                  </div>
+                  <button onClick={() => setFacturaAuditando(null)} className={`text-xs font-extrabold px-3.5 py-2 rounded-xl cursor-pointer ${T.sec}`}>
+                    Cerrar
+                  </button>
+                </div>
+
+                {/* DESGLOSE TRIBUTARIO DE LA FACTURA */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className={`${T.muted} p-3.5 rounded-xl`}>
+                    <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Monto Neto</span>
+                    <p className={`text-base font-extrabold mt-0.5 ${T.main}`}>
+                      ${Number(facturaAuditando.netoClp || Math.round((facturaAuditando.totalClp || 0) / 1.19)).toLocaleString("es-CL")}
+                    </p>
+                  </div>
+                  <div className={`${T.muted} p-3.5 rounded-xl`}>
+                    <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>IVA Crédito (19%)</span>
+                    <p className="text-base font-extrabold text-amber-500 mt-0.5">
+                      ${Number(facturaAuditando.ivaClp || ((facturaAuditando.totalClp || 0) - Math.round((facturaAuditando.totalClp || 0) / 1.19))).toLocaleString("es-CL")}
+                    </p>
+                  </div>
+                  <div className={`${T.muted} p-3.5 rounded-xl`}>
+                    <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Total Factura</span>
+                    <p className="text-base font-extrabold text-emerald-500 mt-0.5">
+                      ${Number(facturaAuditando.totalClp || 0).toLocaleString("es-CL")}
+                    </p>
+                  </div>
+                </div>
+
+                {/* TABLA DE PRODUCTOS QUE ENTRARON EN ESA FACTURA */}
+                <div className="overflow-x-auto border border-slate-200/40 rounded-2xl">
+                  <table className="w-full text-left text-xs">
+                    <thead className={`${T.muted} uppercase text-[10px]`}>
+                      <tr>
+                        <th className="p-3">SKU</th>
+                        <th className="p-3">Producto</th>
+                        <th className="p-3 text-center">Cant.</th>
+                        <th className="p-3 text-right">Unit. Neto</th>
+                        <th className="p-3 text-right">Unit. c/IVA</th>
+                        <th className="p-3 text-right">Subtotal Neto</th>
+                        <th className="p-3 text-center">Stock</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200/30">
+                      {(facturaAuditando.items || []).map((it, i) => {
+                        const unitNeto = Number(it.netoUnitario || (it.cantidad > 0 ? Math.round((it.costoTotal || 0) / it.cantidad) : 0));
+                        const unitBruto = it.unitConIva || Math.round(unitNeto * 1.19);
+                        const subNeto = it.netoLinea || unitNeto * Number(it.cantidad || 1);
+                        return (
+                          <tr key={i}>
+                            <td className="p-3 font-mono">{it.codigo || "-"}</td>
+                            <td className={`p-3 font-bold ${T.main}`}>{it.nombre}</td>
+                            <td className="p-3 text-center font-extrabold">{it.cantidad}</td>
+                            <td className="p-3 text-right">${unitNeto.toLocaleString("es-CL")}</td>
+                            <td className="p-3 text-right font-semibold">${unitBruto.toLocaleString("es-CL")}</td>
+                            <td className="p-3 text-right font-extrabold">${subNeto.toLocaleString("es-CL")}</td>
+                            <td className="p-3 text-center">
+                              {it.sumadoAlStock !== false ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">Sumado</span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">Solo Gasto</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="max-w-6xl mx-auto px-4 pt-5 space-y-4">
+            {/* CABECERA */}
+            <div className={`${T.card} rounded-2xl p-5 border-t-4 ${T.top} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <button onClick={() => window.location.replace(urlVolver)} className={`text-xs font-bold px-3 py-1 rounded-lg cursor-pointer ${T.btn}`}>
@@ -294,128 +537,383 @@
                     {empresa.nombre} • {empresa.rut}
                   </span>
                 </div>
-                <h1 className={`text-xl font-extrabold ${T.main}`}>Recepción Automática SII, Compras & Finanzas</h1>
-                <p className={`text-xs ${T.sub}`}>Importa facturas vía OpenFactura, XML SII o lector PDF417 y suma stock al instante.</p>
+                <h1 className={`text-xl font-extrabold ${T.main}`}>Recepción XML SII, Cuadratura de Costos & IVA</h1>
+                <p className={`text-xs ${T.sub}`}>Audita y edita cada producto antes de sumarlo al inventario, cuadra Neto/IVA y archiva todas tus compras.</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            {/* KPI TRIBUTARIOS Y DE CAJA */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className={`${T.card} rounded-2xl p-4`}>
-                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ingresos</span>
-                <p className="text-lg font-extrabold text-emerald-600 mt-1">${ingresosTotales.toLocaleString("es-CL")}</p>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Compras Netas</span>
+                <p className={`text-lg font-extrabold mt-1 ${T.main}`}>${totalesFinancieros.comprasNeto.toLocaleString("es-CL")}</p>
+                <span className={`text-[11px] ${T.sub}`}>Costo mercadería sin IVA</span>
               </div>
               <div className={`${T.card} rounded-2xl p-4`}>
-                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Compras SII</span>
-                <p className="text-lg font-extrabold text-rose-500 mt-1">${egresosTotales.toLocaleString("es-CL")}</p>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>IVA Crédito Compras (19%)</span>
+                <p className="text-lg font-extrabold text-amber-500 mt-1">${totalesFinancieros.comprasIva.toLocaleString("es-CL")}</p>
+                <span className={`text-[11px] ${T.sub}`}>IVA pagado a proveedores</span>
               </div>
               <div className={`${T.card} rounded-2xl p-4`}>
-                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Resultado Neto</span>
-                <p className={`text-lg font-extrabold mt-1 ${T.main}`}>${(ingresosTotales - egresosTotales).toLocaleString("es-CL")}</p>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Total Facturas Compra</span>
+                <p className="text-lg font-extrabold text-rose-500 mt-1">${totalesFinancieros.comprasTotal.toLocaleString("es-CL")}</p>
+                <span className={`text-[11px] ${T.sub}`}>{compras.length} facturas archivadas</span>
+              </div>
+              <div className={`${T.card} rounded-2xl p-4`}>
+                <span className={`text-[10px] font-extrabold uppercase ${T.sub}`}>Ventas Brutas Registradas</span>
+                <p className="text-lg font-extrabold text-emerald-600 mt-1">${totalesFinancieros.ingresosBrutos.toLocaleString("es-CL")}</p>
+                <span className={`text-[11px] ${T.sub}`}>{ventas.length} órdenes emitidas</span>
               </div>
             </div>
 
+            {/* NAVEGACIÓN PRINCIPAL */}
             <div className={`${T.card} rounded-2xl p-1.5 grid grid-cols-2 gap-1.5`}>
               <button onClick={() => setTab("lector")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "lector" ? T.btn : T.sec}`}>
-                1. Lector Facturas SII
+                1. Cargar y Auditar Factura XML
               </button>
               <button onClick={() => setTab("historial")} className={`py-2.5 rounded-xl text-xs font-extrabold cursor-pointer ${tab === "historial" ? T.btn : T.sec}`}>
-                2. Historial Compras ({compras.length})
+                2. Archivo Histórico de Facturas ({compras.length})
               </button>
             </div>
 
+            {/* ================= TAB 1: LECTOR CON PRE-VISUALIZACIÓN EDITABLE Y CUADRATURA ================= */}
             {tab === "lector" && (
               <div className="space-y-4">
                 {vistaPreviaFactura ? (
-                  <div className={`${T.card} rounded-2xl p-5 space-y-4 border-2 border-blue-600`}>
-                    <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
+                  <div className={`${T.card} rounded-2xl p-5 sm:p-6 space-y-5 border-2 border-blue-600`}>
+                    {/* CABECERA EDITABLE DE LA FACTURA */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/30 pb-4">
                       <div>
-                        <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded ${T.tag}`}>{vistaPreviaFactura.origen}</span>
-                        <h2 className={`text-base font-extrabold mt-1 ${T.main}`}>
-                          Factura #{vistaPreviaFactura.folio} • {vistaPreviaFactura.proveedor}
+                        <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${T.tag}`}>
+                          Paso 1: Revisión y Edición Previa (Aún no modifica tu inventario)
+                        </span>
+                        <h2 className={`text-lg font-extrabold mt-1 ${T.main}`}>
+                          {vistaPreviaFactura.origen}
                         </h2>
-                        <p className={`text-xs ${T.sub}`}>RUT: {vistaPreviaFactura.rutProveedor} • Fecha: {vistaPreviaFactura.fecha}</p>
                       </div>
-                      <button onClick={() => setVistaPreviaFactura(null)} className={`text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer ${T.sec}`}>Cancelar</button>
+                      <button
+                        type="button"
+                        onClick={() => setVistaPreviaFactura(null)}
+                        className={`text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shrink-0 ${T.sec}`}
+                      >
+                        Descartar y Volver
+                      </button>
                     </div>
 
-                    <form onSubmit={agregarItemVistaPrevia} className="grid grid-cols-1 sm:grid-cols-5 gap-2">
-                      <input type="text" value={itemCod} onChange={(e) => setItemCod(e.target.value)} placeholder="SKU" className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
-                      <input type="text" value={itemNom} onChange={(e) => setItemNom(e.target.value)} placeholder="Producto *" className={`sm:col-span-2 rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
-                      <input type="number" min="1" value={itemCant} onChange={(e) => setItemCant(e.target.value)} placeholder="Cant" className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
-                      <button type="submit" className={`rounded-xl px-3 py-2 text-xs font-extrabold cursor-pointer ${T.btn}`}>+ Ítem</button>
-                    </form>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Proveedor / Razón Social</label>
+                        <input
+                          type="text"
+                          value={vistaPreviaFactura.proveedor}
+                          onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, proveedor: e.target.value.toUpperCase() })}
+                          className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>N° Folio Factura</label>
+                        <input
+                          type="text"
+                          value={vistaPreviaFactura.folio}
+                          onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, folio: e.target.value })}
+                          className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha Emisión</label>
+                        <input
+                          type="date"
+                          value={vistaPreviaFactura.fecha}
+                          onChange={(e) => setVistaPreviaFactura({ ...vistaPreviaFactura, fecha: e.target.value })}
+                          className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}
+                        />
+                      </div>
+                    </div>
 
-                    <div className="divide-y divide-slate-200/30">
-                      {vistaPreviaFactura.items.length === 0 ? (
-                        <p className={`text-xs text-center py-4 ${T.sub}`}>Agrega los productos recibidos arriba si el documento no trajo detalle XML.</p>
-                      ) : (
-                        vistaPreviaFactura.items.map((it, idx) => (
-                          <div key={idx} className="py-2.5 flex items-center justify-between text-xs">
-                            <span className={`font-bold ${T.main}`}>{it.codigo ? `[${it.codigo}] ` : ""}{it.nombre}</span>
-                            <span className={`font-extrabold px-2.5 py-0.5 rounded ${T.tag}`}>+{it.cantidad} unds</span>
+                    {/* CUADRATURA TRIBUTARIA EN VIVO (NETO / IVA 19% / TOTAL) */}
+                    <div className={`${T.muted} rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 items-center`}>
+                      <div>
+                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Subtotal Neto Calculado</span>
+                        <p className={`text-base font-extrabold ${T.main}`}>${cuadraturaPrevia.neto.toLocaleString("es-CL")}</p>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>IVA (19%)</span>
+                        <p className="text-base font-extrabold text-amber-500">${cuadraturaPrevia.iva.toLocaleString("es-CL")}</p>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Total con IVA</span>
+                        <p className="text-base font-extrabold text-emerald-500">${cuadraturaPrevia.total.toLocaleString("es-CL")}</p>
+                      </div>
+                      <div>
+                        {vistaPreviaFactura.totalDeclaradoXml > 0 ? (
+                          <div>
+                            <span className={`text-[10px] font-extrabold uppercase block ${T.sub}`}>Total XML Original</span>
+                            <p className={`text-xs font-extrabold ${cuadraturaPrevia.cuadraConXml ? "text-emerald-600" : "text-amber-600"}`}>
+                              ${vistaPreviaFactura.totalDeclaradoXml.toLocaleString("es-CL")} {cuadraturaPrevia.cuadraConXml ? "(Cuadrado ✓)" : `(Dif: $${cuadraturaPrevia.diferenciaXml.toLocaleString("es-CL")})`}
+                            </p>
                           </div>
-                        ))
-                      )}
+                        ) : (
+                          <span className={`text-[11px] ${T.sub}`}>Cuadratura automática al 19%</span>
+                        )}
+                      </div>
                     </div>
 
+                    {/* TABLA EDITABLE DE PRODUCTOS DE LA FACTURA */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className={`text-xs font-extrabold uppercase tracking-wider ${T.main}`}>
+                          Productos Detectados ({vistaPreviaFactura.items.length}) — Edita cantidades, nombres o costos antes de confirmar
+                        </h3>
+                      </div>
+
+                      <div className="overflow-x-auto border border-slate-200/40 rounded-2xl">
+                        <table className="w-full text-left text-xs">
+                          <thead className={`${T.muted} uppercase text-[10px]`}>
+                            <tr>
+                              <th className="p-2.5 text-center w-14" title="Marcar para sumar al inventario">Stock</th>
+                              <th className="p-2.5 w-28">SKU / Cód.</th>
+                              <th className="p-2.5 min-w-[200px]">Nombre Producto</th>
+                              <th className="p-2.5 text-center w-24">Cantidad</th>
+                              <th className="p-2.5 text-right w-28">Costo Unit. Neto</th>
+                              <th className="p-2.5 text-right w-28">Unit. c/IVA</th>
+                              <th className="p-2.5 text-right w-28">Total Línea</th>
+                              <th className="p-2.5 text-center w-12"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200/30">
+                            {vistaPreviaFactura.items.map((it) => {
+                              const netoLinea = Math.round(Number(it.cantidad || 0) * Number(it.netoUnitario || 0));
+                              const totalLinea = Math.round(netoLinea * 1.19);
+                              const unitConIva = Math.round(Number(it.netoUnitario || 0) * 1.19);
+                              return (
+                                <tr key={it.uid} className={!it.sumarAlStock ? "opacity-50" : ""}>
+                                  <td className="p-2 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={it.sumarAlStock}
+                                      onChange={(e) => actualizarItemPrevia(it.uid, "sumarAlStock", e.target.checked)}
+                                      className="w-4 h-4 cursor-pointer"
+                                      title="Sumar al stock del catálogo"
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <input
+                                      type="text"
+                                      value={it.codigo}
+                                      onChange={(e) => actualizarItemPrevia(it.uid, "codigo", e.target.value)}
+                                      placeholder="SKU"
+                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-mono font-bold ${T.input}`}
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <input
+                                      type="text"
+                                      value={it.nombre}
+                                      onChange={(e) => actualizarItemPrevia(it.uid, "nombre", e.target.value)}
+                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-bold ${T.input}`}
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={it.cantidad}
+                                      onChange={(e) => actualizarItemPrevia(it.uid, "cantidad", e.target.value)}
+                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-extrabold text-center ${T.input}`}
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={it.netoUnitario}
+                                      onChange={(e) => actualizarItemPrevia(it.uid, "netoUnitario", e.target.value)}
+                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-bold text-right ${T.input}`}
+                                    />
+                                  </td>
+                                  <td className={`p-2 text-right font-semibold ${T.sub}`}>
+                                    ${unitConIva.toLocaleString("es-CL")}
+                                  </td>
+                                  <td className={`p-2 text-right font-extrabold ${T.main}`}>
+                                    ${totalLinea.toLocaleString("es-CL")}
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => eliminarItemPrevia(it.uid)}
+                                      className="text-rose-500 hover:text-rose-700 font-extrabold px-2 py-1 cursor-pointer"
+                                      title="Quitar línea"
+                                    >
+                                      ✕
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* AGREGAR LÍNEA MANUAL ADICIONAL */}
+                      <form onSubmit={agregarItemVistaPrevia} className="grid grid-cols-1 sm:grid-cols-6 gap-2 pt-2">
+                        <input type="text" value={itemCod} onChange={(e) => setItemCod(e.target.value)} placeholder="SKU" className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
+                        <input type="text" value={itemNom} onChange={(e) => setItemNom(e.target.value)} placeholder="Agregar producto adicional *" className={`sm:col-span-2 rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                        <input type="number" min="1" value={itemCant} onChange={(e) => setItemCant(e.target.value)} placeholder="Cant." className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                        <input type="number" min="0" value={itemNetoUnit} onChange={(e) => setItemNetoUnit(e.target.value)} placeholder="Costo Neto Unit." className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} required />
+                        <button type="submit" className={`rounded-xl px-3 py-2 text-xs font-extrabold cursor-pointer ${T.sec}`}>+ Agregar Línea</button>
+                      </form>
+                    </div>
+
+                    {/* BOTÓN DE CONFIRMACIÓN DEFINITIVA */}
                     <button
+                      type="button"
                       onClick={confirmarYSumarStock}
                       disabled={guardando || vistaPreviaFactura.items.length === 0}
-                      className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}
+                      className={`w-full font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg cursor-pointer ${T.btn}`}
                     >
-                      {guardando ? "Sincronizando..." : "Confirmar y Sumar Ítems al Catálogo y Stock"}
+                      {guardando
+                        ? "Confirmando, Cuadrando IVA y Sumando Stock..."
+                        : `Confirmar Factura #${vistaPreviaFactura.folio}, Cuadrar IVA ($${cuadraturaPrevia.iva.toLocaleString("es-CL")}) y Sumar Stock`}
                     </button>
                   </div>
                 ) : (
-                  <>
-                    <form onSubmit={consultarPorFolioApi} className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Vía API (OpenFactura / SII)</span>
-                      <h2 className={`text-base font-extrabold ${T.main}`}>Consultar Factura Completa por Folio</h2>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
-                        <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
-                      </div>
-                      <button type="submit" className={`w-full font-extrabold py-3 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                        Descargar Factura Completa
-                      </button>
-                    </form>
-
-                    <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Instantáneo Sin Digitar</span>
-                      <h2 className={`text-base font-extrabold ${T.main}`}>Cargar XML DTE o Escanear Timbre SII</h2>
-                      <label className={`block w-full text-center font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
-                        Subir Archivo XML de Factura (.xml)
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className={`${T.card} rounded-2xl p-6 space-y-3`}>
+                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Carga Automática con Pre-Auditoría</span>
+                      <h2 className={`text-base font-extrabold ${T.main}`}>Subir Archivo XML de Factura SII (.xml)</h2>
+                      <p className={`text-xs ${T.sub}`}>
+                        Extrae automáticamente proveedor, folio, productos y costos netos. Te mostrará toda la tabla editable para que revises y confirmes antes de modificar tu stock.
+                      </p>
+                      <label className={`block w-full text-center font-extrabold py-4 rounded-xl text-xs cursor-pointer shadow-sm ${T.btn}`}>
+                        Seleccionar Archivo XML (.xml)
                         <input type="file" accept=".xml" onChange={procesarArchivoXml} className="hidden" />
                       </label>
-                      <input
-                        type="text"
-                        value={timbreScan}
-                        onChange={(e) => procesarTimbrePdf417(e.target.value)}
-                        placeholder="O haz clic aquí y escanea el código PDF417 del SII con pistola 2D"
-                        className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold ${T.input}`}
-                      />
+                      <div className="pt-2">
+                        <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>O escanea el timbre PDF417 impreso con pistola 2D:</label>
+                        <input
+                          type="text"
+                          value={timbreScan}
+                          onChange={(e) => procesarTimbrePdf417(e.target.value)}
+                          placeholder="Haz clic aquí y escanea el código del SII..."
+                          className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-semibold ${T.input}`}
+                        />
+                      </div>
                     </div>
-                  </>
+
+                    <form onSubmit={consultarPorFolioApi} className={`${T.card} rounded-2xl p-6 space-y-3`}>
+                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>Consulta por RUT y Folio</span>
+                      <h2 className={`text-base font-extrabold ${T.main}`}>Ingresar o Consultar Factura por Folio</h2>
+                      <p className={`text-xs ${T.sub}`}>
+                        Ingresa el RUT del proveedor y el N° de folio para abrir la tabla de pre-carga y cuadrar costos e IVA.
+                      </p>
+                      <div className="space-y-2.5">
+                        <input type="text" value={rutEmisor} onChange={(e) => setRutEmisor(formatearRut(e.target.value))} placeholder="RUT Proveedor (Ej: 76.123.456-7) *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                        <input type="text" value={folioFactura} onChange={(e) => setFolioFactura(e.target.value)} placeholder="N° Folio Factura *" className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`} required />
+                      </div>
+                      <button type="submit" className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                        Abrir Pre-Carga de Factura →
+                      </button>
+                    </form>
+                  </div>
                 )}
               </div>
             )}
 
+            {/* ================= TAB 2: ARCHIVO HISTÓRICO INFINITO DE FACTURAS DE COMPRA ================= */}
             {tab === "historial" && (
-              <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
-                <h2 className={`text-sm font-extrabold ${T.main}`}>Facturas de Compra Registradas ({compras.length})</h2>
-                {compras.length === 0 ? (
-                  <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no hay facturas de compra registradas.</p>
+              <div className={`${T.card} rounded-2xl p-5 sm:p-6 space-y-4`}>
+                <div>
+                  <h2 className={`text-base font-extrabold ${T.main}`}>Archivo Histórico Infinito de Facturas Cargadas ({compras.length})</h2>
+                  <p className={`text-xs ${T.sub}`}>
+                    Todas las facturas confirmadas quedan respaldadas de por vida con su desglose de Neto, IVA y productos ingresados. Toca cualquier factura para auditarla.
+                  </p>
+                </div>
+
+                {/* BUSCADOR Y FILTRO DE FECHAS DESDE / HASTA */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Buscar por N° Folio, Proveedor, RUT o Producto</label>
+                    <input
+                      type="text"
+                      value={busquedaArchivo}
+                      onChange={(e) => setBusquedaArchivo(e.target.value)}
+                      placeholder="Ej: 4521, Intcomex, Router..."
+                      className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none ${T.input}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha Desde</label>
+                    <input
+                      type="date"
+                      value={fechaDesdeArchivo}
+                      onChange={(e) => setFechaDesdeArchivo(e.target.value)}
+                      className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-bold block mb-1 ${T.sub}`}>Fecha Hasta</label>
+                    <input
+                      type="date"
+                      value={fechaHastaArchivo}
+                      onChange={(e) => setFechaHastaArchivo(e.target.value)}
+                      className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold outline-none ${T.input}`}
+                    />
+                  </div>
+                </div>
+
+                {(busquedaArchivo || fechaDesdeArchivo || fechaHastaArchivo) && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className={T.sub}>Mostrando {comprasFiltradas.length} de {compras.length} facturas archivadas</span>
+                    <button
+                      onClick={() => { setBusquedaArchivo(""); setFechaDesdeArchivo(""); setFechaHastaArchivo(""); }}
+                      className="font-bold underline cursor-pointer"
+                    >
+                      Limpiar Filtros
+                    </button>
+                  </div>
+                )}
+
+                {comprasFiltradas.length === 0 ? (
+                  <div className={`${T.muted} rounded-xl p-8 text-center space-y-1`}>
+                    <p className={`text-xs font-bold ${T.main}`}>No hay facturas de compra registradas con ese filtro</p>
+                    <p className={`text-[11px] ${T.sub}`}>Sube un archivo XML en la primera pestaña para auditarlo y guardarlo aquí.</p>
+                  </div>
                 ) : (
-                  <div className="divide-y divide-slate-200/30">
-                    {compras.map((c) => (
-                      <div key={c.id} className="py-3 flex items-center justify-between text-xs">
-                        <div>
-                          <span className={`font-extrabold ${T.main}`}>Factura #{c.folio} • {c.proveedor}</span>
-                          <span className={`block text-[11px] ${T.sub}`}>{c.fecha} • {(c.items || []).length} productos sumados</span>
+                  <div className="divide-y divide-slate-200/40">
+                    {comprasFiltradas.map((c) => {
+                      const neto = Number(c.netoClp || Math.round((c.totalClp || 0) / 1.19));
+                      const iva = Number(c.ivaClp || ((c.totalClp || 0) - neto));
+                      const total = Number(c.totalClp || 0);
+                      return (
+                        <div
+                          key={c.id}
+                          onClick={() => setFacturaAuditando(c)}
+                          className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs cursor-pointer hover:opacity-85"
+                        >
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`font-extrabold text-sm ${T.main}`}>Factura N° {c.folio}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${T.tag}`}>{c.proveedor}</span>
+                              <span className={`text-[11px] ${T.sub}`}>Fecha: {c.fecha}</span>
+                            </div>
+                            <p className={`mt-1 ${T.sub}`}>
+                              {(c.items || []).length} producto(s) • Neto: <strong>${neto.toLocaleString("es-CL")}</strong> + IVA: <strong>${iva.toLocaleString("es-CL")}</strong>
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className={`text-sm font-extrabold ${T.main}`}>Total: ${total.toLocaleString("es-CL")}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setFacturaAuditando(c); }}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.sec}`}
+                            >
+                              Auditar Detalle
+                            </button>
+                          </div>
                         </div>
-                        <span className={`font-extrabold ${T.main}`}>${Number(c.totalClp || 0).toLocaleString("es-CL")}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
