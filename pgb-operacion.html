@@ -306,7 +306,7 @@
       const [inventarioEsperandoCount, setInventarioEsperandoCount] = useState(0);
       const [seleccionadosInventario, setSeleccionadosInventario] = useState({});
       const [seleccionadosRetornosPDF, setSeleccionadosRetornosPDF] = useState({});
-      
+
       const [seleccionadosConteoDigital, setSeleccionadosConteoDigital] = useState({});
       const [modoConteoDigitalActivo, setModoConteoDigitalActivo] = useState(false);
       const [valoresConteoDigital, setValoresConteoDigital] = useState({});
@@ -329,6 +329,10 @@
       const [editandoId, setEditandoId] = useState(null);
       const [cierreExpandido, setCierreExpandido] = useState(null);
       const [tarjetasAbiertas, setTarjetasAbiertas] = useState({});
+
+      // Escudo anti-doble clic en transacciones críticas (estado + ref síncrono)
+      const [procesandoTx, setProcesandoTx] = useState(false);
+      const txLockRef = useRef(false);
 
       const [busqueda, setBusqueda] = useState("");
       const [busquedaCatalogo, setBusquedaCatalogo] = useState("");
@@ -376,6 +380,21 @@
       const [notas, setNotas] = useState("");
 
       const sincronizandoRef = useRef(false);
+
+      // Helper síncrono para bloquear dobles clics en cualquier guardado/ajuste
+      const ejecutarConBloqueo = async (fn) => {
+        if (txLockRef.current) return;
+        txLockRef.current = true;
+        setProcesandoTx(true);
+        try {
+          await fn();
+        } catch (err) {
+          alert("Error en la operación: " + (err?.message || err));
+        } finally {
+          txLockRef.current = false;
+          setProcesandoTx(false);
+        }
+      };
 
       const toggleIntegranteAlternativo = (nombre) => {
         if (equipoAlternativo.includes(nombre)) {
@@ -614,7 +633,7 @@
 
       const importarCatalogoExcel = async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file || importandoExcel) return;
         setImportandoExcel(true);
 
         try {
@@ -734,7 +753,7 @@
             });
           });
 
-          const CHUNK_SIZE = 400;
+          const CHUNK_SIZE = 450;
           for (let i = 0; i < nuevos.length; i += CHUNK_SIZE) {
             const batch = db.batch();
             nuevos.slice(i, i + CHUNK_SIZE).forEach((item) => {
@@ -757,19 +776,19 @@
             await batch.commit();
           }
 
-          const batchSync = db.batch();
-          let registrosSincronizados = 0;
-
+          const syncOps = [];
           incidencias.forEach((inc) => {
             const hInc = huellaFlexible((inc.producto || "").replace(/^\[[^\]]+\]\s*/, ""));
             const match = mapaActualizacion.find((m) => m.huella === hInc);
             if (match && (inc.producto !== match.displayNuevo || !inc.codigoProducto)) {
-              batchSync.update(db.collection("incidencias").doc(inc.id), {
-                producto: match.displayNuevo,
-                codigoProducto: match.codigo,
-                proveedorProducto: match.proveedor
+              syncOps.push({
+                ref: db.collection("incidencias").doc(inc.id),
+                data: {
+                  producto: match.displayNuevo,
+                  codigoProducto: match.codigo,
+                  proveedorProducto: match.proveedor
+                }
               });
-              registrosSincronizados++;
             }
           });
 
@@ -777,20 +796,24 @@
             const hCp = huellaFlexible((cp.producto || "").replace(/^\[[^\]]+\]\s*/, ""));
             const match = mapaActualizacion.find((m) => m.huella === hCp);
             if (match && (cp.producto !== match.displayNuevo || !cp.codigoProducto)) {
-              batchSync.update(db.collection("conteo_pendiente").doc(cp.id), {
-                producto: match.displayNuevo,
-                codigoProducto: match.codigo,
-                proveedorProducto: match.proveedor
+              syncOps.push({
+                ref: db.collection("conteo_pendiente").doc(cp.id),
+                data: {
+                  producto: match.displayNuevo,
+                  codigoProducto: match.codigo,
+                  proveedorProducto: match.proveedor
+                }
               });
-              registrosSincronizados++;
             }
           });
 
-          if (registrosSincronizados > 0) {
+          for (let i = 0; i < syncOps.length; i += CHUNK_SIZE) {
+            const batchSync = db.batch();
+            syncOps.slice(i, i + CHUNK_SIZE).forEach((op) => batchSync.update(op.ref, op.data));
             await batchSync.commit();
           }
 
-          alert(`✅ Catálogo sincronizado: ${nuevos.length} nuevos, ${actualizables.length} fusionados con su código original y ${registrosSincronizados} registros activos actualizados.`);
+          alert(`✅ Catálogo sincronizado: ${nuevos.length} nuevos, ${actualizables.length} fusionados con su código original y ${syncOps.length} registros activos actualizados.`);
         } catch (err) {
           console.error(err);
           alert("Error al leer el archivo Excel: " + err.message);
@@ -848,21 +871,30 @@
 
       const eliminarProductoCatalogo = async (id, e) => {
         e.stopPropagation();
+        if (txLockRef.current) return;
         if (confirm("¿Eliminar este producto del catálogo?")) {
-          try { await db.collection("catalogo_productos").doc(id).delete(); } catch (err) { alert(err.message); }
+          await ejecutarConBloqueo(async () => {
+            await db.collection("catalogo_productos").doc(id).delete();
+          });
         }
       };
 
       const eliminarClienteCatalogo = async (id, e) => {
         e.stopPropagation();
+        if (txLockRef.current) return;
         if (confirm("¿Eliminar este cliente del catálogo?")) {
-          try { await db.collection("catalogo_clientes").doc(id).delete(); } catch (err) { alert(err.message); }
+          await ejecutarConBloqueo(async () => {
+            await db.collection("catalogo_clientes").doc(id).delete();
+          });
         }
       };
 
       const eliminarRegistroHistorialInv = async (id) => {
+        if (txLockRef.current) return;
         if (confirm("¿Deseas eliminar este registro del historial de inventario?")) {
-          try { await db.collection("historial_inventario").doc(id).delete(); } catch (err) { alert(err.message); }
+          await ejecutarConBloqueo(async () => {
+            await db.collection("historial_inventario").doc(id).delete();
+          });
         }
       };
 
@@ -889,6 +921,7 @@
 
       const guardarIncidencia = async (e) => {
         e.preventDefault();
+        if (txLockRef.current) return;
         if (!factura.trim()) return alert("Completa el Nº de Factura.");
 
         const esMalFacturadoUnico = MOTIVOS_RETORNO_UNICO_VENTAS.includes(motivo);
@@ -910,107 +943,107 @@
           return alert("Selecciona al menos un chofer válido en la Ruta Alternativa.");
         }
 
-        let rutaTextoFinal = rutaTipo;
-        let integrantesRuta = [];
-        if (rutaTipo === "Ruta 1") {
-          rutaTextoFinal = "Ruta 1 (Juan / Julio)";
-          integrantesRuta = ["Juan", "Julio"];
-        } else if (rutaTipo === "Ruta 2") {
-          rutaTextoFinal = "Ruta 2 (Carlos / Horacio)";
-          integrantesRuta = ["Carlos", "Horacio"];
-        } else {
-          const roles = resolverRolesRutaAlternativa(equipoAlternativo);
-          rutaTextoFinal = roles.texto;
-          integrantesRuta = equipoAlternativo;
-        }
+        await ejecutarConBloqueo(async () => {
+          let rutaTextoFinal = rutaTipo;
+          let integrantesRuta = [];
+          if (rutaTipo === "Ruta 1") {
+            rutaTextoFinal = "Ruta 1 (Juan / Julio)";
+            integrantesRuta = ["Juan", "Julio"];
+          } else if (rutaTipo === "Ruta 2") {
+            rutaTextoFinal = "Ruta 2 (Carlos / Horacio)";
+            integrantesRuta = ["Carlos", "Horacio"];
+          } else {
+            const roles = resolverRolesRutaAlternativa(equipoAlternativo);
+            rutaTextoFinal = roles.texto;
+            integrantesRuta = equipoAlternativo;
+          }
 
-        const clienteNorm = normalizarTexto(cliente);
-        const usaMalFacturado = esMalFacturadoUnico || esCruceVentas;
-        const rawProdPrincipal = usaMalFacturado ? productoMalFacturado : producto;
-        const infoProdPrincipal = await registrarProductoEnCatalogo(rawProdPrincipal);
-        const prodPrincipal = infoProdPrincipal.display;
-        const cantPrincipal = usaMalFacturado ? Number(cantidadMalFacturada) : Number(cantidad);
-        const uniPrincipal = usaMalFacturado ? unidadMalFacturada : unidad;
+          const clienteNorm = normalizarTexto(cliente);
+          const usaMalFacturado = esMalFacturadoUnico || esCruceVentas;
+          const rawProdPrincipal = usaMalFacturado ? productoMalFacturado : producto;
+          const infoProdPrincipal = await registrarProductoEnCatalogo(rawProdPrincipal);
+          const prodPrincipal = infoProdPrincipal.display;
+          const cantPrincipal = usaMalFacturado ? Number(cantidadMalFacturada) : Number(cantidad);
+          const uniPrincipal = usaMalFacturado ? unidadMalFacturada : unidad;
 
-        let infoProdCruce = { display: null, codigo: "", proveedor: "" };
-        if ((motivo === "Cruce" || motivo === "AceptadoPorCliente" || esCruceVentas) && productoCruce) {
-          infoProdCruce = await registrarProductoEnCatalogo(productoCruce);
-        }
-        const prodCruceNorm = infoProdCruce.display;
+          let infoProdCruce = { display: null, codigo: "", proveedor: "" };
+          if ((motivo === "Cruce" || motivo === "AceptadoPorCliente" || esCruceVentas) && productoCruce) {
+            infoProdCruce = await registrarProductoEnCatalogo(productoCruce);
+          }
+          const prodCruceNorm = infoProdCruce.display;
 
-        if (clienteNorm) await registrarClienteEnCatalogo(clienteNorm);
+          if (clienteNorm) await registrarClienteEnCatalogo(clienteNorm);
 
-        const motivoObj = MOTIVOS.find(m => m.id === motivo);
-        const requiereFisico = motivoObj ? motivoObj.fisico : true;
-        const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
+          const motivoObj = MOTIVOS.find(m => m.id === motivo);
+          const requiereFisico = motivoObj ? motivoObj.fisico : true;
+          const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
 
-        let infoDanioObj = null;
-        let cantidadParaConteo = cantPrincipal;
-        let unidadParaConteo = uniPrincipal;
+          let infoDanioObj = null;
+          let cantidadParaConteo = cantPrincipal;
+          let unidadParaConteo = uniPrincipal;
 
-        if (motivo === "Daño/Merma") {
-          const esManipulacion = causaDanio.includes("manipulación");
-          const respFinal = esManipulacion ? responsableDanio : (causaDanio.includes("fábrica") ? "Origen / Fábrica" : "Accidente en furgón");
-          
-          infoDanioObj = {
-            causa: causaDanio,
-            responsable: respFinal,
-            esDanioTotal: danioTotalForm,
-            cantidadDanada: danioTotalForm ? Number(cantidad) : Number(cantDanadaParcial),
-            unidadDanada: danioTotalForm ? unidad : (unidad === "Unidad" ? "Unidad" : "Unidad suelta")
+          if (motivo === "Daño/Merma") {
+            const esManipulacion = causaDanio.includes("manipulación");
+            const respFinal = esManipulacion ? responsableDanio : (causaDanio.includes("fábrica") ? "Origen / Fábrica" : "Accidente en furgón");
+
+            infoDanioObj = {
+              causa: causaDanio,
+              responsable: respFinal,
+              esDanioTotal: danioTotalForm,
+              cantidadDanada: danioTotalForm ? Number(cantidad) : Number(cantDanadaParcial),
+              unidadDanada: danioTotalForm ? unidad : (unidad === "Unidad" ? "Unidad" : "Unidad suelta")
+            };
+
+            if (!danioTotalForm) {
+              cantidadParaConteo = Number(cantDanadaParcial);
+              unidadParaConteo = unidad === "Unidad" ? "Unidad" : "Unidad suelta";
+            }
+          }
+
+          if (requiereFisico && requiereAjusteInv && !["AceptadoPorCliente", ...MOTIVOS_VENTAS_IDS].includes(motivo)) {
+            await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim(), infoProdPrincipal);
+          }
+          if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
+            await registrarConteoPendiente(prodCruceNorm, unidadCruce, Number(cantidadCruce), factura.trim(), infoProdCruce);
+          }
+
+          const checksIniciales = {};
+          accionesSeleccionadas.forEach(ac => {
+            checksIniciales[ac] = { completado: false, por: "", fechaHora: "" };
+          });
+
+          const tieneSecundario = motivo === "Cruce" || motivo === "AceptadoPorCliente" || esCruceVentas;
+
+          const datos = {
+            factura: factura.trim(),
+            cliente: clienteNorm,
+            fecha: fecha || fechaIsoChile(),
+            ruta: rutaTextoFinal,
+            rutaTipo,
+            integrantesRuta,
+            areaResponsable,
+            armador: areaResponsable === "bodega" ? armador : "",
+            vendedor: areaResponsable === "ventas" ? vendedor : "",
+            registradoPor,
+            motivo,
+            producto: prodPrincipal,
+            codigoProducto: infoProdPrincipal.codigo || "",
+            proveedorProducto: infoProdPrincipal.proveedor || "",
+            cantidad: cantPrincipal,
+            unidad: uniPrincipal,
+            productoCruce: tieneSecundario ? prodCruceNorm : null,
+            codigoProductoCruce: tieneSecundario ? (infoProdCruce.codigo || "") : "",
+            proveedorProductoCruce: tieneSecundario ? (infoProdCruce.proveedor || "") : "",
+            cantidadCruce: tieneSecundario ? Number(cantidadCruce) : null,
+            unidadCruce: tieneSecundario ? unidadCruce : null,
+            detalleDanio: infoDanioObj,
+            acciones: accionesSeleccionadas,
+            checksAcciones: checksIniciales,
+            retornoBodegaInfo: null,
+            notas: notas.trim(),
+            timestamp: Date.now()
           };
 
-          if (!danioTotalForm) {
-            cantidadParaConteo = Number(cantDanadaParcial);
-            unidadParaConteo = unidad === "Unidad" ? "Unidad" : "Unidad suelta";
-          }
-        }
-
-        if (requiereFisico && requiereAjusteInv && !["AceptadoPorCliente", ...MOTIVOS_VENTAS_IDS].includes(motivo)) {
-          await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim(), infoProdPrincipal);
-        }
-        if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
-          await registrarConteoPendiente(prodCruceNorm, unidadCruce, Number(cantidadCruce), factura.trim(), infoProdCruce);
-        }
-
-        const checksIniciales = {};
-        accionesSeleccionadas.forEach(ac => {
-          checksIniciales[ac] = { completado: false, por: "", fechaHora: "" };
-        });
-
-        const tieneSecundario = motivo === "Cruce" || motivo === "AceptadoPorCliente" || esCruceVentas;
-
-        const datos = {
-          factura: factura.trim(),
-          cliente: clienteNorm,
-          fecha: fecha || fechaIsoChile(),
-          ruta: rutaTextoFinal,
-          rutaTipo,
-          integrantesRuta,
-          areaResponsable,
-          armador: areaResponsable === "bodega" ? armador : "",
-          vendedor: areaResponsable === "ventas" ? vendedor : "",
-          registradoPor,
-          motivo,
-          producto: prodPrincipal,
-          codigoProducto: infoProdPrincipal.codigo || "",
-          proveedorProducto: infoProdPrincipal.proveedor || "",
-          cantidad: cantPrincipal,
-          unidad: uniPrincipal,
-          productoCruce: tieneSecundario ? prodCruceNorm : null,
-          codigoProductoCruce: tieneSecundario ? (infoProdCruce.codigo || "") : "",
-          proveedorProductoCruce: tieneSecundario ? (infoProdCruce.proveedor || "") : "",
-          cantidadCruce: tieneSecundario ? Number(cantidadCruce) : null,
-          unidadCruce: tieneSecundario ? unidadCruce : null,
-          detalleDanio: infoDanioObj,
-          acciones: accionesSeleccionadas,
-          checksAcciones: checksIniciales,
-          retornoBodegaInfo: null,
-          notas: notas.trim(),
-          timestamp: Date.now()
-        };
-
-        try {
           if (editandoId) {
             const incAnterior = incidencias.find(i => i.id === editandoId);
             const checksAnteriores = incAnterior?.checksAcciones || {};
@@ -1028,7 +1061,7 @@
           }
           limpiarFormulario();
           setVista("dashboard");
-        } catch (err) { alert("Error: " + err.message); }
+        });
       };
 
       const registrarEnHistorialInventario = async (productoNombre, unidadMedida, facturaNum, responsableAjuste, fechaAjuste, responsableConteo, fechaConteo, detalleExtra = "") => {
@@ -1064,11 +1097,12 @@
 
       const guardarIncidenteBodega = async (e) => {
         e.preventDefault();
+        if (txLockRef.current) return;
         if (!prodBodega.trim()) return alert("Ingresa el nombre del producto.");
 
-        const infoProd = await registrarProductoEnCatalogo(prodBodega);
+        await ejecutarConBloqueo(async () => {
+          const infoProd = await registrarProductoEnCatalogo(prodBodega);
 
-        try {
           await db.collection("incidentes_bodega").add({
             producto: infoProd.display,
             codigoProducto: infoProd.codigo || "",
@@ -1090,20 +1124,19 @@
           setCantBodega(1);
           setNotasBodega("");
           alert("✅ Incidente de bodega registrado correctamente.");
-        } catch (err) {
-          alert("Error al registrar: " + err.message);
-        }
+        });
       };
 
       const ajustarIncidenteBodega = async (inc) => {
+        if (txLockRef.current) return;
         const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar inventario:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
           if (resp) alert("Nombre no válido. Debe ser Pedro o Bedanli.");
           return;
         }
 
-        const ahoraStr = fechaLegibleChile();
-        try {
+        await ejecutarConBloqueo(async () => {
+          const ahoraStr = fechaLegibleChile();
           await db.collection("incidentes_bodega").doc(inc.id).update({
             ajustado: true,
             ajustadoPor: resp.trim(),
@@ -1114,14 +1147,15 @@
           await registrarEnHistorialInventario(inc.producto, inc.unidad, "BODEGA-INT", resp.trim(), ahoraStr, inc.responsable, inc.fechaHoraAjuste || ahoraStr, detalleHistorial);
 
           alert("✅ Incidente ajustado y sumado automáticamente al Historial Acumulativo.");
-        } catch (err) {
-          alert("Error al ajustar: " + err.message);
-        }
+        });
       };
 
       const eliminarIncidenteBodega = async (id) => {
+        if (txLockRef.current) return;
         if (confirm("¿Deseas eliminar este registro de incidente interno?")) {
-          try { await db.collection("incidentes_bodega").doc(id).delete(); } catch (err) { alert(err.message); }
+          await ejecutarConBloqueo(async () => {
+            await db.collection("incidentes_bodega").doc(id).delete();
+          });
         }
       };
 
@@ -1145,50 +1179,51 @@
       };
 
       const guardarRecepcionRetornoDirecto = async (item) => {
-        const resp = retornoFormState.responsable || "Edwin";
-        const items = retornoFormState.items || [];
+        if (txLockRef.current) return;
+        await ejecutarConBloqueo(async () => {
+          const resp = retornoFormState.responsable || "Edwin";
+          const items = retornoFormState.items || [];
 
-        let discrepancias = [];
-        let todoCompleto = true;
+          let discrepancias = [];
+          let todoCompleto = true;
 
-        for (const it of items) {
-          if (!it.recibido) {
-            todoCompleto = false;
-            let responsableDanio = it.responsableRuta || "Ninguno";
-            let motivoTexto = it.motivoFalta;
-            if (motivoTexto.includes("rompió")) {
-              motivoTexto += ` (Responsable/Causa: ${responsableDanio})`;
-            } else if (motivoTexto.includes("fábrica")) {
-              motivoTexto += ` (Reclamar a Proveedor / Origen)`;
+          for (const it of items) {
+            if (!it.recibido) {
+              todoCompleto = false;
+              let responsableDanio = it.responsableRuta || "Ninguno";
+              let motivoTexto = it.motivoFalta;
+              if (motivoTexto.includes("rompió")) {
+                motivoTexto += ` (Responsable/Causa: ${responsableDanio})`;
+              } else if (motivoTexto.includes("fábrica")) {
+                motivoTexto += ` (Reclamar a Proveedor / Origen)`;
+              }
+              discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${motivoTexto} (Detalle: ${it.detalle || 'N/A'})`);
+
+              await registrarConteoPendiente(it.nombre, it.unidad, Number(it.cantFalta || 1), item.factura);
+            } else {
+              discrepancias.push(`Recibido conforme: ${it.cantidad} ${it.unidad} de ${it.nombre}`);
             }
-            discrepancias.push(`Faltante/Dañado: ${it.cantFalta || 0} de ${it.cantidad} ${it.unidad} de ${it.nombre} — Motivo: ${motivoTexto} (Detalle: ${it.detalle || 'N/A'})`);
-            
-            await registrarConteoPendiente(it.nombre, it.unidad, Number(it.cantFalta || 1), item.factura);
-          } else {
-            discrepancias.push(`Recibido conforme: ${it.cantidad} ${it.unidad} de ${it.nombre}`);
           }
-        }
 
-        const ahoraStr = fechaLegibleChile();
-        const infoRetorno = {
-          recibido: true,
-          completo: todoCompleto,
-          discrepanciasTexto: discrepancias.join(" | "),
-          itemsDetalle: items,
-          recibidoPor: resp,
-          fechaHoraRecibo: ahoraStr
-        };
+          const ahoraStr = fechaLegibleChile();
+          const infoRetorno = {
+            recibido: true,
+            completo: todoCompleto,
+            discrepanciasTexto: discrepancias.join(" | "),
+            itemsDetalle: items,
+            recibidoPor: resp,
+            fechaHoraRecibo: ahoraStr
+          };
 
-        const checks = item.checksAcciones || {};
-        checks["Chofer Retorna Producto a Bodega"] = {
-          completado: true,
-          por: resp,
-          fechaHora: ahoraStr
-        };
+          const checks = { ...(item.checksAcciones || {}) };
+          checks["Chofer Retorna Producto a Bodega"] = {
+            completado: true,
+            por: resp,
+            fechaHora: ahoraStr
+          };
 
-        const todasListas = (item.acciones || []).every(ac => checks[ac] && checks[ac].completado);
+          const todasListas = (item.acciones || []).every(ac => checks[ac] && checks[ac].completado);
 
-        try {
           await db.collection("incidencias").doc(item.id).update({
             retornoBodegaInfo: infoRetorno,
             checksAcciones: checks,
@@ -1196,29 +1231,28 @@
           });
           setRecibiendoRetornoId(null);
           alert("✅ Recepción de retorno registrada. Los faltantes/daños se sumaron automáticamente al Conteo Cíclico.");
-        } catch (err) {
-          alert("Error al guardar: " + err.message);
-        }
+        });
       };
 
       const toggleCheckConteoFisico = async (id, estadoActual) => {
+        if (txLockRef.current) return;
         const resp = prompt(`Selecciona quién realizó el conteo físico:\n1. Nico\n2. Edwin\n3. Diego\n\n(Escribe el nombre exacto):`, "Diego");
         if (!resp || !["Nico", "Edwin", "Diego"].includes(resp.trim())) {
           if (resp) alert("Nombre no válido. Debe ser Nico, Edwin o Diego.");
           return;
         }
-        const ahoraStr = fechaLegibleChile();
-        try {
+        await ejecutarConBloqueo(async () => {
+          const ahoraStr = fechaLegibleChile();
           await db.collection("conteo_pendiente").doc(id).update({
             conteoFisicoHecho: !estadoActual,
             responsableConteo: !estadoActual ? resp.trim() : "",
             fechaHoraConteo: !estadoActual ? ahoraStr : ""
           });
-        } catch (err) { alert(err.message); }
+        });
       };
 
       const toggleCheckAjusteSistema = async (id, estadoActual) => {
-        if (estadoActual) return;
+        if (estadoActual || txLockRef.current) return;
 
         const resp = prompt(`Confirma tu nombre como Jefatura (Pedro o Bedanli) para ajustar el inventario y pasarlo al Historial Acumulativo:\n1. Pedro\n2. Bedanli\n\n(Escribe el nombre exacto):`, "Pedro");
         if (!resp || !["Pedro", "Bedanli"].includes(resp.trim())) {
@@ -1229,9 +1263,9 @@
         const itemConteo = conteoPendiente.find(cp => cp.id === id);
         if (!itemConteo) return;
 
-        const ahoraStr = fechaLegibleChile();
+        await ejecutarConBloqueo(async () => {
+          const ahoraStr = fechaLegibleChile();
 
-        try {
           const detalleTexto = itemConteo.cantidadContada !== undefined
             ? `Conteo Cíclico Digital (Stock físico contado: ${itemConteo.cantidadContada} ${itemConteo.unidad} | Desfase reportado: ${itemConteo.cantidad} ${itemConteo.unidad})`
             : `Conteo Cíclico Físico (Cantidad ajustada: ${itemConteo.cantidad} ${itemConteo.unidad} — Ref Fact #${itemConteo.factura})`;
@@ -1252,7 +1286,7 @@
             const prodNormInc = normalizarTexto(inc.producto);
             const prodCruceInc = inc.productoCruce ? normalizarTexto(inc.productoCruce) : "";
             if (facturasAsociadas.includes(inc.factura) && (prodNormInc === itemConteo.producto || prodCruceInc === itemConteo.producto)) {
-              const checks = inc.checksAcciones || {};
+              const checks = { ...(inc.checksAcciones || {}) };
               if ((inc.acciones || []).includes("Ajustar Inventario en Bodega")) {
                 checks["Ajustar Inventario en Bodega"] = {
                   completado: true,
@@ -1280,11 +1314,11 @@
             const histEl = document.getElementById("seccion-historial-acumulativo");
             if (histEl) histEl.scrollIntoView({ behavior: "smooth" });
           }, 250);
-
-        } catch (err) { alert("Error al procesar ajuste: " + err.message); }
+        });
       };
 
       const guardarConteoDigitalBodega = async () => {
+        if (txLockRef.current) return;
         const seleccionadosIds = Object.keys(seleccionadosConteoDigital).filter(id => seleccionadosConteoDigital[id]);
         if (seleccionadosIds.length === 0) return alert("No hay ítems seleccionados.");
 
@@ -1294,34 +1328,39 @@
           return;
         }
 
-        const ahoraStr = fechaLegibleChile();
+        await ejecutarConBloqueo(async () => {
+          const ahoraStr = fechaLegibleChile();
+          const CHUNK = 450;
 
-        try {
-          const batch = db.batch();
-          seleccionadosIds.forEach(id => {
-            const valorReal = valoresConteoDigital[id] !== undefined ? valoresConteoDigital[id] : 0;
-            const ref = db.collection("conteo_pendiente").doc(id);
-            batch.update(ref, {
-              conteoFisicoHecho: true,
-              responsableConteo: resp.trim(),
-              fechaHoraConteo: ahoraStr,
-              cantidadContada: Number(valorReal)
+          for (let i = 0; i < seleccionadosIds.length; i += CHUNK) {
+            const batch = db.batch();
+            seleccionadosIds.slice(i, i + CHUNK).forEach(id => {
+              const itemRef = conteoPendiente.find(cp => cp.id === id);
+              const valorReal = valoresConteoDigital[id] !== undefined ? valoresConteoDigital[id] : (itemRef ? itemRef.cantidad : 0);
+              const ref = db.collection("conteo_pendiente").doc(id);
+              batch.update(ref, {
+                conteoFisicoHecho: true,
+                responsableConteo: resp.trim(),
+                fechaHoraConteo: ahoraStr,
+                cantidadContada: Number(valorReal)
+              });
             });
-          });
+            await batch.commit();
+          }
 
-          await batch.commit();
           setModoConteoDigitalActivo(false);
           setSeleccionadosConteoDigital({});
           setValoresConteoDigital({});
           alert("✅ Conteo digital guardado con éxito. Ahora la Jefatura (Pedro o Bedanli) ha sido notificada para realizar el ajuste final.");
-        } catch (err) {
-          alert("Error al guardar: " + err.message);
-        }
+        });
       };
 
       const eliminarItemConteoPendiente = async (id) => {
+        if (txLockRef.current) return;
         if (confirm("¿Eliminar este ítem de conteo?")) {
-          try { await db.collection("conteo_pendiente").doc(id).delete(); } catch (err) { alert(err.message); }
+          await ejecutarConBloqueo(async () => {
+            await db.collection("conteo_pendiente").doc(id).delete();
+          });
         }
       };
 
@@ -1363,6 +1402,7 @@
       };
 
       const toggleCheckAccion = async (id, accionNombre, estadoActual) => {
+        if (txLockRef.current) return;
         const usuarioActual = prompt(`Selecciona tu nombre:\n1. Edwin\n2. Nico\n3. Diego\n4. Bedanli\n5. Pedro\n6. Gabriel\n\n(Escribe el nombre exacto):`, "Diego");
         if (!usuarioActual || !USUARIOS_SISTEMA.includes(usuarioActual.trim())) {
           if (usuarioActual) alert("Nombre no válido. Debe ser uno del equipo.");
@@ -1372,40 +1412,40 @@
         const incidenciaActual = incidencias.find(i => i.id === id);
         if (!incidenciaActual) return;
 
-        const checks = incidenciaActual.checksAcciones || {};
-        const ahora = fechaLegibleChile();
-        const nuevoEstado = !estadoActual;
+        await ejecutarConBloqueo(async () => {
+          const checks = { ...(incidenciaActual.checksAcciones || {}) };
+          const ahora = fechaLegibleChile();
+          const nuevoEstado = !estadoActual;
 
-        checks[accionNombre] = {
-          completado: nuevoEstado,
-          por: usuarioActual.trim(),
-          fechaHora: nuevoEstado ? ahora : ""
-        };
+          checks[accionNombre] = {
+            completado: nuevoEstado,
+            por: usuarioActual.trim(),
+            fechaHora: nuevoEstado ? ahora : ""
+          };
 
-        if (nuevoEstado && accionNombre.includes("Inventario")) {
-          const cantAjuste = (incidenciaActual.motivo === "Daño/Merma" && incidenciaActual.detalleDanio) ? incidenciaActual.detalleDanio.cantidadDanada : incidenciaActual.cantidad;
-          const uniAjuste = (incidenciaActual.motivo === "Daño/Merma" && incidenciaActual.detalleDanio) ? incidenciaActual.detalleDanio.unidadDanada : incidenciaActual.unidad;
+          if (nuevoEstado && accionNombre.includes("Inventario")) {
+            const cantAjuste = (incidenciaActual.motivo === "Daño/Merma" && incidenciaActual.detalleDanio) ? incidenciaActual.detalleDanio.cantidadDanada : incidenciaActual.cantidad;
+            const uniAjuste = (incidenciaActual.motivo === "Daño/Merma" && incidenciaActual.detalleDanio) ? incidenciaActual.detalleDanio.unidadDanada : incidenciaActual.unidad;
 
-          await registrarEnHistorialInventario(incidenciaActual.producto, uniAjuste, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Directo en Ruta (${cantAjuste} ${uniAjuste})`);
-          if (incidenciaActual.productoCruce) {
-            await registrarEnHistorialInventario(incidenciaActual.productoCruce, incidenciaActual.unidadCruce, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Cruce en Ruta (${incidenciaActual.cantidadCruce} ${incidenciaActual.unidadCruce})`);
+            await registrarEnHistorialInventario(incidenciaActual.producto, uniAjuste, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Directo en Ruta (${cantAjuste} ${uniAjuste})`);
+            if (incidenciaActual.productoCruce) {
+              await registrarEnHistorialInventario(incidenciaActual.productoCruce, incidenciaActual.unidadCruce, incidenciaActual.factura, usuarioActual.trim(), ahora, usuarioActual.trim(), ahora, `Ajuste Cruce en Ruta (${incidenciaActual.cantidadCruce} ${incidenciaActual.unidadCruce})`);
+            }
+
+            const prodNorm = normalizarTexto(incidenciaActual.producto);
+            const cpAsociado = conteoPendiente.find(cp => cp.producto === prodNorm && cp.factura && cp.factura.includes(incidenciaActual.factura));
+            if (cpAsociado) {
+              await db.collection("conteo_pendiente").doc(cpAsociado.id).delete();
+            }
           }
 
-          const prodNorm = normalizarTexto(incidenciaActual.producto);
-          const cpAsociado = conteoPendiente.find(cp => cp.producto === prodNorm && cp.factura && cp.factura.includes(incidenciaActual.factura));
-          if (cpAsociado) {
-            await db.collection("conteo_pendiente").doc(cpAsociado.id).delete();
-          }
-        }
+          const todasListas = (incidenciaActual.acciones || []).every(ac => checks[ac] && checks[ac].completado);
 
-        const todasListas = incidenciaActual.acciones.every(ac => checks[ac] && checks[ac].completado);
-
-        try {
           await db.collection("incidencias").doc(id).update({
             checksAcciones: checks,
             resuelto: todasListas ? true : incidenciaActual.resuelto
           });
-        } catch (err) { alert("Error al actualizar check: " + err.message); }
+        });
       };
 
       const toggleExpandirTarjeta = (id) => {
@@ -1415,7 +1455,7 @@
       const cargarParaEditar = (item) => {
         setEditandoId(item.id);
         setFactura(item.factura || ""); setCliente(item.cliente || ""); setFecha(item.fecha || fechaIsoChile());
-        
+
         if (item.rutaTipo) {
           setRutaTipo(item.rutaTipo);
           if (item.integrantesRuta && item.integrantesRuta.length > 0) {
@@ -1435,7 +1475,7 @@
         setVendedor(item.vendedor || VENDEDORES[0]);
         setRegistradoPor(item.registradoPor || "Diego");
         setMotivo(item.motivo || (esVentas ? "ErrorFacturacion" : "Faltante"));
-        
+
         if (MOTIVOS_VENTAS_IDS.includes(item.motivo)) {
           setProductoMalFacturado(item.producto || "");
           setCantidadMalFacturada(item.cantidad || 1);
@@ -1463,55 +1503,71 @@
       };
 
       const cambiarEstado = async (id, estadoActual) => {
-        await db.collection("incidencias").doc(id).update({ resuelto: !estadoActual });
+        if (txLockRef.current) return;
+        await ejecutarConBloqueo(async () => {
+          await db.collection("incidencias").doc(id).update({ resuelto: !estadoActual });
+        });
       };
 
       const eliminarIncidencia = async (id) => {
-        if (confirm("¿Deseas eliminar este registro?")) await db.collection("incidencias").doc(id).delete();
+        if (txLockRef.current) return;
+        if (confirm("¿Deseas eliminar este registro?")) {
+          await ejecutarConBloqueo(async () => {
+            await db.collection("incidencias").doc(id).delete();
+          });
+        }
       };
 
+      // CIERRE DE SEMANA CON BLOQUEO ANTI-DOBLE CLIC Y LOTES SEGUROS DE 450
       const cerrarSemana = async () => {
+        if (txLockRef.current) return;
         if (incidencias.length === 0 && incidentesBodega.filter(ib => ib.ajustado).length === 0) return alert("No hay registros activos para cerrar.");
         const nombreSemana = prompt("Nombre del cierre (Ej: Semana 09 al 14 Nov):");
-        if (!nombreSemana) return;
+        if (!nombreSemana || !nombreSemana.trim()) return;
 
-        try {
+        await ejecutarConBloqueo(async () => {
           const ahoraTs = Date.now();
           await db.collection("cierres_semanales").add({
-            nombreSemana,
+            nombreSemana: nombreSemana.trim(),
             fechaCierre: new Date(ahoraTs).toISOString(),
             fechaCierreChile: fechaLegibleChile(ahoraTs),
             totalRegistros: incidencias.length + incidentesBodega.filter(ib => ib.ajustado).length,
             registros: incidencias,
             incidentesBodega: incidentesBodega.filter(ib => ib.ajustado)
           });
-          
-          const batch = db.batch();
-          
+
+          const refsABorrar = [];
+
           incidencias.forEach(inc => {
             const tieneRetorno = (inc.acciones || []).includes("Chofer Retorna Producto a Bodega");
             const retornoRecibido = inc.retornoBodegaInfo && inc.retornoBodegaInfo.recibido;
             if (!tieneRetorno || retornoRecibido) {
-              batch.delete(db.collection("incidencias").doc(inc.id));
+              refsABorrar.push(db.collection("incidencias").doc(inc.id));
             }
           });
 
           conteoPendiente.forEach(cp => {
             if (cp.conteoFisicoHecho && cp.ajusteSistemaHecho) {
-              batch.delete(db.collection("conteo_pendiente").doc(cp.id));
+              refsABorrar.push(db.collection("conteo_pendiente").doc(cp.id));
             }
           });
 
           incidentesBodega.forEach(ib => {
             if (ib.ajustado) {
-              batch.delete(db.collection("incidentes_bodega").doc(ib.id));
+              refsABorrar.push(db.collection("incidentes_bodega").doc(ib.id));
             }
           });
 
-          await batch.commit();
+          const CHUNK = 450;
+          for (let i = 0; i < refsABorrar.length; i += CHUNK) {
+            const batch = db.batch();
+            refsABorrar.slice(i, i + CHUNK).forEach(ref => batch.delete(ref));
+            await batch.commit();
+          }
+
           alert("✅ Semana cerrada con éxito. Los retornos pendientes y pendientes de conteo se arrastraron automáticamente a la nueva semana.");
           setVista("historial");
-        } catch (err) { alert("Error: " + err.message); }
+        });
       };
 
       const copiarResumenWhatsApp = () => {
@@ -1667,7 +1723,7 @@
               ? esIncidenciaVentas(item)
               : (item.armador === filtroArmador || item.vendedor === filtroArmador);
           const coincideRuta = filtroRuta === "todos" ? true : (item.rutaTipo === filtroRuta || item.ruta?.startsWith(filtroRuta));
-          
+
           let coincideFecha = true;
           if (filtroFechaDesde && item.fecha < filtroFechaDesde) coincideFecha = false;
           if (filtroFechaHasta && item.fecha > filtroFechaHasta) coincideFecha = false;
@@ -1875,12 +1931,13 @@
               </button>
 
               <button
+                disabled={procesandoTx}
                 onClick={cerrarSemana}
-                className="w-full px-5 py-4 text-left text-sm font-bold flex items-center justify-between text-amber-100 hover:bg-rose-700/90 hover:text-white transition cursor-pointer"
+                className="w-full px-5 py-4 text-left text-sm font-bold flex items-center justify-between text-amber-100 hover:bg-rose-700/90 hover:text-white disabled:opacity-40 transition cursor-pointer"
               >
                 <span className="flex items-center gap-3">
                   <span className="text-base">🔒</span>
-                  <span>Cerrar Semana</span>
+                  <span>{procesandoTx ? "Procesando..." : "Cerrar Semana"}</span>
                 </span>
                 <span className="text-xs opacity-75">‹</span>
               </button>
@@ -1894,7 +1951,7 @@
           {/* CONTENIDO PRINCIPAL */}
           <div className="flex-1 lg:pl-72">
             <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-28">
-              
+
               {conteosListosParaAjustar.length > 0 && (
                 <div className="mb-6 no-print">
                   <button
@@ -2266,7 +2323,7 @@
 
                     <form onSubmit={guardarIncidenteBodega} className="bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-200 space-y-4 mb-6">
                       <h3 className="text-sm font-black text-amber-700 uppercase tracking-wider">➕ Registrar Nuevo Incidente en Bodega</h3>
-                      
+
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="sm:col-span-2 relative">
                           <label className="text-xs font-bold text-slate-600 block mb-1">Código o Nombre del Producto *</label>
@@ -2373,8 +2430,8 @@
                         <input type="text" value={notasBodega} onChange={e => setNotasBodega(e.target.value)} placeholder="Ej: Se abrió para uso en oficina/bodega..." className="w-full bg-white border border-slate-300 focus:border-amber-500 rounded-xl px-4 py-2.5 text-sm text-slate-900 outline-none" />
                       </div>
 
-                      <button type="submit" className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-3 rounded-xl text-xs sm:text-sm shadow-md transition cursor-pointer">
-                        💾 Registrar Incidente Interno
+                      <button type="submit" disabled={procesandoTx} className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 font-black py-3 rounded-xl text-xs sm:text-sm shadow-md transition cursor-pointer">
+                        {procesandoTx ? "⏳ Guardando Incidente..." : "💾 Registrar Incidente Interno"}
                       </button>
                     </form>
 
@@ -2401,10 +2458,11 @@
                             <div className="flex items-center gap-2">
                               {!ib.ajustado ? (
                                 <button
+                                  disabled={procesandoTx}
                                   onClick={() => ajustarIncidenteBodega(ib)}
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition cursor-pointer"
+                                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition cursor-pointer"
                                 >
-                                  ⚖️ Ajustar Inventario (Jefatura)
+                                  {procesandoTx ? "Procesando..." : "⚖️ Ajustar Inventario (Jefatura)"}
                                 </button>
                               ) : (
                                 <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-3 py-2 rounded-xl font-bold">
@@ -2412,8 +2470,9 @@
                                 </span>
                               )}
                               <button
+                                disabled={procesandoTx}
                                 onClick={() => eliminarIncidenteBodega(ib.id)}
-                                className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-2 rounded-xl font-bold transition cursor-pointer"
+                                className="bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 border border-rose-200 px-3 py-2 rounded-xl font-bold transition cursor-pointer"
                                 title="Eliminar registro"
                               >
                                 🗑️
@@ -2566,8 +2625,8 @@
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                       Mostrando {incidenciasFiltradas.length} registros
                     </span>
-                    <button onClick={cerrarSemana} className="bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-300 text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer lg:hidden">
-                      🔒 Cerrar y Archivar Semana
+                    <button disabled={procesandoTx} onClick={cerrarSemana} className="bg-rose-50 hover:bg-rose-600 hover:text-white disabled:opacity-40 text-rose-700 border border-rose-300 text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer lg:hidden">
+                      {procesandoTx ? "⏳ Cerrando..." : "🔒 Cerrar y Archivar Semana"}
                     </button>
                   </div>
 
@@ -2707,7 +2766,7 @@
                                   ) : estaRecibiendo ? (
                                     <div className="bg-white p-3.5 rounded-xl border border-sky-300 space-y-3 text-xs">
                                       <p className="font-bold text-amber-800">📋 Marque los productos que llegaron completos:</p>
-                                      
+
                                       {retornoFormState.items && retornoFormState.items.map((it, iIdx) => (
                                         <div key={iIdx} className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                                           <label className="flex items-center gap-2.5 cursor-pointer font-black text-slate-900">
@@ -2859,14 +2918,16 @@
 
                                       <div className="flex gap-2 pt-1">
                                         <button
+                                          disabled={procesandoTx}
                                           onClick={() => guardarRecepcionRetornoDirecto(item)}
-                                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 rounded-xl shadow-sm transition cursor-pointer"
+                                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-black py-2 rounded-xl shadow-sm transition cursor-pointer"
                                         >
-                                          💾 Guardar Recepción
+                                          {procesandoTx ? "⏳ Guardando..." : "💾 Guardar Recepción"}
                                         </button>
                                         <button
+                                          disabled={procesandoTx}
                                           onClick={() => setRecibiendoRetornoId(null)}
-                                          className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-xl font-bold cursor-pointer"
+                                          className="bg-slate-200 hover:bg-slate-300 disabled:opacity-40 text-slate-700 px-3 py-2 rounded-xl font-bold cursor-pointer"
                                         >
                                           Cancelar
                                         </button>
@@ -2918,9 +2979,10 @@
                                           <div className="flex items-start gap-2.5">
                                             <input
                                               type="checkbox"
+                                              disabled={procesandoTx}
                                               checked={infoCheck.completado}
                                               onChange={() => toggleCheckAccion(item.id, acc, infoCheck.completado)}
-                                              className="mt-0.5 w-4 h-4 accent-amber-500 cursor-pointer"
+                                              className="mt-0.5 w-4 h-4 accent-amber-500 cursor-pointer disabled:opacity-40"
                                             />
                                             <div>
                                               <p className={`text-xs font-bold ${infoCheck.completado ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>
@@ -2942,14 +3004,14 @@
                             </div>
 
                             <div className="pt-4 mt-3 border-t border-slate-200 flex items-center justify-between gap-2 text-xs">
-                              <button onClick={() => cambiarEstado(item.id, item.resuelto)} className={`px-3.5 py-2 rounded-xl font-bold transition cursor-pointer ${item.resuelto ? "bg-emerald-600 text-white" : "bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-500 hover:text-slate-950"}`}>
+                              <button disabled={procesandoTx} onClick={() => cambiarEstado(item.id, item.resuelto)} className={`px-3.5 py-2 rounded-xl font-bold disabled:opacity-40 transition cursor-pointer ${item.resuelto ? "bg-emerald-600 text-white" : "bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-500 hover:text-slate-950"}`}>
                                 {item.resuelto ? "✅ Incidencia Resuelta" : "⏳ Marcar Todo Resuelto"}
                               </button>
                               <div className="flex items-center gap-1.5">
-                                <button onClick={() => cargarParaEditar(item)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-sky-700 font-semibold rounded-xl cursor-pointer">
+                                <button disabled={procesandoTx} onClick={() => cargarParaEditar(item)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-sky-700 font-semibold rounded-xl cursor-pointer">
                                   ✏️ Editar
                                 </button>
-                                <button onClick={() => eliminarIncidencia(item.id)} className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold rounded-xl cursor-pointer">
+                                <button disabled={procesandoTx} onClick={() => eliminarIncidencia(item.id)} className="px-3 py-2 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 font-semibold rounded-xl cursor-pointer">
                                   🗑️
                                 </button>
                               </div>
@@ -3470,7 +3532,7 @@
                                       </span>
                                     )}
                                   </div>
-                                  <button type="button" onClick={(e) => eliminarProductoCatalogo(cp.id, e)} className="text-rose-600 hover:text-rose-800 text-[10px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer whitespace-nowrap shrink-0">
+                                  <button type="button" disabled={procesandoTx} onClick={(e) => eliminarProductoCatalogo(cp.id, e)} className="text-rose-600 hover:text-rose-800 disabled:opacity-40 text-[10px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer whitespace-nowrap shrink-0">
                                     🗑️ Borrar
                                   </button>
                                 </div>
@@ -3499,7 +3561,7 @@
                             catalogoClientes.map(cc => (
                               <div key={cc.id} className="flex items-center justify-between bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
                                 <span className="font-semibold text-slate-900 truncate pr-2">{cc.nombre}</span>
-                                <button type="button" onClick={(e) => eliminarClienteCatalogo(cc.id, e)} className="text-rose-600 hover:text-rose-800 text-[10px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer whitespace-nowrap">
+                                <button type="button" disabled={procesandoTx} onClick={(e) => eliminarClienteCatalogo(cc.id, e)} className="text-rose-600 hover:text-rose-800 disabled:opacity-40 text-[10px] font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 cursor-pointer whitespace-nowrap">
                                   🗑️ Borrar
                                 </button>
                               </div>
@@ -3539,8 +3601,8 @@
                     <input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: Factura emitida con razón social antigua..." className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm text-slate-900 outline-none" />
                   </div>
 
-                  <button type="submit" className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer">
-                    {editandoId ? "💾 Guardar Cambios" : "✅ Guardar y Sincronizar en Vivo"}
+                  <button type="submit" disabled={procesandoTx} className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer">
+                    {procesandoTx ? "⏳ Guardando y Sincronizando..." : editandoId ? "💾 Guardar Cambios" : "✅ Guardar y Sincronizar en Vivo"}
                   </button>
                 </form>
               )}
@@ -3708,7 +3770,7 @@
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* CONTEO CÍCLICO PENDIENTE */}
                   {modoConteoDigitalActivo ? (
                     <div className="light-card rounded-3xl p-6 sm:p-8 border-2 border-amber-400 space-y-5">
@@ -3718,8 +3780,9 @@
                           <p className="text-xs text-slate-500">Ingresa las cantidades reales contadas (Fase 1: Nico, Edwin o Diego).</p>
                         </div>
                         <button
+                          disabled={procesandoTx}
                           onClick={() => setModoConteoDigitalActivo(false)}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
+                          className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
                         >
                           ✕ Cancelar Conteo Digital
                         </button>
@@ -3748,10 +3811,11 @@
                       </div>
 
                       <button
+                        disabled={procesandoTx}
                         onClick={guardarConteoDigitalBodega}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer"
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-black py-4 rounded-2xl text-sm shadow-md transition cursor-pointer"
                       >
-                        💾 Guardar y Enviar Conteo Digital (Notificar a Jefatura)
+                        {procesandoTx ? "⏳ Guardando Conteo..." : "💾 Guardar y Enviar Conteo Digital (Notificar a Jefatura)"}
                       </button>
                     </div>
                   ) : (
@@ -3823,24 +3887,27 @@
                                     <td className="p-3 text-amber-700 font-bold">#{cp.factura}</td>
                                     <td className="p-3 text-center">
                                       <button
+                                        disabled={procesandoTx}
                                         onClick={() => toggleCheckConteoFisico(cp.id, cp.conteoFisicoHecho)}
-                                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${cp.conteoFisicoHecho ? 'bg-emerald-600 text-white' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+                                        className={`px-3 py-1.5 rounded-xl font-bold text-xs disabled:opacity-40 transition cursor-pointer ${cp.conteoFisicoHecho ? 'bg-emerald-600 text-white' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'}`}
                                       >
                                         {cp.conteoFisicoHecho ? `✓ ${cp.responsableConteo}` : "[ ] Físico Hecho"}
                                       </button>
                                     </td>
                                     <td className="p-3 text-center">
                                       <button
+                                        disabled={procesandoTx}
                                         onClick={() => toggleCheckAjusteSistema(cp.id, cp.ajusteSistemaHecho)}
-                                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-amber-100 border border-amber-400 text-amber-950 hover:bg-amber-500'}`}
+                                        className={`px-3 py-1.5 rounded-xl font-bold text-xs disabled:opacity-40 transition cursor-pointer ${cp.ajusteSistemaHecho ? 'bg-emerald-600 text-white' : 'bg-amber-100 border border-amber-400 text-amber-950 hover:bg-amber-500'}`}
                                       >
                                         {cp.ajusteSistemaHecho ? `✓ ${cp.responsableAjuste}` : "⚖️ Ajustar y Archivar"}
                                       </button>
                                     </td>
                                     <td className="p-3 text-right">
                                       <button
+                                        disabled={procesandoTx}
                                         onClick={() => eliminarItemConteoPendiente(cp.id)}
-                                        className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer"
+                                        className="bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 border border-rose-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer"
                                       >
                                         🗑️
                                       </button>
@@ -4020,8 +4087,9 @@
                                     </button>
                                   )}
                                   <button
+                                    disabled={procesandoTx}
                                     onClick={() => eliminarRegistroHistorialInv(ultimoReg.id)}
-                                    className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-2.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                                    className="bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 border border-rose-200 px-2.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
                                     title="Eliminar registro"
                                   >
                                     🗑️
@@ -4039,8 +4107,9 @@
                                         {ant.detalle && <span className="block text-[10px] text-slate-500 mt-0.5">Motivo/Detalle: {ant.detalle}</span>}
                                       </div>
                                       <button
+                                        disabled={procesandoTx}
                                         onClick={() => eliminarRegistroHistorialInv(ant.id)}
-                                        className="text-rose-600 hover:text-rose-800 text-[11px] font-bold cursor-pointer"
+                                        className="text-rose-600 hover:text-rose-800 disabled:opacity-40 text-[11px] font-bold cursor-pointer"
                                       >
                                         🗑️ Borrar
                                       </button>
