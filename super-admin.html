@@ -27,12 +27,22 @@
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
   </style>
+  <script>
+    window.onerror = function (msg, url, line) {
+      var box = document.getElementById("error-fallback");
+      if (box) {
+        box.style.display = "block";
+        box.innerText = "Error detectado (Línea " + line + "): " + msg;
+      }
+    };
+  </script>
 </head>
 <body class="bg-slate-100 text-slate-900 min-h-screen selection:bg-slate-900 selection:text-white">
+  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:14px; font-size:12px; font-weight:700; border-bottom:2px solid #ef4444;"></div>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -46,6 +56,7 @@
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
+    const FieldValue = firebase.firestore.FieldValue;
 
     const RUT_PGB = "769497226";
     const PIN_MAESTRO = "2026";
@@ -56,6 +67,83 @@
       if (c.length < 2) return c;
       const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
       return `${cuerpo}-${c.slice(-1)}`;
+    };
+
+    const fechaIsoChile = (ts = Date.now()) => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(new Date(ts));
+      } catch (e) {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+    };
+
+    // COMPRESOR AUTOMÁTICO DE LOGOTIPOS PARA NUNCA SUPERAR EL LÍMITE DE 1 MB DE FIRESTORE
+    const comprimirLogoImagen = (file) => {
+      return new Promise((resolve, reject) => {
+        const urlObj = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const MAX_W = 520;
+            const MAX_H = 240;
+            let w = img.naturalWidth || img.width;
+            let h = img.naturalHeight || img.height;
+            const ratio = Math.min(1, MAX_W / w, MAX_H / h);
+            w = Math.max(1, Math.round(w * ratio));
+            h = Math.max(1, Math.round(h * ratio));
+
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(img, 0, 0, w, h);
+
+            // 1. Intenta WebP (mantiene transparencia y pesa muy poco)
+            let dataUrl = canvas.toDataURL("image/webp", 0.85);
+
+            // 2. Si el navegador no soporta WebP, usa PNG
+            if (!dataUrl.startsWith("data:image/webp")) {
+              dataUrl = canvas.toDataURL("image/png");
+            }
+
+            // 3. Si aún pesa más de ~260 KB en Base64, comprime en JPEG con fondo blanco
+            if (dataUrl.length > 350000) {
+              const canvasJpg = document.createElement("canvas");
+              canvasJpg.width = w;
+              canvasJpg.height = h;
+              const ctxJpg = canvasJpg.getContext("2d");
+              ctxJpg.fillStyle = "#ffffff";
+              ctxJpg.fillRect(0, 0, w, h);
+              ctxJpg.drawImage(img, 0, 0, w, h);
+              dataUrl = canvasJpg.toDataURL("image/jpeg", 0.82);
+            }
+
+            URL.revokeObjectURL(urlObj);
+
+            if (dataUrl.length > 480000) {
+              return reject(new Error("La imagen sigue siendo demasiado pesada incluso tras comprimir. Usa un archivo más simple."));
+            }
+
+            const kb = Math.max(1, Math.round((dataUrl.length * 0.75) / 1024));
+            resolve({ dataUrl, kb, w, h });
+          } catch (err) {
+            URL.revokeObjectURL(urlObj);
+            reject(err);
+          }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(urlObj);
+          reject(new Error("No se pudo leer la imagen seleccionada."));
+        };
+        img.src = urlObj;
+      });
     };
 
     const MODULOS_DEFAULT = {
@@ -102,7 +190,7 @@
         items: [
           { key: "m8_omnicanal", code: "M8", label: "Canales Mercado Libre & Falabella" },
           { key: "m9_stock_sync", code: "M9", label: "Descuento Automático de Stock" },
-          { key: "m10_sii_dte", code: "M10", label: "Motor Tributario SII (33 / 39)" },
+          { key: "m10_sii_dte", code: "M10", label: "Motor Tributario SII (33 / 39 / NC 61)" },
           { key: "m11_colas_print", code: "M11", label: "Colas Impresión (Lider aparte)" }
         ]
       },
@@ -120,7 +208,7 @@
           { key: "m15_pos_ventas", code: "M15", label: "Punto de Venta (POS)" },
           { key: "m16_caja_cobros", code: "M16", label: "Cuentas por Cobrar y Arqueo" },
           { key: "m17_compras_prov", code: "M17", label: "Recepción Facturas XML / Proveedores" },
-          { key: "m18_finanzas_bi", code: "M18", label: "Balance y Flujo Financiero" }
+          { key: "m18_finanzas_bi", code: "M18", label: "Balance, Supervisor y Flujo Financiero" }
         ]
       }
     ];
@@ -130,7 +218,12 @@
         type="button"
         role="switch"
         aria-checked={checked}
-        onClick={onChange}
+        onClick={(e) => {
+          if (onChange) {
+            e.stopPropagation();
+            onChange();
+          }
+        }}
         className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
           checked ? "bg-slate-900" : "bg-slate-200"
         }`}
@@ -151,6 +244,8 @@
       const [empresas, setEmpresas] = useState([]);
       const [seleccionadaId, setSeleccionadaId] = useState("");
       const [guardando, setGuardando] = useState(false);
+      const [logoInfoTxt, setLogoInfoTxt] = useState("");
+      const [hayCambiosSinGuardar, setHayCambiosSinGuardar] = useState(false);
 
       // Formulario nueva empresa
       const [crearAbierto, setCrearAbierto] = useState(false);
@@ -161,6 +256,7 @@
 
       // Edición empresa seleccionada
       const [editForm, setEditForm] = useState(null);
+      const ultimoIdCargadoRef = useRef("");
 
       useEffect(() => {
         if (!autorizado) return;
@@ -169,17 +265,24 @@
           const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
           setEmpresas(lista);
-          if (!seleccionadaId && lista.length > 0) {
-            const tecno = lista.find((e) => e.id === "775280425") || lista[0];
-            setSeleccionadaId(tecno.id);
-          }
+          setSeleccionadaId((prev) => {
+            if (prev && lista.some((e) => e.id === prev)) return prev;
+            if (lista.length > 0) {
+              const tecno = lista.find((e) => e.id === "775280425") || lista[0];
+              return tecno.id;
+            }
+            return "";
+          });
         });
         return () => unsub();
       }, [autorizado]);
 
+      // Carga editForm SOLO al cambiar de empresa seleccionada (evita pisar cambios en curso por snapshots externos)
       useEffect(() => {
+        if (!seleccionadaId || seleccionadaId === ultimoIdCargadoRef.current) return;
         const emp = empresas.find((e) => e.id === seleccionadaId);
         if (emp) {
+          ultimoIdCargadoRef.current = seleccionadaId;
           setEditForm({
             id: emp.id,
             nombre: emp.nombre || "",
@@ -189,8 +292,11 @@
             activa: emp.activa !== false,
             temaVisual: emp.temaVisual || "claro_retail",
             logoBase64: emp.logoBase64 || "",
+            tienePinSupervisor: Boolean(emp.pinSupervisorHash || emp.pinSupervisor),
             modulosActivos: { ...MODULOS_DEFAULT, ...(emp.modulosActivos || {}) }
           });
+          setLogoInfoTxt(emp.logoBase64 ? `${Math.max(1, Math.round((emp.logoBase64.length * 0.75) / 1024))} KB` : "");
+          setHayCambiosSinGuardar(false);
         }
       }, [seleccionadaId, empresas]);
 
@@ -211,6 +317,10 @@
       };
 
       const entrarComoEmpresa = (rutId) => {
+        if (hayCambiosSinGuardar) {
+          const seguir = confirm("Tienes cambios sin guardar en esta empresa. ¿Deseas salir sin guardarlos?");
+          if (!seguir) return;
+        }
         const rutLimpio = limpiarRut(rutId);
         sessionStorage.removeItem("nexus_admin_ok");
         localStorage.setItem("nexus_empresa_rut", rutLimpio);
@@ -226,6 +336,7 @@
         e.preventDefault();
         const rutLimpio = limpiarRut(nuevoRut);
         if (rutLimpio.length < 7 || !nuevoNombre.trim()) return alert("Completa nombre y RUT válido.");
+        const ahora = Date.now();
         await db.collection("saas_empresas").doc(rutLimpio).set({
           nombre: nuevoNombre.trim().toUpperCase(),
           rut: formatearRut(rutLimpio),
@@ -234,8 +345,10 @@
           activa: true,
           temaVisual: "claro_retail",
           modulosActivos: { ...MODULOS_DEFAULT },
-          creadoTs: Date.now()
+          fechaCreacion: fechaIsoChile(ahora),
+          creadoTs: ahora
         }, { merge: true });
+        ultimoIdCargadoRef.current = "";
         setSeleccionadaId(rutLimpio);
         setCrearAbierto(false);
         setNuevoNombre("");
@@ -243,14 +356,31 @@
         setNuevaClave("");
       };
 
-      const subirLogoEmpresa = (e) => {
+      const subirLogoEmpresa = async (e) => {
         const file = e.target.files[0];
         if (!file || !editForm) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          setEditForm({ ...editForm, logoBase64: reader.result });
-        };
-        reader.readAsDataURL(file);
+        e.target.value = "";
+        try {
+          const res = await comprimirLogoImagen(file);
+          setEditForm({ ...editForm, logoBase64: res.dataUrl });
+          setLogoInfoTxt(`${res.w}×${res.h}px • ${res.kb} KB (Optimizado)`);
+          setHayCambiosSinGuardar(true);
+        } catch (err) {
+          alert("Error al optimizar logo: " + err.message);
+        }
+      };
+
+      const quitarLogoEmpresa = () => {
+        if (!editForm) return;
+        setEditForm({ ...editForm, logoBase64: "" });
+        setLogoInfoTxt("");
+        setHayCambiosSinGuardar(true);
+      };
+
+      const actualizarCampoEdit = (campo, valor) => {
+        if (!editForm) return;
+        setEditForm({ ...editForm, [campo]: valor });
+        setHayCambiosSinGuardar(true);
       };
 
       const toggleSwitch = (key) => {
@@ -262,6 +392,22 @@
             [key]: !editForm.modulosActivos[key]
           }
         });
+        setHayCambiosSinGuardar(true);
+      };
+
+      const restablecerPinSupervisorCliente = async () => {
+        if (!editForm) return;
+        if (!confirm(`¿Restablecer la Clave de Supervisor de ${editForm.nombre} a la clave por defecto (1234)?`)) return;
+        try {
+          await db.collection("saas_empresas").doc(editForm.id).update({
+            pinSupervisorHash: FieldValue.delete(),
+            pinSupervisor: FieldValue.delete()
+          });
+          setEditForm({ ...editForm, tienePinSupervisor: false });
+          alert(`Clave de Supervisor de ${editForm.nombre} restablecida a 1234.`);
+        } catch (err) {
+          alert("Error al restablecer clave: " + err.message);
+        }
       };
 
       const guardarCambiosEmpresa = async () => {
@@ -278,6 +424,7 @@
             logoBase64: editForm.logoBase64,
             modulosActivos: editForm.modulosActivos
           }, { merge: true });
+          setHayCambiosSinGuardar(false);
           alert(`Configuración y switches de ${editForm.nombre} guardados en tiempo real.`);
         } catch (err) {
           alert("Error al guardar: " + err.message);
@@ -301,6 +448,7 @@
                 onChange={(e) => setPinInput(e.target.value)}
                 placeholder="PIN Maestro"
                 className="w-full bg-slate-950 border border-slate-700 rounded-2xl px-4 py-3 text-center text-sm font-extrabold tracking-widest outline-none"
+                autoFocus
                 required
               />
               <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 font-extrabold py-3.5 rounded-2xl text-xs uppercase cursor-pointer">
@@ -359,7 +507,11 @@
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Empresa Configurando</label>
               <select
                 value={seleccionadaId}
-                onChange={(e) => setSeleccionadaId(e.target.value)}
+                onChange={(e) => {
+                  if (hayCambiosSinGuardar && !confirm("Tienes cambios sin guardar. ¿Cambiar de empresa de todos modos?")) return;
+                  ultimoIdCargadoRef.current = "";
+                  setSeleccionadaId(e.target.value);
+                }}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-extrabold text-slate-900"
               >
                 {empresas.map((emp) => (
@@ -383,27 +535,41 @@
           {/* FICHA DE EDICIÓN Y 18 SWITCHES */}
           {editForm && (
             <div className="space-y-4">
+              {hayCambiosSinGuardar && (
+                <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 text-xs">
+                  <span className="font-bold">Tienes cambios pendientes por guardar en {editForm.nombre}.</span>
+                  <button
+                    type="button"
+                    onClick={guardarCambiosEmpresa}
+                    disabled={guardando}
+                    className="bg-slate-900 text-white font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shrink-0"
+                  >
+                    {guardando ? "Guardando..." : "Guardar Ahora"}
+                  </button>
+                </div>
+              )}
+
               <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                   <h2 className="text-sm font-extrabold text-slate-900">Identidad, Clave y Tema Predeterminado</h2>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-600">{editForm.activa ? "Activa" : "Pausada"}</span>
-                    <SwitchItem checked={editForm.activa} onChange={() => setEditForm({ ...editForm, activa: !editForm.activa })} />
+                    <SwitchItem checked={editForm.activa} onChange={() => actualizarCampoEdit("activa", !editForm.activa)} />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] font-bold text-slate-500 block mb-1">Nombre / Razón Social</label>
-                    <input type="text" value={editForm.nombre} onChange={(e) => setEditForm({ ...editForm, nombre: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    <input type="text" value={editForm.nombre} onChange={(e) => actualizarCampoEdit("nombre", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Clave de Acceso</label>
-                    <input type="text" value={editForm.claveAcceso} onChange={(e) => setEditForm({ ...editForm, claveAcceso: e.target.value })} placeholder="Sin clave = acceso por RUT" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Clave de Acceso Portal</label>
+                    <input type="text" value={editForm.claveAcceso} onChange={(e) => actualizarCampoEdit("claveAcceso", e.target.value)} placeholder="Sin clave = acceso por RUT" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-slate-500 block mb-1">Tema Visual Inicial</label>
-                    <select value={editForm.temaVisual} onChange={(e) => setEditForm({ ...editForm, temaVisual: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold">
+                    <select value={editForm.temaVisual} onChange={(e) => actualizarCampoEdit("temaVisual", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold">
                       <option value="claro_retail">Claro Retail & E-Commerce (Predeterminado)</option>
                       <option value="claro_ejecutivo">Claro Ejecutivo (Softland Pro)</option>
                       <option value="oscuro_obsidian">Modo Oscuro Obsidian</option>
@@ -411,17 +577,47 @@
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Logotipo Empresa (PNG / JPG)</label>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                      Logotipo Empresa (Compresión automática anti-límite)
+                    </label>
                     <div className="flex items-center gap-2">
                       <label className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-center cursor-pointer">
                         Subir Logo
                         <input type="file" accept="image/*" onChange={subirLogoEmpresa} className="hidden" />
                       </label>
                       {editForm.logoBase64 && (
-                        <img src={editForm.logoBase64} alt="Logo" className="h-9 w-14 object-contain border border-slate-200 rounded-lg bg-white p-0.5" />
+                        <>
+                          <img src={editForm.logoBase64} alt="Logo" className="h-9 w-14 object-contain border border-slate-200 rounded-lg bg-white p-0.5 shrink-0" />
+                          <button
+                            type="button"
+                            onClick={quitarLogoEmpresa}
+                            className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl px-2.5 py-2 text-xs font-bold cursor-pointer shrink-0"
+                            title="Quitar logo"
+                          >
+                            Quitar
+                          </button>
+                        </>
                       )}
                     </div>
+                    {logoInfoTxt && <p className="text-[10px] font-semibold text-emerald-700 mt-1">Peso optimizado: {logoInfoTxt}</p>}
                   </div>
+                </div>
+
+                {/* RESCATE DE CLAVE DE SUPERVISOR DEL CLIENTE */}
+                <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="font-extrabold text-slate-800 block">Soporte Clave de Supervisor del Cliente</span>
+                    <span className="text-[11px] text-slate-500">
+                      Estado actual: {editForm.tienePinSupervisor ? "Clave personalizada (SHA-256)" : "Clave inicial predeterminada (1234)"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={restablecerPinSupervisorCliente}
+                    className="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-extrabold px-3.5 py-2 rounded-xl text-xs cursor-pointer shrink-0"
+                  >
+                    Restablecer Clave Supervisor (1234)
+                  </button>
                 </div>
               </div>
 
@@ -444,7 +640,7 @@
                             <span className="text-[10px] font-extrabold text-slate-400 block">{sw.code}</span>
                             <span className="text-xs font-extrabold text-slate-900">{sw.label}</span>
                           </div>
-                          <SwitchItem checked={activo} onChange={() => {}} />
+                          <SwitchItem checked={activo} onChange={() => toggleSwitch(sw.key)} />
                         </div>
                       );
                     })}
