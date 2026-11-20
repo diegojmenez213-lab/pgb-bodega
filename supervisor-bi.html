@@ -167,6 +167,7 @@
 
       // Evita sobrescribir comisionesForm si entra una venta mientras se edita
       const comisionesInicializadasRef = useRef(false);
+      const guardandoLockRef = useRef(false);
 
       // Bloqueo por clave de supervisor (en memoria React: al salir se vuelve a bloquear)
       const [desbloqueado, setDesbloqueado] = useState(false);
@@ -243,6 +244,7 @@
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const tienePinPersonalizado = Boolean(empresa?.pinSupervisorHash || empresa?.pinSupervisor);
       const hayFiltroParcialCanales = canalesActivos.length < TODAS_PLATAFORMAS.length;
+      const rangoFechasInvertido = Boolean(fechaDesde && fechaHasta && fechaDesde > fechaHasta);
 
       const validarAccesoSupervisor = async (e) => {
         e.preventDefault();
@@ -551,22 +553,44 @@
         };
       }, [desbloqueado, tabSup, resumenFinanciero, T.dark]);
 
+      // VALIDACIÓN EXPLÍCITA DE PIN (MÍN 4 CARACTERES) + SANEAMIENTO DE COMISIONES + ANTI-DOBLE CLIC
       const guardarSeguridadYComisiones = async (e) => {
         e.preventDefault();
+        if (guardandoLockRef.current) return;
+
+        const pinLimpio = nuevoPin.trim();
+        if (pinLimpio.length > 0 && pinLimpio.length < 4) {
+          return alert("La nueva Clave de Supervisor debe tener al menos 4 caracteres.");
+        }
+
+        const comisionesLimpias = {};
+        TODAS_PLATAFORMAS.forEach((c) => {
+          const val = Number(comisionesForm[c]);
+          comisionesLimpias[c] = Number.isFinite(val) ? Math.max(0, Math.min(100, val)) : COMISIONES_DEFAULT[c];
+        });
+
+        guardandoLockRef.current = true;
         setGuardandoCfg(true);
         try {
-          const payload = { comisionesCanales: comisionesForm };
-          if (nuevoPin.trim().length >= 4) {
-            payload.pinSupervisorHash = await sha256Hex(nuevoPin.trim());
+          const payload = { comisionesCanales: comisionesLimpias };
+          if (pinLimpio.length >= 4) {
+            payload.pinSupervisorHash = await sha256Hex(pinLimpio);
             payload.pinSupervisor = FieldValue.delete();
           }
           await empRef().set(payload, { merge: true });
+          setComisionesForm(comisionesLimpias);
           setNuevoPin("");
-          alert("Configuración de comisiones y clave cifrada (SHA-256) guardada.");
+          alert(
+            pinLimpio.length >= 4
+              ? "Comisiones y nueva Clave de Supervisor cifrada (SHA-256) guardadas."
+              : "Porcentajes de comisiones guardados correctamente."
+          );
         } catch (err) {
           alert(err.message);
+        } finally {
+          setGuardandoCfg(false);
+          guardandoLockRef.current = false;
         }
-        setGuardandoCfg(false);
       };
 
       if (!empresa) {
@@ -665,36 +689,57 @@
             </div>
 
             {/* BARRA DE RANGO DE FECHAS UNIVERSAL (1 DÍA HASTA 10 AÑOS — HORA CHILE) */}
-            <div className={`${T.card} rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className={`text-xs font-extrabold mr-1 ${T.sub}`}>Periodo:</span>
-                {[
-                  { label: "Hoy", dias: 0 },
-                  { label: "7 Días", dias: 7 },
-                  { label: "30 Días", dias: 30 },
-                  { label: "1 Año", dias: 365 },
-                  { label: "Histórico (10 años)", dias: -1 }
-                ].map((p) => (
-                  <button
-                    key={p.label}
-                    onClick={() => aplicarRangoRapido(p.dias)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.sec}`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
+            <div className={`${T.card} rounded-2xl p-4 space-y-3`}>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className={`text-xs font-extrabold mr-1 ${T.sub}`}>Periodo:</span>
+                  {[
+                    { label: "Hoy", dias: 0 },
+                    { label: "7 Días", dias: 7 },
+                    { label: "30 Días", dias: 30 },
+                    { label: "1 Año", dias: 365 },
+                    { label: "Histórico (10 años)", dias: -1 }
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      onClick={() => aplicarRangoRapido(p.dias)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${T.sec}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 sm:flex items-center gap-2 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <label className={`font-bold ${T.sub}`}>Desde:</label>
+                    <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className={`w-full sm:w-auto rounded-xl px-2.5 py-1.5 font-bold ${T.input}`} />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className={`font-bold ${T.sub}`}>Hasta:</label>
+                    <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className={`w-full sm:w-auto rounded-xl px-2.5 py-1.5 font-bold ${T.input}`} />
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:flex items-center gap-2 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <label className={`font-bold ${T.sub}`}>Desde:</label>
-                  <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className={`w-full sm:w-auto rounded-xl px-2.5 py-1.5 font-bold ${T.input}`} />
+              {rangoFechasInvertido && (
+                <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-rose-500">
+                    La fecha "Desde" ({fechaDesde}) es posterior a "Hasta" ({fechaHasta}). No se mostrarán ventas hasta corregir el rango.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = fechaDesde;
+                      setFechaDesde(fechaHasta);
+                      setFechaHasta(d);
+                    }}
+                    className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs cursor-pointer shrink-0"
+                  >
+                    Invertir fechas
+                  </button>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <label className={`font-bold ${T.sub}`}>Hasta:</label>
-                  <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className={`w-full sm:w-auto rounded-xl px-2.5 py-1.5 font-bold ${T.input}`} />
-                </div>
-              </div>
+              )}
             </div>
 
             {/* PESTAÑAS DE SUPERVISOR */}
@@ -785,18 +830,29 @@
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {TODAS_PLATAFORMAS.map((c) => {
                     const st = resumenFinanciero.porCanal[c];
+                    const ocultaPorFiltro = !canalesActivos.includes(c);
                     const share = resumenFinanciero.ventasBrutas > 0 ? ((st.bruto / resumenFinanciero.ventasBrutas) * 100).toFixed(1) : "0.0";
                     return (
-                      <div key={c} className={`${T.card} rounded-2xl p-4 space-y-1.5`}>
-                        <div className="flex items-center justify-between">
+                      <div key={c} className={`${T.card} rounded-2xl p-4 space-y-1.5 transition ${ocultaPorFiltro ? "opacity-45" : ""}`}>
+                        <div className="flex items-center justify-between gap-2">
                           <span className={`text-xs font-extrabold ${T.main}`}>{c}</span>
-                          <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: CANALES_COLOR[c].bg, color: CANALES_COLOR[c].color }}>
-                            {share}%
-                          </span>
+                          {ocultaPorFiltro ? (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${T.sec}`}>Oculta</span>
+                          ) : (
+                            <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: CANALES_COLOR[c].bg, color: CANALES_COLOR[c].color }}>
+                              {share}%
+                            </span>
+                          )}
                         </div>
                         <p className={`text-xl font-extrabold ${T.main}`}>${st.bruto.toLocaleString("es-CL")}</p>
                         <p className={`text-[11px] ${T.sub}`}>
-                          {st.ordenes} ventas • Comisión ({st.pctComision}%): <strong>${st.comision.toLocaleString("es-CL")}</strong>
+                          {ocultaPorFiltro ? (
+                            "Desmarcada en el filtro superior"
+                          ) : (
+                            <>
+                              {st.ordenes} ventas • Comisión ({st.pctComision}%): <strong>${st.comision.toLocaleString("es-CL")}</strong>
+                            </>
+                          )}
                         </p>
                       </div>
                     );
@@ -929,7 +985,7 @@
               <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
                 <div>
                   <h2 className={`text-sm font-extrabold ${T.main}`}>Registro de Modificaciones Autorizadas por Supervisor ({auditoriaInv.length})</h2>
-                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre, SKU, cuarentena o se carga una factura de compra con clave de supervisor, queda respaldado aquí.</p>
+                  <p className={`text-xs ${T.sub}`}>Cada vez que se edita stock, nombre, SKU, cuarentena, devolución o se carga una factura de compra con clave de supervisor, queda respaldado aquí.</p>
                 </div>
                 {auditoriaInv.length === 0 ? (
                   <p className={`text-xs text-center py-8 ${T.sub}`}>Aún no se han registrado modificaciones autorizadas de inventario.</p>
@@ -966,6 +1022,11 @@
                     placeholder="Dejar vacío para mantener la clave actual"
                     className={`w-full rounded-xl px-3.5 py-2.5 text-xs font-bold ${T.input}`}
                   />
+                  {nuevoPin.trim().length > 0 && nuevoPin.trim().length < 4 && (
+                    <p className="text-[11px] font-bold text-rose-500">
+                      La clave debe tener al menos 4 caracteres.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2.5">
@@ -979,9 +1040,9 @@
                             type="number"
                             step="0.1"
                             min="0"
-                            max="50"
+                            max="100"
                             value={comisionesForm[c]}
-                            onChange={(e) => setComisionesForm({ ...comisionesForm, [c]: Number(e.target.value) })}
+                            onChange={(e) => setComisionesForm({ ...comisionesForm, [c]: e.target.value })}
                             className={`w-20 rounded-lg px-2 py-1.5 text-xs font-extrabold text-center ${T.input}`}
                           />
                           <span className="text-xs font-bold">%</span>
@@ -991,7 +1052,7 @@
                   </div>
                 </div>
 
-                <button type="submit" disabled={guardandoCfg} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
+                <button type="submit" disabled={guardandoCfg} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer disabled:opacity-40 ${T.btn}`}>
                   {guardandoCfg ? "Guardando..." : "Guardar Clave Cifrada y Comisiones"}
                 </button>
               </form>
