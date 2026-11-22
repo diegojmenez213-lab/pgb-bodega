@@ -76,7 +76,9 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    const NEXUS_API_BASE = "https://pgb-bodega.vercel.app/api";
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -100,6 +102,12 @@
       return `${cuerpo}-${c.slice(-1)}`;
     };
 
+    const CANAL_LABEL = {
+      meli: "Mercado Libre",
+      falabella: "Falabella",
+      lider: "Lider"
+    };
+
     const PALETAS = {
       ejecutivo: { btn: "bg-slate-900 hover:bg-slate-800 text-white", tag: "bg-slate-100 text-slate-800", border: "border-slate-900", sw: "bg-slate-900" },
       ecommerce: { btn: "bg-blue-700 hover:bg-blue-800 text-white", tag: "bg-blue-50 text-blue-800", border: "border-blue-700", sw: "bg-blue-700" },
@@ -109,35 +117,35 @@
 
     const AYUDA_APIS = {
       sii: {
-        titulo: "Cómo obtener tu API Key en OpenFactura / SII",
+        titulo: "Cómo conectar tu proveedor SII (OpenFactura / SimpleFactura / Otros)",
         pasos: [
-          "1. Inicia sesión en tu portal de OpenFactura (Haulmer) o tu proveedor DTE autorizado por el SII.",
-          "2. Ve al menú Configuración → Integraciones / API Keys.",
-          "3. Copia tu API Key de Producción. OpenFactura asignará automáticamente tus folios CAF (33 y 39) en cada emisión."
+          "1. Inicia sesión en el portal de tu proveedor DTE autorizado por el SII.",
+          "2. Ve a Configuración → Integraciones / API Keys y copia tu llave.",
+          "3. Recomendado: empieza en ambiente 'Certificación (Pruebas)' antes de pasar a Producción."
         ]
       },
       meli: {
-        titulo: "Cómo obtener Client ID y Secret en Mercado Libre",
+        titulo: "Cómo conectar Mercado Libre Chile (OAuth2)",
         pasos: [
           "1. Entra a developers.mercadolibre.cl con la cuenta principal de la tienda.",
-          "2. Abre 'Mis Aplicaciones' → 'Crear nueva aplicación' (permisos: Órdenes, Ítems y Facturación).",
-          "3. Copia el App ID (Client ID) y el Client Secret generados en la ficha de la app."
+          "2. Copia tu App ID (Client ID) y Client Secret con permisos de Órdenes y Facturación.",
+          "3. Pega tu Refresh Token (o Access Token inicial). El backend renovará los tokens automáticamente y los guardará cifrados."
         ]
       },
       falabella: {
         titulo: "Cómo obtener API Key en Falabella Seller Center",
         pasos: [
           "1. Ingresa a sellercenter.falabella.com con usuario administrador.",
-          "2. Haz clic en Configuración (arriba a la derecha) → 'Administrar Usuarios'.",
-          "3. Copia el Correo (User ID) y la columna 'API Key' de tu usuario."
+          "2. Ve a Configuración → Administrar Usuarios.",
+          "3. Copia el Correo (User ID) y la columna 'API Key'. El backend firmará las peticiones con HMAC-SHA256."
         ]
       },
       lider: {
-        titulo: "Cómo obtener el Token en Lider / Walmart Marketplace",
+        titulo: "Cómo conectar Lider / Walmart Marketplace",
         pasos: [
-          "1. Entra a marketplace.walmartchile.cl (Seller Center Lider).",
+          "1. Entra a tu portal Seller Center de Lider / Walmart Chile.",
           "2. Dirígete a Configuración → Credenciales API / Integración.",
-          "3. Genera o copia el Client Secret / Token de acceso."
+          "3. Copia tu Client ID y Client Secret para generar tokens OAuth2 automáticos."
         ]
       }
     };
@@ -174,7 +182,7 @@
 
     const HojaDocumentoOficialSii = ({ orden, empresa, datosEmisor }) => {
       if (!orden) return null;
-      const esFactura = orden.tipoDte === 33;
+      const esFactura = Number(orden.tipoDte) === 33;
       const total = Number(orden.totalClp || 0);
       const neto = Math.round(total / 1.19);
       const iva = total - neto;
@@ -193,9 +201,7 @@
                 <p className="text-base font-extrabold uppercase tracking-tight">
                   {(empresa?.nombre || "EMPRESA").toUpperCase()}
                 </p>
-                <p className="text-[11px] uppercase">
-                  Giro: {datosEmisor.giro || "COMERCIAL"}
-                </p>
+                <p className="text-[11px] uppercase">Giro: {datosEmisor.giro || "COMERCIAL"}</p>
                 <p className="text-[11px] uppercase">
                   Casa Matriz: {datosEmisor.direccion || "SANTIAGO"}, {datosEmisor.comuna || "Santiago"}
                 </p>
@@ -218,12 +224,8 @@
                 <span><strong>R.U.T.:</strong> {orden.rutComprador || "S/I"}</span>
                 <span><strong>Forma de Pago:</strong> Contado</span>
               </div>
-              <div>
-                <span><strong>Giro:</strong> Comercial</span>
-              </div>
-              <div>
-                <span><strong>Dirección:</strong> {orden.direccionCliente || "Santiago"}</span>
-              </div>
+              <div><span><strong>Giro:</strong> {orden.giroComprador || "Comercial"}</span></div>
+              <div><span><strong>Dirección:</strong> {orden.direccionCliente || "Santiago"}</span></div>
             </div>
 
             <div className="mt-5">
@@ -339,14 +341,38 @@
       const [catalogo, setCatalogo] = useState([]);
       const [ordenes, setOrdenes] = useState([]);
 
-      const [apisForm, setApisForm] = useState({
+      // Estado de sesión real con backend Vercel
+      const [sesionBackendLista, setSesionBackendLista] = useState(false);
+      const [verificandoSesion, setVerificandoSesion] = useState(true);
+      const [mostrarModalAuthBackend, setMostrarModalAuthBackend] = useState(false);
+      const [modoAuthBackend, setModoAuthBackend] = useState("empresa"); // "empresa" | "superAdmin"
+      const [claveAuthBackend, setClaveAuthBackend] = useState("");
+      const [errorAuthBackend, setErrorAuthBackend] = useState("");
+      const [autenticandoBackend, setAutenticandoBackend] = useState(false);
+
+      // Estado real desde Vercel (/api/sii/estado y /api/marketplaces/estado)
+      const [estadoBackendSii, setEstadoBackendSii] = useState(null);
+      const [estadoBackendMkt, setEstadoBackendMkt] = useState(null);
+      const [ordenesRealesMkt, setOrdenesRealesMkt] = useState([]);
+      const [cargandoMkt, setCargandoMkt] = useState(false);
+      const [sincronizandoCanal, setSincronizandoCanal] = useState(null);
+      const [emitiendoDocId, setEmitiendoDocId] = useState(null);
+      const [tipoOverridePorDoc, setTipoOverridePorDoc] = useState({});
+      const [avisoOperacion, setAvisoOperacion] = useState(null); // { tipo: "ok"|"error", texto }
+
+      // Formulario Bóveda Cifrada (nunca se guarda en texto plano en Firestore)
+      const [vaultForm, setVaultForm] = useState({
+        siiProveedor: "openfactura",
+        siiAmbiente: "certificacion",
+        siiApiKey: "",
         meliClientId: "",
         meliSecret: "",
+        meliRefreshToken: "",
+        meliSellerId: "",
         falabellaUser: "",
         falabellaApiKey: "",
-        liderApiKey: "",
-        siiProveedor: "OpenFactura (Haulmer)",
-        siiApiKey: "",
+        liderClientId: "",
+        liderClientSecret: "",
         siiModoAutomatico: false
       });
 
@@ -367,6 +393,7 @@
       });
 
       const [tab, setTab] = useState("ordenes");
+      const [subTabOrdenes, setSubTabOrdenes] = useState("borradores"); // "borradores" | "historial"
       const [filtroCanal, setFiltroCanal] = useState("TODOS");
       const [busqueda, setBusqueda] = useState("");
       const [busquedaImpresas, setBusquedaImpresas] = useState("");
@@ -383,7 +410,55 @@
       const [skuSeleccionado, setSkuSeleccionado] = useState("");
       const [cantidadNueva, setCantidadNueva] = useState(1);
       const [totalNuevo, setTotalNuevo] = useState(19990);
+      const [emitirViaBackendManual, setEmitirViaBackendManual] = useState(false);
 
+      // Helper seguro de llamadas autenticadas al backend en Vercel
+      const nexusFetch = useCallback(async (path, options = {}) => {
+        const user = auth.currentUser;
+        if (!user || user.isAnonymous) {
+          throw new Error("Activa primero tu Sesión Segura del Servidor para operar con la bóveda y APIs reales.");
+        }
+        const idToken = await user.getIdToken();
+        const headers = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+          "x-tenant-rut": rutActivo,
+          ...(options.headers || {})
+        };
+        const resp = await fetch(`${NEXUS_API_BASE}${path}`, { ...options, headers });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) {
+          throw new Error(data.error || `Error del servidor (${resp.status})`);
+        }
+        return data;
+      }, [rutActivo]);
+
+      const refrescarEstadoYOrdenesBackend = useCallback(async () => {
+        const user = auth.currentUser;
+        if (!user || user.isAnonymous) return;
+        setCargandoMkt(true);
+        try {
+          const [siiData, mktData, ordData] = await Promise.all([
+            nexusFetch("/sii/estado", { method: "GET" }).catch(() => null),
+            nexusFetch("/marketplaces/estado", { method: "GET" }).catch(() => null),
+            nexusFetch("/marketplaces/ordenes?limite=60", { method: "GET" }).catch(() => null)
+          ]);
+          if (siiData) {
+            setEstadoBackendSii(siiData);
+            setVaultForm((prev) => ({
+              ...prev,
+              siiProveedor: siiData.proveedor || prev.siiProveedor,
+              siiAmbiente: siiData.ambiente || prev.siiAmbiente
+            }));
+          }
+          if (mktData) setEstadoBackendMkt(mktData.canales || null);
+          if (ordData) setOrdenesRealesMkt(Array.isArray(ordData.ordenes) ? ordData.ordenes : []);
+        } finally {
+          setCargandoMkt(false);
+        }
+      }, [nexusFetch]);
+
+      // Inicialización de sesión Firebase (priorizando Custom Token real) + listeners Firestore
       useEffect(() => {
         if (!rutActivo) {
           window.location.replace("index.html");
@@ -391,7 +466,9 @@
         }
 
         let unsubs = [];
-        const conectar = () => {
+        let cancelado = false;
+
+        const conectarFirestore = () => {
           const empRef = db.collection("saas_empresas").doc(rutActivo);
 
           const u1 = empRef.onSnapshot((doc) => {
@@ -403,9 +480,11 @@
                 return;
               }
               setEmpresa(data);
-              if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
               if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
               if (data.cafConfig) setCafConfig((prev) => ({ ...prev, ...data.cafConfig }));
+              if (typeof data.siiModoAutomatico === "boolean") {
+                setVaultForm((prev) => ({ ...prev, siiModoAutomatico: data.siiModoAutomatico }));
+              }
             } else {
               localStorage.removeItem("nexus_empresa_rut");
               window.location.replace("index.html");
@@ -435,9 +514,43 @@
           unsubs = [u1, u2, u3];
         };
 
-        auth.signInAnonymously().then(conectar).catch(conectar);
-        return () => unsubs.forEach((fn) => typeof fn === "function" && fn());
-      }, [rutActivo]);
+        const iniciarAuth = async () => {
+          try {
+            const pendingToken = sessionStorage.getItem("nexus_custom_token");
+            if (pendingToken) {
+              await auth.signInWithCustomToken(pendingToken);
+              sessionStorage.removeItem("nexus_custom_token");
+            }
+          } catch (err) {
+            console.warn("No se pudo aplicar customToken guardado:", err.message);
+          }
+
+          const unsubAuth = auth.onAuthStateChanged(async (user) => {
+            if (cancelado) return;
+            if (!user) {
+              try {
+                await auth.signInAnonymously();
+              } catch (_) {}
+              return;
+            }
+            const tieneTokenReal = !user.isAnonymous;
+            setSesionBackendLista(tieneTokenReal);
+            setVerificandoSesion(false);
+            if (!unsubs.length) conectarFirestore();
+            if (tieneTokenReal) {
+              refrescarEstadoYOrdenesBackend();
+            }
+          });
+
+          unsubs.push(unsubAuth);
+        };
+
+        iniciarAuth();
+        return () => {
+          cancelado = true;
+          unsubs.forEach((fn) => typeof fn === "function" && fn());
+        };
+      }, [rutActivo, refrescarEstadoYOrdenesBackend]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
       const catRef = () =>
@@ -446,35 +559,294 @@
           : empRef().collection("catalogo");
 
       const estadoConexiones = useMemo(() => {
-        const a = empresa?.apis || {};
         return {
-          meli: Boolean(a.meliClientId && a.meliSecret),
-          falabella: Boolean(a.falabellaUser && a.falabellaApiKey),
-          lider: Boolean(a.liderApiKey),
-          sii: Boolean(a.siiApiKey)
+          meli: Boolean(estadoBackendMkt?.meli?.conectado),
+          falabella: Boolean(estadoBackendMkt?.falabella?.conectado),
+          lider: Boolean(estadoBackendMkt?.lider?.conectado),
+          sii: Boolean(estadoBackendSii?.conectado)
         };
-      }, [empresa]);
+      }, [estadoBackendMkt, estadoBackendSii]);
 
-      const pilotoAutomaticoActivo = Boolean(apisForm.siiModoAutomatico);
+      const pilotoAutomaticoActivo = Boolean(vaultForm.siiModoAutomatico);
       const faltanCredencialesCriticas = !estadoConexiones.sii || (!estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
-      const guardarCredencialesEmpresa = async (e) => {
+      const activarSesionBackend = async (e) => {
         e.preventDefault();
-        setGuardandoApis(true);
+        setAutenticandoBackend(true);
+        setErrorAuthBackend("");
         try {
-          await empRef().set({ apis: apisForm, datosEmisor }, { merge: true });
-          alert("Credenciales API y datos tributarios guardados.");
+          const endpoint = modoAuthBackend === "superAdmin"
+            ? `${NEXUS_API_BASE}/auth/login-super-admin`
+            : `${NEXUS_API_BASE}/auth/login-empresa`;
+          const body = modoAuthBackend === "superAdmin"
+            ? { pin: claveAuthBackend.trim(), clave: claveAuthBackend.trim() }
+            : { rut: rutActivo, clave: claveAuthBackend };
+
+          const resp = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok || !data.customToken) {
+            throw new Error(data.error || "Credencial rechazada por el servidor.");
+          }
+
+          await auth.signInWithCustomToken(data.customToken);
+          setClaveAuthBackend("");
+          setMostrarModalAuthBackend(false);
+          setSesionBackendLista(true);
+          setAvisoOperacion({ tipo: "ok", texto: "Sesión segura activada. Conectado a la bóveda AES-256 y APIs en Vercel." });
+          await refrescarEstadoYOrdenesBackend();
         } catch (err) {
-          alert("Error al guardar: " + err.message);
+          setErrorAuthBackend(err.message || "Error conectando con el servidor.");
+        } finally {
+          setAutenticandoBackend(false);
         }
-        setGuardandoApis(false);
+      };
+
+      const guardarCredencialesEnBoveda = async (e) => {
+        e.preventDefault();
+        if (!sesionBackendLista) {
+          setMostrarModalAuthBackend(true);
+          return;
+        }
+        setGuardandoApis(true);
+        setAvisoOperacion(null);
+        try {
+          const guardados = [];
+
+          // 1. SII en bóveda cifrada
+          if (vaultForm.siiApiKey.trim()) {
+            await nexusFetch("/auth/guardar-credenciales", {
+              method: "POST",
+              body: JSON.stringify({
+                servicio: "sii",
+                proveedor: vaultForm.siiProveedor,
+                ambiente: vaultForm.siiAmbiente,
+                credenciales: { apiKey: vaultForm.siiApiKey.trim() },
+                metadatos: {
+                  razonSocial: empresa?.nombre || "",
+                  giro: datosEmisor.giro,
+                  direccion: datosEmisor.direccion,
+                  comuna: datosEmisor.comuna
+                }
+              })
+            });
+            guardados.push(`SII (${vaultForm.siiProveedor} / ${vaultForm.siiAmbiente})`);
+          }
+
+          // 2. Mercado Libre en bóveda cifrada
+          if (vaultForm.meliClientId.trim() || vaultForm.meliSecret.trim() || vaultForm.meliRefreshToken.trim()) {
+            const credsMeli = {};
+            if (vaultForm.meliClientId.trim()) credsMeli.clientId = vaultForm.meliClientId.trim();
+            if (vaultForm.meliSecret.trim()) credsMeli.clientSecret = vaultForm.meliSecret.trim();
+            if (vaultForm.meliRefreshToken.trim()) credsMeli.refreshToken = vaultForm.meliRefreshToken.trim();
+            if (vaultForm.meliSellerId.trim()) credsMeli.sellerId = vaultForm.meliSellerId.trim();
+
+            await nexusFetch("/auth/guardar-credenciales", {
+              method: "POST",
+              body: JSON.stringify({
+                servicio: "meli",
+                proveedor: "mercadolibre",
+                ambiente: "produccion",
+                credenciales: credsMeli,
+                metadatos: {
+                  sellerId: vaultForm.meliSellerId.trim() || "",
+                  autoEmitir: false // Siempre arranca en Modo Borrador seguro
+                }
+              })
+            });
+            guardados.push("Mercado Libre");
+          }
+
+          // 3. Falabella en bóveda cifrada
+          if (vaultForm.falabellaUser.trim() && vaultForm.falabellaApiKey.trim()) {
+            await nexusFetch("/auth/guardar-credenciales", {
+              method: "POST",
+              body: JSON.stringify({
+                servicio: "falabella",
+                proveedor: "falabella",
+                ambiente: "produccion",
+                credenciales: {
+                  userId: vaultForm.falabellaUser.trim(),
+                  apiKey: vaultForm.falabellaApiKey.trim()
+                },
+                metadatos: { autoEmitir: false }
+              })
+            });
+            guardados.push("Falabella");
+          }
+
+          // 4. Lider / Walmart en bóveda cifrada
+          if (vaultForm.liderClientId.trim() && vaultForm.liderClientSecret.trim()) {
+            await nexusFetch("/auth/guardar-credenciales", {
+              method: "POST",
+              body: JSON.stringify({
+                servicio: "lider",
+                proveedor: "walmart_chile",
+                ambiente: "produccion",
+                credenciales: {
+                  clientId: vaultForm.liderClientId.trim(),
+                  clientSecret: vaultForm.liderClientSecret.trim()
+                },
+                metadatos: { autoEmitir: false }
+              })
+            });
+            guardados.push("Lider");
+          }
+
+          // Guardar datos públicos del emisor (sin secretos)
+          await empRef().set({ datosEmisor }, { merge: true });
+
+          // Limpiar inputs de secretos en memoria del navegador tras cifrar
+          setVaultForm((prev) => ({
+            ...prev,
+            siiApiKey: "",
+            meliSecret: "",
+            meliRefreshToken: "",
+            falabellaApiKey: "",
+            liderClientSecret: ""
+          }));
+
+          await refrescarEstadoYOrdenesBackend();
+          setAvisoOperacion({
+            tipo: "ok",
+            texto: guardados.length
+              ? `Cifrado AES-256 guardado correctamente para: ${guardados.join(", ")}.`
+              : "Datos del emisor guardados. Ingresa una API key en algún bloque para actualizar la bóveda cifrada."
+          });
+        } catch (err) {
+          setAvisoOperacion({ tipo: "error", texto: "Error guardando en bóveda: " + err.message });
+        } finally {
+          setGuardandoApis(false);
+        }
+      };
+
+      const sincronizarMarketplacesReales = async (canal = "todos") => {
+        if (!sesionBackendLista) {
+          setMostrarModalAuthBackend(true);
+          return;
+        }
+        setSincronizandoCanal(canal);
+        setAvisoOperacion(null);
+        try {
+          // SIEMPRE en Modo Borrador seguro (autoEmitir: false) al sincronizar manualmente
+          const res = await nexusFetch("/marketplaces/sincronizar", {
+            method: "POST",
+            body: JSON.stringify({ canal, limite: 25, autoEmitir: false })
+          });
+
+          const resumen = Object.entries(res.resultados || {})
+            .map(([c, info]) => {
+              const nombre = CANAL_LABEL[c] || c;
+              if (info.estado === "SIN_CREDENCIALES") return `${nombre}: sin credenciales`;
+              if (info.estado === "ERROR_CONEXION") return `${nombre}: ERROR (${info.ultimoError})`;
+              return `${nombre}: ${info.totalLeidas || 0} leídas (${info.nuevas || 0} nuevas)`;
+            })
+            .join(" • ");
+
+          await refrescarEstadoYOrdenesBackend();
+          setTab("ordenes");
+          setSubTabOrdenes("borradores");
+          setAvisoOperacion({
+            tipo: "ok",
+            texto: `Sincronización en Modo Borrador completada → ${resumen}`
+          });
+        } catch (err) {
+          setAvisoOperacion({ tipo: "error", texto: err.message });
+        } finally {
+          setSincronizandoCanal(null);
+        }
+      };
+
+      const emitirOrdenRealControlada = async (ord) => {
+        if (!sesionBackendLista) {
+          setMostrarModalAuthBackend(true);
+          return;
+        }
+        const docId = ord.docId || ord.id;
+        const tipoElegido = Number(tipoOverridePorDoc[docId] || ord.tipoDteSugerido || 39);
+        const nombreCanal = CANAL_LABEL[ord.canal] || ord.canal;
+        const tipoTexto = tipoElegido === 33 ? "Factura Electrónica (33)" : "Boleta Electrónica (39)";
+        const provInfo = `${estadoBackendSii?.proveedor || "simulador"} (${estadoBackendSii?.ambiente || "certificacion"})`;
+
+        if (!confirm(`¿Emitir ${tipoTexto} para orden ${nombreCanal} #${ord.orderId} por $${Number(ord.mntTotal || 0).toLocaleString("es-CL")} CLP vía ${provInfo}?`)) {
+          return;
+        }
+
+        setEmitiendoDocId(docId);
+        setAvisoOperacion(null);
+        try {
+          const res = await nexusFetch("/marketplaces/emitir-orden", {
+            method: "POST",
+            body: JSON.stringify({
+              docId,
+              tipoDte: tipoElegido
+            })
+          });
+
+          const dte = res.dte;
+          if (res.yaEmitida) {
+            setAvisoOperacion({ tipo: "ok", texto: `Esta orden ya había sido emitida previamente (bloqueo antiduplicados activo).` });
+          } else if (dte) {
+            // Espejar a ecommerce_ordenes con ID determinista para activar Cola Física Lider y Lotes PDF
+            const ahora = Date.now();
+            const primerItem = Array.isArray(ord.items) && ord.items.length ? ord.items[0] : {};
+            const cantTotal = (ord.items || []).reduce((acc, it) => acc + Number(it.cantidad || 1), 0) || 1;
+            const descItems = (ord.items || []).map((it) => `${it.cantidad}x ${it.nombre}`).join(" + ").slice(0, 140) || primerItem.nombre || "Pedido Marketplace";
+            const esLider = ord.canal === "lider";
+            const esSimulacion = String(dte.proveedorUsado || "").toLowerCase() === "simulador" || dte.ambiente === "certificacion";
+
+            await empRef().collection("ecommerce_ordenes").doc(`mkt_${docId}`).set({
+              canal: nombreCanal,
+              ordenExterna: String(ord.orderId),
+              origenDocId: docId,
+              comprador: ord.receptor?.razonSocial || "Consumidor Final",
+              rutComprador: tipoElegido === 33 ? (ord.receptor?.rut || "") : "",
+              giroComprador: ord.receptor?.giro || "Comercial",
+              direccionCliente: [ord.receptor?.direccion, ord.receptor?.comuna].filter(Boolean).join(", ") || "Santiago",
+              productoId: "marketplace",
+              codigoSku: primerItem.sku || "MKT",
+              productoNombre: descItems,
+              cantidad: cantTotal,
+              totalClp: Number(ord.mntTotal || dte.mntTotal || 0),
+              tipoDte: Number(dte.tipoDte || tipoElegido),
+              folioSii: Number(dte.folio || 0),
+              trackIdSii: dte.trackId || null,
+              estadoSii: dte.estadoSii || "EMITIDO",
+              proveedorUsado: dte.proveedorUsado || "simulador",
+              ambienteSii: dte.ambiente || "certificacion",
+              timbradoSii: true,
+              enviadoMarketplace: !esLider,
+              esSimulacion,
+              colaImpresion: esLider ? "lider" : "general",
+              etiquetaImpresa: false,
+              despachado: false,
+              fechaIso: new Date(ahora).toISOString().slice(0, 10),
+              horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+              fecha: new Date(ahora).toLocaleString("es-CL"),
+              timestamp: ahora
+            }, { merge: true });
+
+            setAvisoOperacion({
+              tipo: "ok",
+              texto: `${tipoTexto} Folio #${dte.folio} registrada (${dte.estadoSii}). Ya está disponible en Lotes PDF${esLider ? " y en la Cola Física Lider" : ""}.`
+            });
+          }
+
+          await refrescarEstadoYOrdenesBackend();
+        } catch (err) {
+          setAvisoOperacion({ tipo: "error", texto: `Error al emitir orden #${ord.orderId}: ${err.message}` });
+        } finally {
+          setEmitiendoDocId(null);
+        }
       };
 
       const toggleModoAutomaticoSii = async () => {
         const nuevoEstado = !pilotoAutomaticoActivo;
-        const actualizado = { ...apisForm, siiModoAutomatico: nuevoEstado };
-        setApisForm(actualizado);
-        await empRef().set({ apis: actualizado }, { merge: true });
+        setVaultForm((prev) => ({ ...prev, siiModoAutomatico: nuevoEstado }));
+        await empRef().set({ siiModoAutomatico: nuevoEstado }, { merge: true });
       };
 
       const registrarOrdenOmnicanal = async (e) => {
@@ -489,37 +861,64 @@
         const rutLim = limpiarRut(rutCompradorNuevo);
         const esFactura33 = rutLim.length >= 7;
         const tipoDte = esFactura33 ? 33 : 39;
-        const folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
         const esLider = canalNuevo === "Lider";
-        const esRealSii = Boolean(estadoConexiones.sii);
         const ahora = Date.now();
 
-        const nuevaOrden = {
-          canal: canalNuevo,
-          ordenExterna: ordenExtNuevo.trim() || `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
-          comprador: compradorNuevo.trim() || "Cliente Marketplace",
-          rutComprador: esFactura33 ? formatearRut(rutLim) : "",
-          direccionCliente: "Santiago",
-          productoId: prodObj.id,
-          codigoSku: prodObj.codigo || "S/C",
-          productoNombre: prodObj.nombre,
-          cantidad: Number(cantidadNueva),
-          totalClp: Number(totalNuevo),
-          tipoDte,
-          folioSii: folioAsignado,
-          timbradoSii: true,
-          enviadoMarketplace: !esLider,
-          esSimulacion: !esRealSii,
-          colaImpresion: esLider ? "lider" : "general",
-          etiquetaImpresa: false,
-          despachado: false,
-          fechaIso: new Date(ahora).toISOString().slice(0, 10),
-          horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
-          fecha: new Date(ahora).toLocaleString("es-CL"),
-          timestamp: ahora
-        };
+        let folioAsignado = esFactura33 ? cafConfig.factura33Actual : cafConfig.boleta39Actual;
+        let esSimulacion = true;
+        let trackIdSii = null;
+        let estadoSii = "SIMULACION_LOCAL";
 
         try {
+          if (emitirViaBackendManual && sesionBackendLista) {
+            const totalNum = Number(totalNuevo);
+            const cantNum = Math.max(1, Number(cantidadNueva));
+            const netoUnitario = Math.round((totalNum / 1.19) / cantNum);
+            const res = await nexusFetch("/sii/emitir", {
+              method: "POST",
+              body: JSON.stringify({
+                tipoDte,
+                receptorRut: esFactura33 ? formatearRut(rutLim) : "66666666-6",
+                receptorRazon: compradorNuevo.trim() || "Cliente Marketplace",
+                items: [{ nombre: prodObj.nombre, cantidad: cantNum, precioUnitario: netoUnitario }],
+                montoTotal: totalNum
+              })
+            });
+            if (res.dte) {
+              folioAsignado = Number(res.dte.folio || folioAsignado);
+              trackIdSii = res.dte.trackId || null;
+              estadoSii = res.dte.estadoSii || "EMITIDO";
+              esSimulacion = res.dte.proveedorUsado === "simulador" || res.dte.ambiente === "certificacion";
+            }
+          }
+
+          const nuevaOrden = {
+            canal: canalNuevo,
+            ordenExterna: ordenExtNuevo.trim() || `${Math.floor(1000000 + Math.random() * 9000000)}-1`,
+            comprador: compradorNuevo.trim() || "Cliente Marketplace",
+            rutComprador: esFactura33 ? formatearRut(rutLim) : "",
+            direccionCliente: "Santiago",
+            productoId: prodObj.id,
+            codigoSku: prodObj.codigo || "S/C",
+            productoNombre: prodObj.nombre,
+            cantidad: Number(cantidadNueva),
+            totalClp: Number(totalNuevo),
+            tipoDte,
+            folioSii: folioAsignado,
+            trackIdSii,
+            estadoSii,
+            timbradoSii: true,
+            enviadoMarketplace: !esLider,
+            esSimulacion,
+            colaImpresion: esLider ? "lider" : "general",
+            etiquetaImpresa: false,
+            despachado: false,
+            fechaIso: new Date(ahora).toISOString().slice(0, 10),
+            horaCorta: new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }),
+            fecha: new Date(ahora).toLocaleString("es-CL"),
+            timestamp: ahora
+          };
+
           const batch = db.batch();
           batch.set(empRef().collection("ecommerce_ordenes").doc(), nuevaOrden);
 
@@ -528,18 +927,21 @@
             batch.update(catRef().doc(prodObj.id), { stockOnline: nuevoStock });
           }
 
-          const nuevoCaf = {
-            ...cafConfig,
-            factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
-            boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
-          };
-          batch.set(empRef(), { cafConfig: nuevoCaf }, { merge: true });
+          if (!emitirViaBackendManual) {
+            const nuevoCaf = {
+              ...cafConfig,
+              factura33Actual: esFactura33 ? cafConfig.factura33Actual + 1 : cafConfig.factura33Actual,
+              boleta39Actual: !esFactura33 ? cafConfig.boleta39Actual + 1 : cafConfig.boleta39Actual
+            };
+            batch.set(empRef(), { cafConfig: nuevoCaf }, { merge: true });
+          }
 
           await batch.commit();
           setMostrarNuevaOrden(false);
           setOrdenExtNuevo("");
           setCompradorNuevo("");
           setRutCompradorNuevo("");
+          setSubTabOrdenes("historial");
         } catch (err) {
           alert("Error al procesar orden: " + err.message);
         }
@@ -547,7 +949,7 @@
 
       const eliminarSimulacion = async (orden) => {
         if (orden.esSimulacion === false) {
-          return alert("Este documento fue emitido en vivo por el SII y no puede eliminarse por normativa tributaria.");
+          return alert("Este documento fue emitido en producción en el SII y no puede eliminarse por normativa tributaria.");
         }
         if (!confirm(`¿Eliminar la simulación ${orden.tipoDte === 33 ? "Factura 33" : "Boleta 39"} #${orden.folioSii}?`)) return;
         const batch = db.batch();
@@ -574,7 +976,7 @@
       const guardarNuevosFoliosCaf = async (e) => {
         e.preventDefault();
         await empRef().set({ cafConfig, datosEmisor }, { merge: true });
-        alert("Datos tributarios guardados.");
+        setAvisoOperacion({ tipo: "ok", texto: "Datos tributarios del emisor guardados." });
       };
 
       const ordenesSinImprimirCronologicas = useMemo(() => {
@@ -658,6 +1060,26 @@
         });
       }, [ordenes, filtroCanal, busqueda]);
 
+      const ordenesRealesFiltradas = useMemo(() => {
+        const q = busqueda.trim().toLowerCase();
+        return ordenesRealesMkt.filter((o) => {
+          const nombreCanal = CANAL_LABEL[o.canal] || o.canal;
+          if (filtroCanal !== "TODOS" && nombreCanal !== filtroCanal) return false;
+          if (!q) return true;
+          return (
+            String(o.orderId || "").toLowerCase().includes(q) ||
+            String(o.receptor?.razonSocial || "").toLowerCase().includes(q) ||
+            String(o.receptor?.rut || "").toLowerCase().includes(q) ||
+            String(o.dteFolio || "").includes(q)
+          );
+        });
+      }, [ordenesRealesMkt, filtroCanal, busqueda]);
+
+      const cantidadBorradores = useMemo(
+        () => ordenesRealesMkt.filter((o) => o.estadoFacturacion !== "EMITIDO").length,
+        [ordenesRealesMkt]
+      );
+
       const urlVolver = rutActivo === RUT_PGB ? "pgb-operacion.html" : "empresa-panel.html";
       const tema = PALETAS[empresa?.paleta || "ecommerce"] || PALETAS.ecommerce;
 
@@ -679,6 +1101,68 @@
                   datosEmisor={datosEmisor}
                 />
               ))}
+            </div>
+          )}
+
+          {/* MODAL ACTIVAR SESIÓN SEGURA BACKEND VERCEL */}
+          {mostrarModalAuthBackend && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 no-print">
+              <div className="corp-card rounded-2xl max-w-md w-full p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">Activar Sesión Segura del Servidor</h3>
+                    <p className="text-[11px] text-slate-500">Requerida para bóveda AES-256, marketplaces reales y motor SII.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarModalAuthBackend(false)}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2 py-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setModoAuthBackend("empresa")}
+                    className={`py-2 rounded-lg text-xs font-bold cursor-pointer ${modoAuthBackend === "empresa" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
+                  >
+                    Clave Empresa ({formatearRut(rutActivo)})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoAuthBackend("superAdmin")}
+                    className={`py-2 rounded-lg text-xs font-bold cursor-pointer ${modoAuthBackend === "superAdmin" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
+                  >
+                    PIN Maestro
+                  </button>
+                </div>
+
+                {errorAuthBackend && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold p-3 rounded-xl">
+                    {errorAuthBackend}
+                  </div>
+                )}
+
+                <form onSubmit={activarSesionBackend} className="space-y-3">
+                  <input
+                    type="password"
+                    value={claveAuthBackend}
+                    onChange={(e) => setClaveAuthBackend(e.target.value)}
+                    placeholder={modoAuthBackend === "superAdmin" ? "Ingresa PIN de Super Admin" : "Ingresa la clave de tu empresa"}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    disabled={autenticandoBackend}
+                    className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}
+                  >
+                    {autenticandoBackend ? "Verificando con Vercel..." : "Conectar Sesión Segura"}
+                  </button>
+                </form>
+              </div>
             </div>
           )}
 
@@ -760,6 +1244,7 @@
           )}
 
           <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-24 space-y-5 no-print">
+            {/* CABECERA CORPORATIVA */}
             <div className={`corp-card rounded-2xl p-5 sm:p-7 border-t-4 ${tema.border} flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
               <div className="flex items-center gap-3.5">
                 {empresa?.logoBase64 && (
@@ -775,6 +1260,11 @@
                     <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${tema.tag}`}>
                       {empresa?.nombre || "Empresa"} • {empresa?.rut || formatearRut(rutActivo)}
                     </span>
+                    <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                      sesionBackendLista ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                    }`}>
+                      {verificandoSesion ? "Verificando API..." : sesionBackendLista ? "Backend Conectado" : "Sesión Local"}
+                    </span>
                   </div>
                   <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
                     E-Commerce Omnicanal & Facturación SII
@@ -783,15 +1273,14 @@
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                <div className={`px-3.5 py-2.5 rounded-xl border flex items-center gap-2.5 ${pilotoAutomaticoActivo ? "bg-emerald-50 border-emerald-300" : "bg-slate-100 border-slate-300"}`}>
-                  <div>
-                    <span className="text-[10px] font-extrabold uppercase block text-slate-700">Piloto Automático</span>
-                    <span className={`text-[11px] font-bold ${pilotoAutomaticoActivo ? "text-emerald-700" : "text-slate-500"}`}>
-                      {pilotoAutomaticoActivo ? "Encendido" : "Pausado (Manual)"}
-                    </span>
-                  </div>
-                  <SwitchToggle checked={pilotoAutomaticoActivo} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
-                </div>
+                <button
+                  type="button"
+                  disabled={Boolean(sincronizandoCanal)}
+                  onClick={() => sincronizarMarketplacesReales("todos")}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-3 rounded-xl cursor-pointer disabled:opacity-60"
+                >
+                  {sincronizandoCanal ? "Sincronizando..." : "↻ Sincronizar Pedidos (Borrador)"}
+                </button>
 
                 <button
                   onClick={() => setMostrarNuevaOrden(!mostrarNuevaOrden)}
@@ -802,6 +1291,40 @@
               </div>
             </div>
 
+            {/* BANNER DE ACTIVACIÓN DE SESIÓN SEGURA SI ENTRÓ ANÓNIMO */}
+            {!verificandoSesion && !sesionBackendLista && (
+              <div className="corp-card rounded-2xl p-4 border-blue-300 bg-blue-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-extrabold text-blue-950 block">
+                    Activa tu Sesión Segura del Servidor (Vercel)
+                  </span>
+                  <span className="text-[11px] text-blue-900/80">
+                    Para cifrar credenciales en la bóveda AES-256, leer pedidos reales de marketplaces y emitir al SII necesitas validar tu sesión con el backend.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalAuthBackend(true)}
+                  className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shrink-0"
+                >
+                  Activar Sesión Segura
+                </button>
+              </div>
+            )}
+
+            {/* AVISO DE OPERACIÓN REAL */}
+            {avisoOperacion && (
+              <div className={`corp-card rounded-2xl p-4 flex items-center justify-between gap-3 text-xs font-bold ${
+                avisoOperacion.tipo === "error"
+                  ? "bg-rose-50 border-rose-300 text-rose-800"
+                  : "bg-emerald-50 border-emerald-300 text-emerald-900"
+              }`}>
+                <span>{avisoOperacion.texto}</span>
+                <button onClick={() => setAvisoOperacion(null)} className="px-2 py-1 opacity-70 hover:opacity-100 cursor-pointer">✕</button>
+              </div>
+            )}
+
+            {/* ALERTA COLA FÍSICA LIDER */}
             {liderPendientesImpresion.length > 0 && (
               <div className="corp-card rounded-2xl p-4 border-2 border-slate-900 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
@@ -824,32 +1347,46 @@
               </div>
             )}
 
-            {faltanCredencialesCriticas && (
+            {/* ALERTA CREDENCIALES PENDIENTES */}
+            {sesionBackendLista && faltanCredencialesCriticas && (
               <div className="corp-card rounded-2xl p-4 border-amber-300 bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <span className="text-xs font-extrabold text-amber-900 block">
-                    Faltan credenciales API por vincular ({!estadoConexiones.sii ? "SII / OpenFactura" : "Canales Marketplace"})
+                    Faltan credenciales cifradas en bóveda ({!estadoConexiones.sii ? "Proveedor SII" : "Canales Marketplace"})
                   </span>
                   <span className="text-[11px] text-slate-600">
-                    Mientras no se conecten las llaves reales, las órdenes se marcan como simulación y se pueden eliminar.
+                    Por seguridad, el sistema trabaja en Modo Borrador y Simulación hasta que cargues las llaves reales en la pestaña 4.
                   </span>
                 </div>
                 <button
                   onClick={() => setTab("credenciales")}
                   className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer shrink-0 ${tema.btn}`}
                 >
-                  Configurar APIs
+                  Configurar Bóveda API
                 </button>
               </div>
             )}
 
+            {/* FORMULARIO MANUAL / SIMULACIÓN */}
             {mostrarNuevaOrden && (
               <form onSubmit={registrarOrdenOmnicanal} className="corp-card rounded-2xl p-5 space-y-4 border-slate-400">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                  <h2 className="text-sm font-extrabold text-slate-900">Nueva Orden (Timbrado SII + Descuento Stock)</h2>
-                  <span className="text-[11px] font-bold text-slate-500">
-                    {limpiarRut(rutCompradorNuevo).length >= 7 ? "Emitirá Factura 33" : "Emitirá Boleta 39"}
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                  <h2 className="text-sm font-extrabold text-slate-900">Nueva Orden Manual / Simulación</h2>
+                  <div className="flex items-center gap-3">
+                    {sesionBackendLista && (
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={emitirViaBackendManual}
+                          onChange={(e) => setEmitirViaBackendManual(e.target.checked)}
+                        />
+                        Enviar a /api/sii/emitir ({estadoBackendSii?.proveedor || "simulador"})
+                      </label>
+                    )}
+                    <span className="text-[11px] font-bold text-slate-500">
+                      {limpiarRut(rutCompradorNuevo).length >= 7 ? "Emitirá Factura 33" : "Emitirá Boleta 39"}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -898,14 +1435,15 @@
                 </div>
 
                 <button type="submit" className={`w-full font-bold py-3 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                  Timbrar {limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"}, Descontar Stock y {canalNuevo === "Lider" ? "Dejar en Cola Física Lider" : "Enviar al Cliente"}
+                  {emitirViaBackendManual ? "Emitir vía Backend SII" : "Registrar Simulación"} ({limpiarRut(rutCompradorNuevo).length >= 7 ? "Factura 33" : "Boleta 39"}) y Descontar Stock
                 </button>
               </form>
             )}
 
+            {/* PESTAÑAS PRINCIPALES */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
               <button onClick={() => setTab("ordenes")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "ordenes" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-                1. Ventas y DTE ({ordenes.length})
+                1. Pedidos & DTE ({ordenesRealesMkt.length + ordenes.length})
               </button>
               <button onClick={() => setTab("impresion")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "impresion" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
                 2. Lotes PDF ({ordenesSinImprimirCronologicas.length})
@@ -914,39 +1452,185 @@
                 3. Stock & Emisor SII
               </button>
               <button onClick={() => setTab("credenciales")} className={`py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer ${tab === "credenciales" ? tema.btn : "text-slate-600 hover:bg-slate-100"}`}>
-                4. API Keys & SII {faltanCredencialesCriticas ? "(!)" : ""}
+                4. Bóveda API & SII {faltanCredencialesCriticas ? "(!)" : ""}
               </button>
             </div>
 
+            {/* TAB 1: PEDIDOS REALES EN BORRADOR + HISTORIAL DTE */}
             {tab === "ordenes" && (
               <div className="space-y-4">
-                <div className="corp-card rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
-                  <input
-                    type="text"
-                    value={busqueda}
-                    onChange={(e) => setBusqueda(e.target.value)}
-                    placeholder="Buscar por orden, cliente, producto o folio..."
-                    className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs font-semibold outline-none"
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {["TODOS", "Mercado Libre", "Falabella", "Lider"].map((c) => (
+                <div className="corp-card rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="inline-flex bg-slate-100 p-1 rounded-xl gap-1">
                       <button
-                        key={c}
-                        onClick={() => setFiltroCanal(c)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
-                          filtroCanal === c ? `${tema.btn} border-transparent` : "bg-slate-50 text-slate-700 border-slate-300"
+                        type="button"
+                        onClick={() => setSubTabOrdenes("borradores")}
+                        className={`px-3.5 py-2 rounded-lg text-xs font-extrabold cursor-pointer ${
+                          subTabOrdenes === "borradores" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"
                         }`}
                       >
-                        {c}
+                        Bandeja Marketplaces Reales ({cantidadBorradores} pendientes)
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={() => setSubTabOrdenes("historial")}
+                        className={`px-3.5 py-2 rounded-lg text-xs font-extrabold cursor-pointer ${
+                          subTabOrdenes === "historial" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"
+                        }`}
+                      >
+                        DTEs Emitidos & Simulaciones ({ordenes.length})
+                      </button>
+                    </div>
+
+                    {subTabOrdenes === "borradores" && sesionBackendLista && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {["meli", "falabella", "lider"].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            disabled={Boolean(sincronizandoCanal)}
+                            onClick={() => sincronizarMarketplacesReales(c)}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                          >
+                            {sincronizandoCanal === c ? "..." : `↻ ${CANAL_LABEL[c]}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      value={busqueda}
+                      onChange={(e) => setBusqueda(e.target.value)}
+                      placeholder="Buscar por orden, cliente, RUT, producto o folio..."
+                      className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs font-semibold outline-none"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {["TODOS", "Mercado Libre", "Falabella", "Lider"].map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setFiltroCanal(c)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                            filtroCanal === c ? `${tema.btn} border-transparent` : "bg-slate-50 text-slate-700 border-slate-300"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {ordenesFiltradas.length === 0 ? (
+                {subTabOrdenes === "borradores" ? (
+                  cargandoMkt ? (
+                    <div className="corp-card rounded-2xl p-10 text-center text-xs font-bold text-slate-500">
+                      Consultando bandeja de pedidos reales en Vercel...
+                    </div>
+                  ) : ordenesRealesFiltradas.length === 0 ? (
+                    <div className="corp-card rounded-2xl p-10 text-center space-y-2">
+                      <h3 className="text-sm font-extrabold text-slate-900">Bandeja de Marketplaces vacía</h3>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        {sesionBackendLista
+                          ? "Cuando conectes tus APIs en '4. Bóveda API & SII' y presiones 'Sincronizar Pedidos (Borrador)', las ventas reales aparecerán aquí sin emitirse al SII hasta que tú lo apruebes."
+                          : "Activa primero tu Sesión Segura del Servidor arriba para consultar tus pedidos reales."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {ordenesRealesFiltradas.map((ord) => {
+                        const docId = ord.docId || ord.id;
+                        const nombreCanal = CANAL_LABEL[ord.canal] || ord.canal;
+                        const yaEmitida = ord.estadoFacturacion === "EMITIDO" || Boolean(ord.dteId);
+                        const tipoSel = Number(tipoOverridePorDoc[docId] || ord.tipoDteSugerido || 39);
+
+                        return (
+                          <div key={docId} className="corp-card rounded-2xl p-5 space-y-3 border border-slate-200">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${tema.tag}`}>
+                                {nombreCanal} • #{ord.orderId}
+                              </span>
+                              <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg ${
+                                yaEmitida
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : ord.estadoFacturacion === "ERROR_EMISION"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-amber-100 text-amber-900"
+                              }`}>
+                                {yaEmitida
+                                  ? `EMITIDO • Folio #${ord.dteFolio || "-"}`
+                                  : ord.estadoFacturacion === "ERROR_EMISION"
+                                  ? "ERROR EMISIÓN"
+                                  : "BORRADOR (Sin enviar a SII)"}
+                              </span>
+                            </div>
+
+                            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                              <p className="text-xs font-extrabold text-slate-900">
+                                {ord.receptor?.razonSocial || "Consumidor Final"}
+                              </p>
+                              <p className="text-[11px] text-slate-600">
+                                RUT: {ord.receptor?.rut || "66666666-6"} • {ord.receptor?.comuna || "Santiago"}
+                              </p>
+                              <div className="pt-1 text-[11px] text-slate-700 space-y-0.5">
+                                {(ord.items || []).slice(0, 3).map((it, idx) => (
+                                  <p key={idx} className="truncate">• {it.cantidad}x {it.nombre}</p>
+                                ))}
+                              </div>
+                              <div className="pt-2 flex flex-wrap gap-3 text-[11px] font-bold text-slate-800 border-t border-slate-200 mt-2">
+                                <span>Neto: ${Number(ord.mntNeto || 0).toLocaleString("es-CL")}</span>
+                                <span>IVA: ${Number(ord.iva || 0).toLocaleString("es-CL")}</span>
+                                <span className="text-slate-950">Total: ${Number(ord.mntTotal || 0).toLocaleString("es-CL")}</span>
+                              </div>
+                            </div>
+
+                            {ord.ultimoErrorEmision && (
+                              <p className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 p-2 rounded-lg">
+                                Último error: {ord.ultimoErrorEmision}
+                              </p>
+                            )}
+
+                            {!yaEmitida ? (
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                                <select
+                                  value={tipoSel}
+                                  onChange={(e) => setTipoOverridePorDoc((prev) => ({ ...prev, [docId]: Number(e.target.value) }))}
+                                  className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold"
+                                >
+                                  <option value={39}>Boleta Electrónica (39)</option>
+                                  <option value={33}>Factura Electrónica (33)</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={emitiendoDocId === docId}
+                                  onClick={() => emitirOrdenRealControlada(ord)}
+                                  className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer disabled:opacity-50 ${tema.btn}`}
+                                >
+                                  {emitiendoDocId === docId ? "Emitiendo..." : `Emitir ${tipoSel === 33 ? "Factura 33" : "Boleta 39"}`}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between text-[11px] font-bold text-emerald-800 bg-emerald-50 px-3 py-2 rounded-xl">
+                                <span>Estado SII: {ord.dteEstadoSii || "EMITIDO"} ({ord.dteProveedor})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSubTabOrdenes("historial")}
+                                  className="underline cursor-pointer"
+                                >
+                                  Ver para imprimir
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : ordenesFiltradas.length === 0 ? (
                   <div className="corp-card rounded-2xl p-10 text-center space-y-2">
                     <h3 className="text-sm font-extrabold text-slate-900">No hay documentos registrados</h3>
-                    <p className="text-xs text-slate-500">Usa "+ Simular / Registrar Orden" arriba para generar una Boleta 39 o Factura 33.</p>
+                    <p className="text-xs text-slate-500">Emite una orden desde la bandeja de marketplaces o usa "+ Simular / Registrar Orden".</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -962,11 +1646,11 @@
                             <div className="flex items-center gap-1.5">
                               {esSimulada ? (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                                  Simulación
+                                  {o.ambienteSii === "certificacion" ? "Certificación" : "Simulación"}
                                 </span>
                               ) : (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                                  SII Real
+                                  SII Producción
                                 </span>
                               )}
                               <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-900 text-white">
@@ -977,7 +1661,7 @@
 
                           <div className="flex flex-wrap gap-1.5">
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                              Timbrada SII
+                              {o.estadoSii || "Timbrada SII"}
                             </span>
                             {esLider ? (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300">
@@ -1043,6 +1727,7 @@
               </div>
             )}
 
+            {/* TAB 2: LOTES PDF (INTACTO) */}
             {tab === "impresion" && (
               <div className="space-y-5">
                 <div className="corp-card rounded-2xl p-6 space-y-5">
@@ -1052,7 +1737,7 @@
                         Cola de Lote PDF — Documentos Nuevos ({ordenesSinImprimirCronologicas.length})
                       </h2>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Aquí solo aparecen las facturas y boletas timbradas que <strong>aún no se han impreso</strong>, ordenadas por hora de llegada (primero la más antigua). Al imprimirlas pasan automáticamente al historial de abajo para nunca repetir.
+                        Aquí solo aparecen las facturas y boletas timbradas que <strong>aún no se han impreso</strong>, ordenadas cronológicamente.
                       </p>
                     </div>
                     {ordenesSinImprimirCronologicas.length > 0 && (
@@ -1107,9 +1792,7 @@
                                   <span className="text-xs font-extrabold text-slate-900">
                                     {o.tipoDte === 33 ? `Factura Electrónica N° ${o.folioSii}` : `Boleta Electrónica N° ${o.folioSii}`}
                                   </span>
-                                  <span className="text-[11px] font-bold text-slate-500">
-                                    • Hora: {horaTexto}
-                                  </span>
+                                  <span className="text-[11px] font-bold text-slate-500">• Hora: {horaTexto}</span>
                                   {o.canal === "Lider" && (
                                     <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-900 text-white">Físico Lider</span>
                                   )}
@@ -1124,9 +1807,7 @@
                               <span className="text-xs font-extrabold text-slate-900 block">
                                 ${Number(o.totalClp || 0).toLocaleString("es-CL")}
                               </span>
-                              <span className="text-[10px] font-bold text-slate-400">
-                                Orden #{index + 1}
-                              </span>
+                              <span className="text-[10px] font-bold text-slate-400">Orden #{index + 1}</span>
                             </div>
                           </div>
                         );
@@ -1209,30 +1890,35 @@
               </div>
             )}
 
+            {/* TAB 3: STOCK & EMISOR */}
             {tab === "stock" && (
               <div className="space-y-5">
                 <form onSubmit={guardarNuevosFoliosCaf} className="corp-card rounded-2xl p-6 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div>
-                      <h2 className="text-sm font-extrabold text-slate-900">Datos Tributarios del Emisor & Automatización SII</h2>
+                      <h2 className="text-sm font-extrabold text-slate-900">Datos Tributarios del Emisor</h2>
                       <p className="text-xs text-slate-500">
-                        Al conectar tu API Key de OpenFactura/SII, los folios CAF (33 y 39) se asignan automáticamente desde tu proveedor DTE.
+                        Estos datos se imprimen en tus boletas/facturas y se envían como metadatos al proveedor SII.
                       </p>
                     </div>
                     <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
-                      <span className="text-xs font-bold">Piloto Automático</span>
+                      <span className="text-xs font-bold">Aviso Automático</span>
                       <SwitchToggle checked={pilotoAutomaticoActivo} onChange={toggleModoAutomaticoSii} colorClass={tema.sw} />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="sm:col-span-2">
+                    <div>
                       <label className="text-[11px] font-bold text-slate-600 block mb-1">Giro Comercial SII</label>
                       <input type="text" value={datosEmisor.giro} onChange={(e) => setDatosEmisor({ ...datosEmisor, giro: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
                     </div>
                     <div>
                       <label className="text-[11px] font-bold text-slate-600 block mb-1">Dirección Casa Matriz</label>
                       <input type="text" value={datosEmisor.direccion} onChange={(e) => setDatosEmisor({ ...datosEmisor, direccion: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Comuna</label>
+                      <input type="text" value={datosEmisor.comuna} onChange={(e) => setDatosEmisor({ ...datosEmisor, comuna: e.target.value })} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
                     </div>
                   </div>
 
@@ -1245,7 +1931,7 @@
                   <h2 className="text-sm font-extrabold text-slate-900">Stock Compartido Multi-Canal ({catalogo.length} productos)</h2>
                   {catalogo.length === 0 ? (
                     <p className="text-xs text-slate-500 bg-slate-50 p-6 rounded-xl text-center">
-                      Carga tus productos desde tu panel principal en la pestaña Catálogo y luego suma stock desde tus facturas XML/SII o aquí mismo.
+                      Carga tus productos desde tu panel principal en la pestaña Catálogo.
                     </p>
                   ) : (
                     <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl">
@@ -1268,56 +1954,107 @@
               </div>
             )}
 
+            {/* TAB 4: BÓVEDA CIFRADA AES-256 (CONECTADA A /api/auth/guardar-credenciales) */}
             {tab === "credenciales" && (
-              <form onSubmit={guardarCredencialesEmpresa} className="corp-card rounded-2xl p-6 space-y-5">
-                <div>
-                  <h2 className="text-base font-extrabold text-slate-900">Credenciales API y Facturación SII</h2>
-                  <p className="text-xs text-slate-500">Presiona el botón <strong>?</strong> en cada bloque si necesitas saber dónde obtener cada llave.</p>
+              <form onSubmit={guardarCredencialesEnBoveda} className="corp-card rounded-2xl p-6 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900">Bóveda Cifrada AES-256 (APIs & Motor SII)</h2>
+                    <p className="text-xs text-slate-500">
+                      Tus claves se cifran en el servidor de Vercel y nunca quedan en texto plano. Solo llena el bloque que quieras guardar o actualizar.
+                    </p>
+                  </div>
+                  {sesionBackendLista && (
+                    <button
+                      type="button"
+                      onClick={refrescarEstadoYOrdenesBackend}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer"
+                    >
+                      ↻ Verificar Estado Real
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* 1. SII */}
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-extrabold uppercase text-slate-800">1. SII / OpenFactura</h3>
-                      <button type="button" onClick={() => setAyudaAbierta("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-extrabold uppercase text-slate-800">1. Proveedor SII</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${estadoConexiones.sii ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
+                          {estadoConexiones.sii ? `Conectado (${estadoBackendSii?.ambiente || "ok"})` : "Sin llave"}
+                        </span>
+                      </div>
+                      <button type="button" onClick={() => setAyudaAbierta("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                     </div>
-                    <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold">
-                      <option>OpenFactura (Haulmer)</option>
-                      <option>SimpleFactura</option>
-                      <option>SII Directo (Certificado .PFX + CAF)</option>
-                    </select>
-                    <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <select value={vaultForm.siiProveedor} onChange={(e) => setVaultForm({ ...vaultForm, siiProveedor: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold">
+                        <option value="openfactura">OpenFactura (Haulmer)</option>
+                        <option value="simplefactura">SimpleFactura</option>
+                        <option value="libredte">LibreDTE</option>
+                        <option value="sii_directo">SII Directo</option>
+                        <option value="simulador">Simulador Interno</option>
+                      </select>
+                      <select value={vaultForm.siiAmbiente} onChange={(e) => setVaultForm({ ...vaultForm, siiAmbiente: e.target.value })} className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold">
+                        <option value="certificacion">Certificación (Pruebas)</option>
+                        <option value="produccion">Producción (Real SII)</option>
+                      </select>
+                    </div>
+                    <input type="password" value={vaultForm.siiApiKey} onChange={(e) => setVaultForm({ ...vaultForm, siiApiKey: e.target.value })} placeholder="Nueva API Key del Proveedor SII" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
 
+                  {/* 2. MERCADO LIBRE */}
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-extrabold uppercase text-slate-800">2. Mercado Libre Chile</h3>
-                      <button type="button" onClick={() => setAyudaAbierta("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-extrabold uppercase text-slate-800">2. Mercado Libre Chile</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${estadoConexiones.meli ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
+                          {estadoConexiones.meli ? "Conectado" : "Sin llave"}
+                        </span>
+                      </div>
+                      <button type="button" onClick={() => setAyudaAbierta("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                     </div>
-                    <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="App ID / Client ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                    <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="text" value={vaultForm.meliClientId} onChange={(e) => setVaultForm({ ...vaultForm, meliClientId: e.target.value })} placeholder="App ID / Client ID" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                      <input type="text" value={vaultForm.meliSellerId} onChange={(e) => setVaultForm({ ...vaultForm, meliSellerId: e.target.value })} placeholder="Seller ID (opcional)" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    </div>
+                    <input type="password" value={vaultForm.meliSecret} onChange={(e) => setVaultForm({ ...vaultForm, meliSecret: e.target.value })} placeholder="Client Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={vaultForm.meliRefreshToken} onChange={(e) => setVaultForm({ ...vaultForm, meliRefreshToken: e.target.value })} placeholder="Refresh Token OAuth2" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
 
+                  {/* 3. FALABELLA */}
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-extrabold uppercase text-slate-800">3. Falabella Seller Center</h3>
-                      <button type="button" onClick={() => setAyudaAbierta("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-extrabold uppercase text-slate-800">3. Falabella Seller Center</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${estadoConexiones.falabella ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
+                          {estadoConexiones.falabella ? "Conectado" : "Sin llave"}
+                        </span>
+                      </div>
+                      <button type="button" onClick={() => setAyudaAbierta("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                     </div>
-                    <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
-                    <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="email" value={vaultForm.falabellaUser} onChange={(e) => setVaultForm({ ...vaultForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center (User ID)" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={vaultForm.falabellaApiKey} onChange={(e) => setVaultForm({ ...vaultForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
 
+                  {/* 4. LIDER */}
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-extrabold uppercase text-slate-800">4. Lider / Walmart Marketplace</h3>
-                      <button type="button" onClick={() => setAyudaAbierta("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer" title="Cómo conseguir API Key">?</button>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-extrabold uppercase text-slate-800">4. Lider / Walmart Marketplace</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${estadoConexiones.lider ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>
+                          {estadoConexiones.lider ? "Conectado" : "Sin llave"}
+                        </span>
+                      </div>
+                      <button type="button" onClick={() => setAyudaAbierta("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                     </div>
-                    <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="text" value={vaultForm.liderClientId} onChange={(e) => setVaultForm({ ...vaultForm, liderClientId: e.target.value })} placeholder="Client ID Lider / Walmart" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
+                    <input type="password" value={vaultForm.liderClientSecret} onChange={(e) => setVaultForm({ ...vaultForm, liderClientSecret: e.target.value })} placeholder="Client Secret Lider / Walmart" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
                   </div>
                 </div>
 
                 <button type="submit" disabled={guardandoApis} className={`w-full font-bold py-3.5 rounded-xl text-xs cursor-pointer ${tema.btn}`}>
-                  {guardandoApis ? "Guardando..." : "Guardar Credenciales y Activar Conexión"}
+                  {guardandoApis ? "Cifrando y guardando en Vercel..." : "Guardar en Bóveda Cifrada AES-256"}
                 </button>
               </form>
             )}
