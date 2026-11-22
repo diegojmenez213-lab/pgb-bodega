@@ -10,12 +10,24 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-mono-tech { font-family: 'JetBrains Mono', monospace; }
+    .hero-grid {
+      background-image:
+        linear-gradient(to right, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    @keyframes pulseSoft {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    .dot-live { animation: pulseSoft 2.2s infinite; }
   </style>
   <script>
     window.addEventListener("pageshow", function (e) {
@@ -32,27 +44,41 @@
     };
   </script>
 </head>
-<body class="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center p-4 selection:bg-blue-600 selection:text-white">
-  <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:12px 16px; border-radius:12px; font-size:12px; font-weight:700; margin-bottom:16px; max-width:28rem; width:100%;"></div>
-  <div id="root" class="w-full max-w-md"></div>
+<body class="bg-white text-slate-900 min-h-screen hero-grid flex flex-col selection:bg-slate-900 selection:text-white">
+  <!-- Barra superior limpia a juego con presentacion.html -->
+  <header class="w-full border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <a href="presentacion.html" class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-xl bg-slate-950 text-white flex items-center justify-center font-extrabold text-sm tracking-tight shadow-sm">
+          N
+        </div>
+        <div class="leading-none">
+          <span class="font-extrabold text-sm tracking-tight text-slate-950 block">NEXUS ERP</span>
+          <span class="text-[10px] font-semibold text-slate-500 tracking-wide">CHILE • SII & OMNICANAL</span>
+        </div>
+      </a>
+
+      <a href="presentacion.html" class="text-xs font-bold text-slate-600 hover:text-slate-950 transition">
+        ← Presentación
+      </a>
+    </div>
+  </header>
+
+  <main class="flex-1 flex flex-col items-center justify-center p-4 sm:p-6">
+    <div id="error-fallback" style="display:none; background:#fee2e2; color:#991b1b; padding:12px 16px; border-radius:12px; font-size:12px; font-weight:700; margin-bottom:16px; max-width:28rem; width:100%;"></div>
+    <div id="root" class="w-full max-w-md"></div>
+  </main>
+
+  <footer class="py-5 text-center text-[11px] font-medium text-slate-400">
+    NEXUS ERP • Infraestructura aislada multi-empresa • Santiago, Chile
+  </footer>
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
-      authDomain: "pgb-bodegad.firebaseapp.com",
-      projectId: "pgb-bodegad",
-      storageBucket: "pgb-bodegad.firebasestorage.app",
-      messagingSenderId: "497839332750",
-      appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
-    };
-
-    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const db = firebase.firestore();
-
+    const NEXUS_API_BASE = "https://pgb-bodega.vercel.app/api";
     const RUT_PGB = "769497226";
+
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase().slice(0, 9);
     const formatearRut = (r) => {
       const c = limpiarRut(r);
@@ -92,9 +118,7 @@
       const loginLockRef = useRef(false);
 
       useEffect(() => {
-        // Al regresar a la portada se cierra automáticamente cualquier sesión temporal de Super Admin
         sessionStorage.removeItem("nexus_admin_ok");
-        auth.signInAnonymously().catch(() => {});
       }, []);
 
       // Contador visual de pausa preventiva si excedió 5 intentos fallidos
@@ -145,52 +169,46 @@
         loginLockRef.current = true;
         setCargando(true);
         try {
-          if (!auth.currentUser) {
-            await auth.signInAnonymously().catch(() => {});
-          }
-          const docRef = db.collection("saas_empresas").doc(rutLimpio);
-          const snap = await docRef.get();
+          const resp = await fetch(`${NEXUS_API_BASE}/auth/login-empresa`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              rut: rutLimpio,
+              clave: claveInput.trim()
+            })
+          });
 
-          if (!snap.exists) {
-            if (rutLimpio === RUT_PGB) {
-              sessionStorage.clear();
-              localStorage.setItem("nexus_empresa_rut", RUT_PGB);
-              localStorage.setItem("nexus_session_ts", String(Date.now()));
-              window.location.replace("pgb-operacion.html");
-              return;
+          const data = await resp.json().catch(() => ({}));
+
+          if (!resp.ok || !data.ok) {
+            if (resp.status === 401 || resp.status === 404) {
+              registrarFalloAcceso(data.error || "RUT o clave de acceso incorrectos.");
+            } else {
+              setErrorMsg(data.error || "No se pudo validar el acceso en este momento.");
             }
-            registrarFalloAcceso("Este RUT no está registrado en la plataforma. Contacta al administrador.");
             return;
           }
 
-          const data = snap.data() || {};
-          if (data.activa === false) {
-            setErrorMsg("El acceso para esta empresa se encuentra pausado temporalmente.");
-            return;
-          }
+          const rutFinal = limpiarRut(data.rutEmpresa || rutLimpio);
 
-          const claveGuardada = String(data.claveAcceso || data.pin || "").trim();
-          if (claveGuardada && claveInput.trim() !== claveGuardada) {
-            registrarFalloAcceso("Clave de acceso incorrecta.");
-            return;
-          }
-
-          // Sesión aislada por RUT usando replace() para bloquear retroceso entre empresas
+          // Sesión aislada por RUT + token firmado para Bóveda AES-256 automática
           sessionStorage.clear();
-          localStorage.setItem("nexus_empresa_rut", rutLimpio);
+          if (data.sessionToken) {
+            sessionStorage.setItem(`nexus_session_token_${rutFinal}`, data.sessionToken);
+          }
+          localStorage.setItem("nexus_empresa_rut", rutFinal);
           localStorage.setItem("nexus_session_ts", String(Date.now()));
 
-          if (rutLimpio === RUT_PGB) {
+          if (data.esPgb || rutFinal === RUT_PGB) {
             window.location.replace("pgb-operacion.html");
           } else {
             window.location.replace("empresa-panel.html");
           }
         } catch (err) {
-          const msg = String(err?.message || "");
-          if (!navigator.onLine || msg.toLowerCase().includes("offline") || msg.toLowerCase().includes("unavailable")) {
-            setErrorMsg("Sin conexión a internet o servidor temporalmente no disponible. Verifica tu señal e intenta de nuevo.");
+          if (!navigator.onLine) {
+            setErrorMsg("Sin conexión a internet. Verifica tu señal e intenta nuevamente.");
           } else {
-            setErrorMsg("Error de conexión: " + msg);
+            setErrorMsg("Error de conexión con el servidor. Intenta de nuevo en unos segundos.");
           }
         } finally {
           setCargando(false);
@@ -202,39 +220,40 @@
       const bloqueadoAhora = segundosRestantes > 0;
 
       return (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-7 sm:p-9 shadow-2xl space-y-6">
-          <div className="text-center space-y-1.5">
-            <span className="inline-block text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-blue-950 text-blue-400 border border-blue-800/60">
-              NEXUS ERP • MULTI-EMPRESA
-            </span>
-            <h1 className="text-2xl font-extrabold tracking-tight text-white pt-1">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-7 sm:p-9 shadow-2xl shadow-slate-900/5 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 border border-slate-200/80 text-[10px] font-extrabold uppercase tracking-wider text-slate-700">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 dot-live"></span>
+              Acceso Seguro • Bóveda AES-256
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-950 pt-1">
               Portal Corporativo
             </h1>
-            <p className="text-xs text-slate-400">
-              Ingresa el RUT de tu empresa para acceder a tu entorno privado.
+            <p className="text-xs sm:text-sm text-slate-500 font-medium">
+              Ingresa el RUT de tu empresa para entrar a tu entorno privado.
             </p>
           </div>
 
           {errorMsg && (
-            <div className="bg-rose-950/80 border border-rose-800 text-rose-200 text-xs font-bold p-3.5 rounded-2xl text-center">
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold p-3.5 rounded-2xl text-center">
               {errorMsg}
             </div>
           )}
 
           <form onSubmit={ingresarEmpresa} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1.5">RUT Empresa *</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">RUT Empresa *</label>
               <input
                 type="text"
                 value={rutInput}
                 onChange={(e) => setRutInput(formatearRut(e.target.value))}
                 placeholder="Ej: 77.528.042-5"
                 autoComplete="username"
-                className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-2xl px-4 py-3.5 text-sm font-bold text-white outline-none"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-950 focus:bg-white rounded-2xl px-4 py-3.5 text-sm font-bold text-slate-950 placeholder:text-slate-400 outline-none transition"
                 required
               />
               {rutLimpioActual.length >= 7 && (
-                <p className={`text-[10px] font-bold mt-1.5 px-1 ${validarRutChileno(rutLimpioActual) ? "text-emerald-400" : "text-amber-400"}`}>
+                <p className={`text-[11px] font-bold mt-1.5 px-1 ${validarRutChileno(rutLimpioActual) ? "text-emerald-600" : "text-amber-600"}`}>
                   {validarRutChileno(rutLimpioActual)
                     ? "✓ Formato de RUT chileno verificado"
                     : "⚠️ Revisa el dígito verificador del RUT"}
@@ -243,7 +262,7 @@
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1.5">Clave de Acceso</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">Clave de Acceso</label>
               <div className="relative">
                 <input
                   type={verClave ? "text" : "password"}
@@ -251,12 +270,12 @@
                   onChange={(e) => setClaveInput(e.target.value)}
                   placeholder="Ingresa tu clave empresarial"
                   autoComplete="current-password"
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-2xl pl-4 pr-16 py-3.5 text-sm font-bold text-white outline-none"
+                  className="w-full bg-slate-50 border border-slate-300 focus:border-slate-950 focus:bg-white rounded-2xl pl-4 pr-16 py-3.5 text-sm font-bold text-slate-950 placeholder:text-slate-400 outline-none transition"
                 />
                 <button
                   type="button"
                   onClick={() => setVerClave(!verClave)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 hover:text-white px-2 py-1 cursor-pointer"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-500 hover:text-slate-950 px-2 py-1 cursor-pointer"
                 >
                   {verClave ? "Ocultar" : "Ver"}
                 </button>
@@ -266,7 +285,7 @@
             <button
               type="submit"
               disabled={cargando || bloqueadoAhora}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
+              className="w-full bg-slate-950 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg shadow-slate-950/15 transition cursor-pointer"
             >
               {cargando
                 ? "Verificando Acceso..."
@@ -276,9 +295,9 @@
             </button>
           </form>
 
-          <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Aislamiento de datos por RUT</span>
-            <a href="super-admin.html" className="hover:text-slate-300 font-bold">
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+            <span className="font-mono-tech text-[10px]">AISLAMIENTO POR RUT</span>
+            <a href="super-admin.html" className="hover:text-slate-950 font-bold transition">
               Admin
             </a>
           </div>
