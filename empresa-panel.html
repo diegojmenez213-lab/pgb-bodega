@@ -44,7 +44,6 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
@@ -97,7 +96,6 @@
     };
 
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
     const db = firebase.firestore();
     const FieldValue = firebase.firestore.FieldValue;
 
@@ -610,8 +608,11 @@
       const [vista, setVista] = useState("inicio");
       const [ahoraTick, setAhoraTick] = useState(() => Date.now());
 
-      // Sesión real con backend en Vercel
-      const [sesionBackendLista, setSesionBackendLista] = useState(false);
+      // Sesión real con backend en Vercel (token propio firmado con NEXUS_MASTER_KEY)
+      const TOKEN_KEY = `nexus_session_token_${rutActivo}`;
+      const [sesionBackendLista, setSesionBackendLista] = useState(() =>
+        Boolean(sessionStorage.getItem(`nexus_session_token_${rutActivo}`))
+      );
       const [mostrarModalAuthBackend, setMostrarModalAuthBackend] = useState(false);
       const [modoAuthBackend, setModoAuthBackend] = useState("empresa");
       const [claveAuthBackend, setClaveAuthBackend] = useState("");
@@ -758,30 +759,32 @@
         }
       };
 
-      // Helper autenticado hacia Vercel
+      // Helper autenticado hacia Vercel (usa sessionToken firmado sin firebase.auth)
       const nexusFetch = useCallback(async (path, options = {}) => {
-        const user = auth.currentUser;
-        if (!user || user.isAnonymous) {
+        const token = sessionStorage.getItem(TOKEN_KEY);
+        if (!token) {
           throw new Error("Activa primero tu Sesión Segura del Servidor para operar con la bóveda cifrada y APIs reales.");
         }
-        const idToken = await user.getIdToken();
         const headers = {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`,
+          "Authorization": `Bearer ${token}`,
           "x-tenant-rut": rutActivo,
           ...(options.headers || {})
         };
         const resp = await fetch(`${NEXUS_API_BASE}${path}`, { ...options, headers });
         const data = await resp.json().catch(() => ({}));
+        if (resp.status === 401) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          setSesionBackendLista(false);
+        }
         if (!resp.ok || data.ok === false) {
           throw new Error(data.error || `Error del servidor (${resp.status})`);
         }
         return data;
-      }, [rutActivo]);
+      }, [rutActivo, TOKEN_KEY]);
 
       const refrescarEstadoBackend = useCallback(async () => {
-        const user = auth.currentUser;
-        if (!user || user.isAnonymous) return;
+        if (!sessionStorage.getItem(TOKEN_KEY)) return;
         try {
           const [siiRes, mktRes, ordRes] = await Promise.all([
             nexusFetch("/sii/estado", { method: "GET" }).catch(() => null),
@@ -799,7 +802,7 @@
           if (mktRes) setEstadoBackendMkt(mktRes.canales || null);
           if (ordRes) setOrdenesRealesMkt(Array.isArray(ordRes.ordenes) ? ordRes.ordenes : []);
         } catch (_) {}
-      }, [nexusFetch]);
+      }, [nexusFetch, TOKEN_KEY]);
 
       // Reloj vivo cada 30 segundos para los cortes de despacho
       useEffect(() => {
@@ -807,7 +810,7 @@
         return () => clearInterval(timer);
       }, []);
 
-      // Listeners Firestore inmediatos + sesión Firebase (sin bloquear nunca)
+      // Listeners Firestore inmediatos + verificación de sessionToken
       useEffect(() => {
         if (!rutActivo) {
           window.location.replace("index.html");
@@ -876,41 +879,15 @@
           setCuarentena(lista);
         });
 
-        let activo = true;
-        const iniciarSesion = async () => {
-          try {
-            const pendingToken = sessionStorage.getItem("nexus_custom_token");
-            if (pendingToken) {
-              await auth.signInWithCustomToken(pendingToken);
-              sessionStorage.removeItem("nexus_custom_token");
-            }
-          } catch (_) {}
-
-          const uAuth = auth.onAuthStateChanged((user) => {
-            if (!activo) return;
-            if (!user) {
-              auth.signInAnonymously().catch(() => {});
-              return;
-            }
-            const esReal = !user.isAnonymous;
-            setSesionBackendLista(esReal);
-            if (esReal) refrescarEstadoBackend();
-          });
-
-          return uAuth;
-        };
-
-        let limpiarAuth = () => {};
-        iniciarSesion().then((fn) => {
-          if (typeof fn === "function") limpiarAuth = fn;
-        });
+        if (sessionStorage.getItem(TOKEN_KEY)) {
+          setSesionBackendLista(true);
+          refrescarEstadoBackend();
+        }
 
         return () => {
-          activo = false;
           u1(); u2(); u3(); u4(); u5(); u6();
-          limpiarAuth();
         };
-      }, [rutActivo, refrescarEstadoBackend]);
+      }, [rutActivo, TOKEN_KEY, refrescarEstadoBackend]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
 
@@ -929,10 +906,11 @@
           return;
         }
         const cb = modalPinReq.onConfirm;
+        const pinVerificado = pinModalInput;
         setModalPinReq(null);
         setPinModalInput("");
         setPinModalError("");
-        await ejecutarConBloqueo(cb);
+        await ejecutarConBloqueo(() => cb(pinVerificado));
       };
 
       const cerrarSesion = () => {
@@ -970,11 +948,11 @@
             body: JSON.stringify(payload)
           });
           const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || !data.ok || !data.customToken) {
+          if (!resp.ok || !data.ok || !data.sessionToken) {
             throw new Error(data.error || "Credencial rechazada por el servidor.");
           }
 
-          await auth.signInWithCustomToken(data.customToken);
+          sessionStorage.setItem(TOKEN_KEY, data.sessionToken);
           setClaveAuthBackend("");
           setMostrarModalAuthBackend(false);
           setSesionBackendLista(true);
@@ -2191,8 +2169,8 @@
         pedirAutorizacionSupervisor(
           "Guardar en Bóveda Cifrada AES-256",
           "Las credenciales se cifrarán en el servidor de Vercel y nunca quedarán en texto plano en Firestore.",
-          async () => {
-            if (!sesionBackendLista) {
+          async (pinSupervisor) => {
+            if (!sessionStorage.getItem(TOKEN_KEY)) {
               setMostrarModalAuthBackend(true);
               throw new Error("Activa primero tu Sesión Segura del Servidor para cifrar credenciales en Vercel.");
             }
@@ -2204,6 +2182,7 @@
                 await nexusFetch("/auth/guardar-credenciales", {
                   method: "POST",
                   body: JSON.stringify({
+                    pinSupervisor,
                     servicio: "sii",
                     proveedor: apisForm.siiProveedor,
                     ambiente: apisForm.siiAmbiente,
@@ -2229,6 +2208,7 @@
                 await nexusFetch("/auth/guardar-credenciales", {
                   method: "POST",
                   body: JSON.stringify({
+                    pinSupervisor,
                     servicio: "meli",
                     proveedor: "mercadolibre",
                     ambiente: "produccion",
@@ -2243,6 +2223,7 @@
                 await nexusFetch("/auth/guardar-credenciales", {
                   method: "POST",
                   body: JSON.stringify({
+                    pinSupervisor,
                     servicio: "falabella",
                     proveedor: "falabella",
                     ambiente: "produccion",
@@ -2260,6 +2241,7 @@
                 await nexusFetch("/auth/guardar-credenciales", {
                   method: "POST",
                   body: JSON.stringify({
+                    pinSupervisor,
                     servicio: "lider",
                     proveedor: "walmart_chile",
                     ambiente: "produccion",
