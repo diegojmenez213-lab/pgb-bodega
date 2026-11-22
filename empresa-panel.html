@@ -52,7 +52,16 @@
     .print-only { display: none; }
     @media print {
       @page { size: auto; margin: 10mm; }
-      body { background: white !important; color: black !important; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html, body {
+        background: white !important;
+        color: black !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        min-height: 0 !important;
+        height: auto !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
       .no-print { display: none !important; }
       .print-only { display: block !important; }
       .hoja-sii {
@@ -62,8 +71,8 @@
         break-inside: avoid;
       }
       .hoja-sii:last-child {
-        page-break-after: auto;
-        break-after: auto;
+        page-break-after: auto !important;
+        break-after: auto !important;
       }
     }
   </style>
