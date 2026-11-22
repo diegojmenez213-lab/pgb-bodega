@@ -10,6 +10,7 @@ const {
   fechaIsoChile
 } = require("../cryptoVault");
 const {
+  signNexusSessionToken,
   requireAuth,
   requireSuperAdmin,
   resolveTenantRut,
@@ -28,7 +29,7 @@ const PROVEEDORES_SII_VALIDOS = new Set([
 function createAuthRouter() {
   const router = express.Router();
 
-  // 1. LOGIN DE EMPRESA -> ENTREGA CUSTOM TOKEN CON CLAIM rutEmpresa
+  // 1. LOGIN DE EMPRESA -> ENTREGA SESSION TOKEN FIRMADO (+ CUSTOM TOKEN OPCIONAL)
   router.post("/login-empresa", async (req, res) => {
     try {
       const db = getDb();
@@ -45,13 +46,13 @@ function createAuthRouter() {
 
       if (!snap.exists) {
         if (rutLimpio === RUT_PGB) {
-          const customToken = await auth.createCustomToken(`emp_${RUT_PGB}`, {
-            rol: "empresa",
-            rutEmpresa: RUT_PGB,
-            esPgb: true
-          });
+          const claims = { rol: "empresa", superAdmin: false, rutEmpresa: RUT_PGB, esPgb: true };
+          const sessionToken = signNexusSessionToken({ uid: `emp_${RUT_PGB}`, ...claims });
+          let customToken = "";
+          try { customToken = await auth.createCustomToken(`emp_${RUT_PGB}`, claims); } catch (_) {}
           return res.json({
             ok: true,
+            sessionToken,
             customToken,
             rutEmpresa: RUT_PGB,
             esPgb: true,
@@ -84,14 +85,19 @@ function createAuthRouter() {
         }).catch(() => {});
       }
 
-      const customToken = await auth.createCustomToken(`emp_${rutLimpio}`, {
+      const claims = {
         rol: "empresa",
+        superAdmin: false,
         rutEmpresa: rutLimpio,
         esPgb: rutLimpio === RUT_PGB
-      });
+      };
+      const sessionToken = signNexusSessionToken({ uid: `emp_${rutLimpio}`, ...claims });
+      let customToken = "";
+      try { customToken = await auth.createCustomToken(`emp_${rutLimpio}`, claims); } catch (_) {}
 
       return res.json({
         ok: true,
+        sessionToken,
         customToken,
         rutEmpresa: rutLimpio,
         esPgb: rutLimpio === RUT_PGB,
@@ -106,12 +112,12 @@ function createAuthRouter() {
     }
   });
 
-  // 2. LOGIN SUPER ADMIN -> ENTREGA CUSTOM TOKEN CON superAdmin: true
+  // 2. LOGIN SUPER ADMIN -> ENTREGA SESSION TOKEN CON superAdmin: true
   router.post("/login-super-admin", async (req, res) => {
     try {
       const db = getDb();
       const auth = getAuth();
-      const pinIngresado = String(req.body?.pin || "").trim();
+      const pinIngresado = String(req.body?.pin || req.body?.clave || "").trim();
       if (!pinIngresado) {
         return res.status(400).json({ ok: false, error: "Ingresa el PIN Maestro." });
       }
@@ -133,12 +139,12 @@ function createAuthRouter() {
         return res.status(401).json({ ok: false, error: "PIN Maestro incorrecto." });
       }
 
-      const customToken = await auth.createCustomToken("nexus_super_admin", {
-        rol: "super_admin",
-        superAdmin: true
-      });
+      const claims = { rol: "super_admin", superAdmin: true, rutEmpresa: "" };
+      const sessionToken = signNexusSessionToken({ uid: "nexus_super_admin", ...claims });
+      let customToken = "";
+      try { customToken = await auth.createCustomToken("nexus_super_admin", claims); } catch (_) {}
 
-      return res.json({ ok: true, customToken });
+      return res.json({ ok: true, sessionToken, customToken, rol: "superAdmin" });
     } catch (err) {
       console.error("[login-super-admin]", err);
       return res.status(500).json({ ok: false, error: "Error Consola Maestra: " + err.message });
