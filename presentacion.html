@@ -1,860 +1,366 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="scroll-smooth">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#080a0f" />
-  <title>NEXUS ERP · Acceso Corporativo</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet" />
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXUS ERP • E-Commerce Omnicanal & Motor SII Chile</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg-page: #080a0f;
-      --bg-panel: #0e121b;
-      --bg-input: #090c13;
-      --border-hairline: rgba(255, 255, 255, 0.08);
-      --border-strong: rgba(255, 255, 255, 0.14);
-      --border-focus: #3b82f6;
-
-      --text-main: #f8fafc;
-      --text-secondary: #94a3b8;
-      --text-muted: #64748b;
-
-      --accent: #2563eb;
-      --accent-hover: #1d4ed8;
-      --success: #10b981;
-      --danger: #ef4444;
-
-      --radius-lg: 16px;
-      --radius-md: 10px;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    html, body {
-      min-height: 100%;
-      background-color: var(--bg-page);
-      color: var(--text-main);
-      font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       -webkit-font-smoothing: antialiased;
-      overflow-x: hidden;
     }
-
-    /* Luz cenital muy sutil, sin neones ni orbes pesados */
-    .subtle-glow {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 0;
-      background:
-        radial-gradient(60% 45% at 15% 0%, rgba(37, 99, 235, 0.11) 0%, transparent 70%),
-        radial-gradient(50% 40% at 85% 100%, rgba(148, 163, 184, 0.05) 0%, transparent 70%);
+    .font-mono-tech { font-family: 'JetBrains Mono', monospace; }
+    .hero-grid {
+      background-image:
+        linear-gradient(to right, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
     }
-
-    /* ============================================================
-       ESCRITORIO (PC): SPLIT-SCREEN CORPORATIVO LIMPIO
-       ============================================================ */
-    .layout {
-      position: relative;
-      z-index: 1;
-      min-height: 100dvh;
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
+    .glass-nav {
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
     }
-
-    /* Panel izquierdo: Marca + Declaración ejecutiva */
-    .brand-column {
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 48px 64px;
-      border-right: 1px solid var(--border-hairline);
-      background: linear-gradient(180deg, rgba(14, 18, 27, 0.45) 0%, rgba(8, 10, 15, 0.2) 100%);
+    .bento-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
     }
-
-    .brand-header {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      width: fit-content;
+    .bento-card:hover {
+      transform: translateY(-2px);
+      border-color: #cbd5e1;
+      box-shadow: 0 18px 40px -15px rgba(15, 23, 42, 0.08);
     }
-
-    .logo-frame {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      background: #111827;
-      border: 1px solid var(--border-strong);
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-      flex-shrink: 0;
+    @keyframes pulseSoft {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
     }
-
-    .logo-frame img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      padding: 5px;
-    }
-
-    .brand-text {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-
-    .brand-name {
-      font-family: "Plus Jakarta Sans", sans-serif;
-      font-size: 1.05rem;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      color: var(--text-main);
-    }
-
-    .brand-tag {
-      font-size: 0.72rem;
-      font-weight: 500;
-      color: var(--text-muted);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-
-    .brand-statement {
-      max-width: 480px;
-      margin: auto 0;
-      padding: 40px 0;
-    }
-
-    .brand-headline {
-      font-family: "Plus Jakarta Sans", sans-serif;
-      font-size: clamp(2rem, 3vw, 2.75rem);
-      font-weight: 700;
-      line-height: 1.15;
-      letter-spacing: -0.025em;
-      color: var(--text-main);
-      margin-bottom: 18px;
-    }
-
-    .brand-motto {
-      font-size: 1rem;
-      line-height: 1.6;
-      color: var(--text-secondary);
-      min-height: 52px;
-      transition: opacity 0.35s ease;
-    }
-
-    .brand-motto.fading {
-      opacity: 0;
-    }
-
-    .desktop-specs {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 24px;
-      padding-top: 28px;
-      border-top: 1px solid var(--border-hairline);
-    }
-
-    .spec-item strong {
-      display: block;
-      font-size: 0.84rem;
-      font-weight: 600;
-      color: var(--text-main);
-      margin-bottom: 4px;
-    }
-
-    .spec-item span {
-      display: block;
-      font-size: 0.78rem;
-      line-height: 1.45;
-      color: var(--text-muted);
-    }
-
-    /* Panel derecho: Acceso sin distracciones */
-    .auth-column {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 40px 32px;
-    }
-
-    .auth-card {
-      width: 100%;
-      max-width: 400px;
-      background: var(--bg-panel);
-      border: 1px solid var(--border-hairline);
-      border-radius: var(--radius-lg);
-      padding: 34px 30px 24px;
-      box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.7);
-    }
-
-    /* Cabecera compacta que SOLO aparece en móvil */
-    .mobile-brand-bar {
-      display: none;
-    }
-
-    .auth-head {
-      margin-bottom: 24px;
-    }
-
-    .auth-title {
-      font-family: "Plus Jakarta Sans", sans-serif;
-      font-size: 1.38rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-main);
-      margin-bottom: 6px;
-    }
-
-    .auth-sub {
-      font-size: 0.86rem;
-      color: var(--text-secondary);
-      line-height: 1.45;
-    }
-
-    .field {
-      margin-bottom: 16px;
-    }
-
-    .field-label {
-      display: block;
-      font-size: 0.79rem;
-      font-weight: 500;
-      color: #cbd5e1;
-      margin-bottom: 7px;
-    }
-
-    .input-wrap {
-      position: relative;
-      display: flex;
-      align-items: center;
-    }
-
-    .field-input {
-      width: 100%;
-      height: 46px;
-      padding: 0 42px 0 14px;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-strong);
-      background: var(--bg-input);
-      color: var(--text-main);
-      font-family: inherit;
-      font-size: 0.94rem;
-      outline: none;
-      transition: border-color 0.18s ease, box-shadow 0.18s ease;
-    }
-
-    .field-input::placeholder {
-      color: #475569;
-    }
-
-    .field-input:focus {
-      border-color: var(--border-focus);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-    }
-
-    .eye-btn {
-      position: absolute;
-      right: 8px;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 8px;
-      cursor: pointer;
-      display: flex;
-      border-radius: 8px;
-      transition: color 0.15s ease;
-    }
-
-    .eye-btn:hover {
-      color: var(--text-main);
-    }
-
-    .status-box {
-      display: none;
-      padding: 10px 12px;
-      border-radius: 9px;
-      font-size: 0.82rem;
-      line-height: 1.4;
-      margin-bottom: 16px;
-      border: 1px solid transparent;
-    }
-
-    .status-box.error {
-      display: block;
-      background: rgba(239, 68, 68, 0.1);
-      border-color: rgba(239, 68, 68, 0.28);
-      color: #fca5a5;
-    }
-
-    .status-box.success {
-      display: block;
-      background: rgba(16, 185, 129, 0.1);
-      border-color: rgba(16, 185, 129, 0.28);
-      color: #6ee7b7;
-    }
-
-    .btn-submit {
-      width: 100%;
-      height: 46px;
-      margin-top: 6px;
-      border: none;
-      border-radius: var(--radius-md);
-      background: var(--accent);
-      color: #ffffff;
-      font-family: "Inter", sans-serif;
-      font-size: 0.92rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: background-color 0.18s ease, transform 0.15s ease;
-    }
-
-    .btn-submit:hover {
-      background: var(--accent-hover);
-    }
-
-    .btn-submit:active {
-      transform: scale(0.99);
-    }
-
-    .btn-submit:disabled {
-      opacity: 0.6;
-      cursor: wait;
-    }
-
-    /* PIE DISCRETO CON ESCUDO CAMUFLADO */
-    .auth-footer {
-      margin-top: 22px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-hairline);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 0.73rem;
-      color: var(--text-muted);
-      user-select: none;
-    }
-
-    .trust-mark {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .stealth-shield {
-      background: transparent;
-      border: none;
-      padding: 4px;
-      margin: -4px;
-      color: var(--text-muted);
-      display: inline-flex;
-      align-items: center;
-      cursor: default;
-      transition: color 0.25s ease;
-    }
-
-    .stealth-shield.armed {
-      color: #60a5fa;
-    }
-
-    /* ============================================================
-       MODAL OCULTO CONSOLA MAESTRA
-       ============================================================ */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 99;
-      background: rgba(4, 6, 12, 0.82);
-      backdrop-filter: blur(8px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-
-    .modal-backdrop.open {
-      display: flex;
-    }
-
-    .modal-box {
-      width: 100%;
-      max-width: 360px;
-      background: var(--bg-panel);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-lg);
-      padding: 24px 22px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8);
-    }
-
-    .modal-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 18px;
-    }
-
-    .modal-title {
-      font-family: "Plus Jakarta Sans", sans-serif;
-      font-size: 0.96rem;
-      font-weight: 700;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .modal-close {
-      background: transparent;
-      border: 1px solid var(--border-hairline);
-      color: var(--text-secondary);
-      width: 30px;
-      height: 30px;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-
-    /* ============================================================
-       MÓVIL: UNA SOLA PANTALLA LIMPIA, SIN SCROLL NI CORTES
-       ============================================================ */
-    @media (max-width: 900px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
-
-      /* En móvil ocultamos el panel de marketing pesado */
-      .brand-column {
-        display: none;
-      }
-
-      .auth-column {
-        min-height: 100dvh;
-        flex-direction: column;
-        justify-content: center;
-        padding: 20px 18px max(20px, env(safe-area-inset-bottom));
-        gap: 22px;
-      }
-
-      .mobile-brand-bar {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        gap: 10px;
-        max-width: 360px;
-      }
-
-      .mobile-lockup {
-        display: inline-flex;
-        align-items: center;
-        gap: 11px;
-      }
-
-      .mobile-tagline {
-        font-size: 0.85rem;
-        line-height: 1.45;
-        color: var(--text-secondary);
-      }
-
-      .auth-card {
-        max-width: 400px;
-        padding: 26px 22px 20px;
-      }
-
-      .auth-title {
-        font-size: 1.24rem;
-      }
-
-      .field-input, .btn-submit {
-        height: 48px;
-        font-size: 1rem; /* Evita zoom automático en iOS */
-      }
-    }
+    .dot-live { animation: pulseSoft 2.2s infinite; }
   </style>
 </head>
-<body>
-  <div class="subtle-glow" aria-hidden="true"></div>
+<body class="bg-white text-slate-900 selection:bg-slate-900 selection:text-white overflow-x-hidden">
 
-  <main class="layout">
-    <!-- COLUMNA IZQUIERDA (SOLO PC / TABLET HORIZONTAL) -->
-    <section class="brand-column">
-      <div class="brand-header">
-        <div class="logo-frame" id="desktopLogoBox">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 2.5L20 7.2V16.8L12 21.5L4 16.8V7.2L12 2.5Z" stroke="#3B82F6" stroke-width="1.8" />
-            <path d="M12 7.5L16 9.8V14.2L12 16.5L8 14.2V9.8L12 7.5Z" fill="#3B82F6" />
-          </svg>
+  <!-- NAVEGACIÓN MINIMALISTA FIJA -->
+  <header class="fixed top-0 inset-x-0 z-50 glass-nav border-b border-slate-200/80">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <a href="#" class="flex items-center gap-2.5 group">
+        <div class="w-8 h-8 rounded-xl bg-slate-950 text-white flex items-center justify-center font-extrabold text-sm tracking-tight shadow-sm">
+          N
         </div>
-        <div class="brand-text">
-          <span class="brand-name" data-brand-name>NEXUS ERP</span>
-          <span class="brand-tag" data-brand-sub>Plataforma Corporativa</span>
+        <div class="leading-none">
+          <span class="font-extrabold text-sm tracking-tight text-slate-950 block">NEXUS ERP</span>
+          <span class="text-[10px] font-semibold text-slate-500 tracking-wide">CHILE • SII & OMNICANAL</span>
+        </div>
+      </a>
+
+      <nav class="hidden md:flex items-center gap-7 text-xs font-semibold text-slate-600">
+        <a href="#capacidades" class="hover:text-slate-950 transition">Capacidades</a>
+        <a href="#flujo" class="hover:text-slate-950 transition">Operación</a>
+        <a href="#seguridad" class="hover:text-slate-950 transition">Seguridad</a>
+      </nav>
+
+      <div class="flex items-center gap-2">
+        <a href="index.html" class="bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition shadow-sm">
+          Ingresar →
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO EJECUTIVO -->
+  <section class="relative pt-28 pb-16 sm:pt-36 sm:pb-24 hero-grid border-b border-slate-100">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="max-w-3xl mx-auto text-center space-y-6">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200/80 text-[11px] font-bold text-slate-700">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 dot-live"></span>
+          Mercado Libre • Falabella • Lider • Motor SII Chile
+        </div>
+
+        <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-slate-950 leading-[1.08]">
+          Tu operación e-commerce y facturación SII,
+          <span class="text-slate-400">bajo control absoluto.</span>
+        </h1>
+
+        <p class="text-sm sm:text-lg text-slate-600 font-medium leading-relaxed max-w-2xl mx-auto">
+          Centraliza pedidos de todos tus marketplaces, emite Boletas 39 y Facturas 33 sin duplicados, separa tu cola física de Lider y protege tus llaves en una bóveda cifrada AES-256.
+        </p>
+
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+          <a href="index.html" class="w-full sm:w-auto bg-slate-950 hover:bg-slate-800 text-white text-sm font-bold px-7 py-3.5 rounded-2xl transition shadow-lg shadow-slate-950/15">
+            Entrar a la Plataforma
+          </a>
+          <a href="#capacidades" class="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-bold px-7 py-3.5 rounded-2xl transition">
+            Explorar Arquitectura
+          </a>
         </div>
       </div>
 
-      <div class="brand-statement">
-        <h1 class="brand-headline">Operación precisa para empresas que escalan.</h1>
-        <p class="brand-motto" id="desktopMotto">
-          Facturación, bodega y canales de venta sincronizados bajo un mismo estándar de control.
+      <!-- VISTA PREVIA EJECUTIVA DEL SISTEMA (RESPONSIVE MÓVIL Y PC) -->
+      <div class="mt-14 sm:mt-16 max-w-5xl mx-auto">
+        <div class="rounded-3xl bg-slate-950 p-2 sm:p-3 shadow-2xl shadow-slate-900/20 border border-slate-800">
+          <div class="rounded-2xl bg-slate-50 border border-slate-200 overflow-hidden">
+            <!-- Barra superior mockup -->
+            <div class="bg-white border-b border-slate-200 px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5">
+                <div class="flex gap-1.5">
+                  <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                  <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                  <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                </div>
+                <span class="text-xs font-extrabold text-slate-900 ml-1">Panel Empresarial</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  Bóveda AES-256 Activa
+                </span>
+              </div>
+              <div class="flex items-center gap-2 text-[11px] font-bold">
+                <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-mono-tech">SII • 33 / 39 / 61</span>
+                <span class="px-2.5 py-1 rounded-lg bg-blue-700 text-white">Modo Borrador</span>
+              </div>
+            </div>
+
+            <!-- Contenido mockup -->
+            <div class="p-4 sm:p-6 space-y-4">
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div class="bg-white rounded-2xl p-4 border border-slate-200/90">
+                  <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Facturado Hoy</span>
+                  <p class="text-lg sm:text-2xl font-extrabold text-slate-950 mt-1">$2.480.900</p>
+                  <span class="text-[11px] font-semibold text-emerald-600">42 DTEs timbrados</span>
+                </div>
+                <div class="bg-white rounded-2xl p-4 border border-slate-200/90">
+                  <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Lotes PDF Hoy</span>
+                  <p class="text-lg sm:text-2xl font-extrabold text-amber-500 mt-1">14</p>
+                  <span class="text-[11px] font-semibold text-slate-500">Orden correlativo folio</span>
+                </div>
+                <div class="bg-white rounded-2xl p-4 border border-slate-200/90">
+                  <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Cola Física Lider</span>
+                  <p class="text-lg sm:text-2xl font-extrabold text-slate-950 mt-1">6</p>
+                  <span class="text-[11px] font-semibold text-slate-500">Impresión obligatoria</span>
+                </div>
+                <div class="bg-white rounded-2xl p-4 border border-slate-200/90">
+                  <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Reposición IA</span>
+                  <p class="text-lg sm:text-2xl font-extrabold text-blue-700 mt-1">5 SKUs</p>
+                  <span class="text-[11px] font-semibold text-slate-500">Cobertura 14 días</span>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div class="lg:col-span-2 bg-white rounded-2xl p-4 border border-slate-200/90 space-y-2.5">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-extrabold text-slate-900">Bandeja Omnicanal en Tiempo Real</span>
+                    <span class="text-[10px] font-bold text-slate-400">Candado Antiduplicados ON</span>
+                  </div>
+                  <div class="divide-y divide-slate-100 text-xs">
+                    <div class="py-2 flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px]">Mercado Libre</span>
+                        <span class="font-bold text-slate-800 truncate">Factura 33 #1042 • RUT Validado</span>
+                      </div>
+                      <span class="font-mono-tech font-bold text-slate-900 shrink-0">$149.990</span>
+                    </div>
+                    <div class="py-2 flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold text-[10px]">Falabella</span>
+                        <span class="font-bold text-slate-800 truncate">Boleta 39 #4891 • Enviada</span>
+                      </div>
+                      <span class="font-mono-tech font-bold text-slate-900 shrink-0">$59.990</span>
+                    </div>
+                    <div class="py-2 flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="px-2 py-0.5 rounded bg-slate-900 text-white font-bold text-[10px]">Lider</span>
+                        <span class="font-bold text-slate-800 truncate">Boleta 39 #4892 • Cola Física</span>
+                      </div>
+                      <span class="font-mono-tech font-bold text-slate-900 shrink-0">$84.990</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-slate-950 text-white rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                  <div>
+                    <span class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">Seguridad Activa</span>
+                    <p class="text-sm font-extrabold mt-1">Cero llaves expuestas</p>
+                    <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      Cada API Key se cifra con AES-256-GCM en servidor y cada acción crítica exige clave SHA-256 de Supervisor.
+                    </p>
+                  </div>
+                  <div class="flex items-center justify-between text-[11px] font-mono-tech text-slate-300 pt-2 border-t border-slate-800">
+                    <span>AES-256-GCM</span>
+                    <span class="text-emerald-400">VERIFICADO</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FRANJA DE MÉTRICAS CLAVE -->
+  <section class="py-12 border-b border-slate-100 bg-slate-50/60">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+      <div>
+        <p class="text-2xl sm:text-3xl font-extrabold text-slate-950 font-mono-tech">AES-256</p>
+        <p class="text-xs font-semibold text-slate-500 mt-1">Bóveda cifrada en servidor</p>
+      </div>
+      <div>
+        <p class="text-2xl sm:text-3xl font-extrabold text-slate-950 font-mono-tech">33 • 39 • 61</p>
+        <p class="text-xs font-semibold text-slate-500 mt-1">Normativa SII completa</p>
+      </div>
+      <div>
+        <p class="text-2xl sm:text-3xl font-extrabold text-slate-950 font-mono-tech">0%</p>
+        <p class="text-xs font-semibold text-slate-500 mt-1">Riesgo de folios duplicados</p>
+      </div>
+      <div>
+        <p class="text-2xl sm:text-3xl font-extrabold text-slate-950 font-mono-tech">100%</p>
+        <p class="text-xs font-semibold text-slate-500 mt-1">Adaptado a móvil y PC</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CAPACIDADES PRINCIPALES (BENTO GRID) -->
+  <section id="capacidades" class="py-20 sm:py-28">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 space-y-12">
+      <div class="max-w-2xl space-y-3">
+        <span class="text-xs font-extrabold uppercase tracking-widest text-blue-700">Arquitectura Empresarial</span>
+        <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">
+          Diseñado para vender más sin perder el control operacional.
+        </h2>
+        <p class="text-sm sm:text-base text-slate-600">
+          Cada módulo resuelve un problema real de la operación diaria en Chile: desde RUTs mal escritos hasta colas físicas de impresión.
         </p>
       </div>
 
-      <div class="desktop-specs">
-        <div class="spec-item">
-          <strong>Facturación SII</strong>
-          <span>Cálculo tributario y registro aislado por empresa.</span>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="bento-card rounded-3xl p-6 space-y-3">
+          <div class="w-10 h-10 rounded-2xl bg-slate-950 text-white flex items-center justify-center text-sm font-extrabold font-mono-tech">01</div>
+          <h3 class="text-base font-extrabold text-slate-950">Motor SII Inteligente</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Valida RUT con algoritmo Módulo 11, retiene órdenes con datos erróneos hasta 1 hora antes del corte de despacho y permite anular con Nota de Crédito 61 y refacturar en un clic.
+          </p>
         </div>
-        <div class="spec-item">
-          <strong>Omnicanalidad</strong>
-          <span>Sincronización centralizada de inventario y pedidos.</span>
+
+        <div class="bento-card rounded-3xl p-6 space-y-3">
+          <div class="w-10 h-10 rounded-2xl bg-blue-700 text-white flex items-center justify-center text-sm font-extrabold font-mono-tech">02</div>
+          <h3 class="text-base font-extrabold text-slate-950">Modo Borrador Seguro</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Sincroniza ventas reales desde Mercado Libre, Falabella y Lider sin emitir nada al SII hasta que tú revises y apruebes, o activa el Piloto Automático cuando quieras.
+          </p>
         </div>
-        <div class="spec-item">
-          <strong>Seguridad AES-256</strong>
-          <span>Bóveda cifrada y acceso segregado por RUT.</span>
+
+        <div class="bento-card rounded-3xl p-6 space-y-3">
+          <div class="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center text-sm font-extrabold font-mono-tech">03</div>
+          <h3 class="text-base font-extrabold text-slate-950">Cola Física Lider & Lotes PDF</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Separa automáticamente los pedidos de Lider que exigen hoja impresa en el paquete. Genera lotes PDF ordenados estrictamente por folio y guarda un archivo histórico infinito.
+          </p>
+        </div>
+
+        <div class="bento-card rounded-3xl p-6 space-y-3">
+          <div class="w-10 h-10 rounded-2xl bg-emerald-700 text-white flex items-center justify-center text-sm font-extrabold font-mono-tech">04</div>
+          <h3 class="text-base font-extrabold text-slate-950">Consejero Económico</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Cruza tu stock actual contra tu velocidad real de ventas para calcular reposiciones exactas a 14 días, alertar sobrestock y exportar tu pedido por PDF o WhatsApp.
+          </p>
+        </div>
+
+        <div class="bento-card rounded-3xl p-6 space-y-3">
+          <div class="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center text-sm font-extrabold font-mono-tech">05</div>
+          <h3 class="text-base font-extrabold text-slate-950">Compras XML & Cuarentena</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Carga facturas de proveedores cuadrando IVA 19% y costos netos al instante. Si un producto vuelve abierto, pasa a Cuarentena para revisión técnica sin contaminar tu stock online.
+          </p>
+        </div>
+
+        <div class="bento-card rounded-3xl p-6 space-y-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-sm font-extrabold font-mono-tech">06</div>
+          <h3 class="text-base font-extrabold text-slate-950">Panel Supervisor & Cierre de Caja</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Cierre de jornada protegido por clave, balance de IVA, utilidad neta real por canal y bitácora completa de auditoría de inventario y personal.
+          </p>
         </div>
       </div>
-    </section>
-
-    <!-- COLUMNA DERECHA (PC) / VISTA PRINCIPAL LIMPIA (MÓVIL) -->
-    <section class="auth-column">
-      <!-- Identidad compacta exclusiva de móvil -->
-      <div class="mobile-brand-bar">
-        <div class="mobile-lockup">
-          <div class="logo-frame" id="mobileLogoBox">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 2.5L20 7.2V16.8L12 21.5L4 16.8V7.2L12 2.5Z" stroke="#3B82F6" stroke-width="1.8" />
-              <path d="M12 7.5L16 9.8V14.2L12 16.5L8 14.2V9.8L12 7.5Z" fill="#3B82F6" />
-            </svg>
-          </div>
-          <div class="brand-text" style="text-align:left;">
-            <span class="brand-name" data-brand-name>NEXUS ERP</span>
-            <span class="brand-tag" data-brand-sub>Plataforma Corporativa</span>
-          </div>
-        </div>
-        <p class="mobile-tagline">Control operativo, bodega y facturación en tiempo real.</p>
-      </div>
-
-      <div class="auth-card">
-        <header class="auth-head">
-          <h2 class="auth-title">Portal Corporativo</h2>
-          <p class="auth-sub">Ingresa el RUT de tu empresa y tu clave de acceso.</p>
-        </header>
-
-        <div id="loginFeedback" class="status-box" role="alert"></div>
-
-        <form id="empresaLoginForm" novalidate>
-          <div class="field">
-            <label class="field-label" for="rutInput">RUT Empresa</label>
-            <div class="input-wrap">
-              <input
-                id="rutInput"
-                name="rut"
-                type="text"
-                class="field-input"
-                placeholder="77.528.042-5"
-                autocomplete="username"
-                required
-              />
-            </div>
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="claveInput">Clave de Acceso</label>
-            <div class="input-wrap">
-              <input
-                id="claveInput"
-                name="clave"
-                type="password"
-                class="field-input"
-                placeholder="••••••••••••"
-                autocomplete="current-password"
-                required
-              />
-              <button type="button" class="eye-btn" id="togglePassBtn" aria-label="Mostrar u ocultar clave">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                  <circle cx="12" cy="12" r="3"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <button type="submit" class="btn-submit" id="btnIngresar">
-            <span>Ingresar</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-            </svg>
-          </button>
-        </form>
-
-        <footer class="auth-footer">
-          <div class="trust-mark">
-            <button
-              type="button"
-              id="stealthShield"
-              class="stealth-shield"
-              tabindex="-1"
-              aria-label="Seguridad de conexión"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-            </button>
-            <span>Conexión cifrada AES-256</span>
-          </div>
-          <span id="yearLabel"></span>
-        </footer>
-      </div>
-    </section>
-  </main>
-
-  <!-- MODAL OCULTO DE CONSOLA MAESTRA (3 TOQUES / MANTENER 1.4s / CTRL+SHIFT+A) -->
-  <div class="modal-backdrop" id="vaultModal" aria-hidden="true">
-    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="vaultTitle">
-      <div class="modal-head">
-        <div class="modal-title" id="vaultTitle">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
-          <span>Consola Maestra</span>
-        </div>
-        <button type="button" class="modal-close" id="closeVaultBtn" aria-label="Cerrar">✕</button>
-      </div>
-
-      <div id="adminFeedback" class="status-box" role="alert"></div>
-
-      <form id="adminLoginForm" novalidate>
-        <div class="field">
-          <label class="field-label" for="adminPinInput">Clave Maestra</label>
-          <div class="input-wrap">
-            <input
-              id="adminPinInput"
-              type="password"
-              class="field-input"
-              placeholder="Ingresa tu clave maestra"
-              autocomplete="off"
-              required
-            />
-          </div>
-        </div>
-        <button type="submit" class="btn-submit" id="btnAdminEntrar">
-          <span>Validar acceso</span>
-        </button>
-      </form>
     </div>
-  </div>
+  </section>
 
-  <script>
-    const NEXUS_BRAND_CONFIG = {
-      nombreEmpresa: "NEXUS ERP",
-      subtitulo: "Plataforma Corporativa",
-      logoUrl: "", // Ej: "./logo.png" cuando subas tu archivo de logo
-      apiBase: "https://pgb-bodega.vercel.app/api",
-      appRedirectUrl: "/index.html",
-      frasesPc: [
-        "Facturación, bodega y canales de venta sincronizados bajo un mismo estándar de control.",
-        "Orden operativo en tiempo real para tomar decisiones con datos reales.",
-        "Infraestructura multi-empresa diseñada para crecer sin perder trazabilidad."
-      ]
-    };
+  <!-- FLUJO EN 3 PASOS -->
+  <section id="flujo" class="py-20 bg-slate-50 border-y border-slate-200/70">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 space-y-12">
+      <div class="text-center max-w-2xl mx-auto space-y-3">
+        <span class="text-xs font-extrabold uppercase tracking-widest text-slate-500">Flujo Diario</span>
+        <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">
+          De la venta al despacho en tres pasos.
+        </h2>
+      </div>
 
-    document.querySelectorAll("[data-brand-name]").forEach((el) => {
-      el.textContent = NEXUS_BRAND_CONFIG.nombreEmpresa;
-    });
-    document.querySelectorAll("[data-brand-sub]").forEach((el) => {
-      el.textContent = NEXUS_BRAND_CONFIG.subtitulo;
-    });
-    document.getElementById("yearLabel").textContent = `© ${new Date().getFullYear()}`;
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-white rounded-3xl p-7 border border-slate-200 space-y-3">
+          <span class="font-mono-tech text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">PASO 01</span>
+          <h3 class="text-lg font-extrabold text-slate-950">Conecta tus APIs</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Ingresa tus credenciales de SII, Mercado Libre, Falabella y Lider desde Ajustes. Quedan cifradas con AES-256 en el servidor.
+          </p>
+        </div>
 
-    if (NEXUS_BRAND_CONFIG.logoUrl) {
-      const imgHtml = `<img src="${NEXUS_BRAND_CONFIG.logoUrl}" alt="${NEXUS_BRAND_CONFIG.nombreEmpresa}" />`;
-      document.getElementById("desktopLogoBox").innerHTML = imgHtml;
-      document.getElementById("mobileLogoBox").innerHTML = imgHtml;
-    }
+        <div class="bg-white rounded-3xl p-7 border border-slate-200 space-y-3">
+          <span class="font-mono-tech text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">PASO 02</span>
+          <h3 class="text-lg font-extrabold text-slate-950">Sincroniza y Emite</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Revisa tus pedidos en Modo Borrador y emite Boletas 39 o Facturas 33 con un toque, descontando stock de forma atómica.
+          </p>
+        </div>
 
-    // Rotación sutil solo en PC
-    const mottoEl = document.getElementById("desktopMotto");
-    let mottoIdx = 0;
-    setInterval(() => {
-      mottoEl.classList.add("fading");
-      setTimeout(() => {
-        mottoIdx = (mottoIdx + 1) % NEXUS_BRAND_CONFIG.frasesPc.length;
-        mottoEl.textContent = NEXUS_BRAND_CONFIG.frasesPc[mottoIdx];
-        mottoEl.classList.remove("fading");
-      }, 360);
-    }, 6500);
+        <div class="bg-white rounded-3xl p-7 border border-slate-200 space-y-3">
+          <span class="font-mono-tech text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">PASO 03</span>
+          <h3 class="text-lg font-extrabold text-slate-950">Imprime y Cierra Caja</h3>
+          <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Imprime tus lotes PDF por folio (con cola separada para Lider) y cierra la jornada archivando todo para consultas futuras.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-    // Formateo RUT chileno + toggle contraseña
-    const rutInput = document.getElementById("rutInput");
-    function formatearRut(valor) {
-      const limpio = String(valor || "").replace(/[^0-9kK]/g, "").toUpperCase();
-      if (limpio.length <= 1) return limpio;
-      return `${limpio.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}-${limpio.slice(-1)}`;
-    }
-    rutInput.addEventListener("input", (e) => {
-      e.target.value = formatearRut(e.target.value);
-    });
+  <!-- SEGURIDAD Y CIERRE EJECUTIVO -->
+  <section id="seguridad" class="py-20 sm:py-28">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6">
+      <div class="rounded-[2rem] bg-slate-950 text-white p-8 sm:p-14 text-center space-y-6 shadow-2xl shadow-slate-950/20 relative overflow-hidden">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15 text-[11px] font-bold text-emerald-300">
+          Infraestructura Aislada Multi-Empresa • Bóveda AES-256
+        </div>
 
-    const claveInput = document.getElementById("claveInput");
-    document.getElementById("togglePassBtn").addEventListener("click", () => {
-      claveInput.type = claveInput.type === "password" ? "text" : "password";
-    });
+        <h2 class="text-3xl sm:text-5xl font-extrabold tracking-tight leading-tight max-w-2xl mx-auto">
+          Todo listo para escalar tu operación hoy.
+        </h2>
 
-    // Escudo discreto: 3 toques rápidos / mantener 1.4s / Ctrl+Shift+A
-    const shieldBtn = document.getElementById("stealthShield");
-    const vaultModal = document.getElementById("vaultModal");
-    const adminPinInput = document.getElementById("adminPinInput");
-    let tapCount = 0;
-    let tapTimer = null;
-    let holdTimer = null;
+        <p class="text-sm sm:text-base text-slate-300 max-w-xl mx-auto leading-relaxed">
+          Accede con tu RUT empresarial, activa tu Bóveda AES-256 y comienza a operar con la tranquilidad de un sistema diseñado a medida.
+        </p>
 
-    function mostrarFeedback(id, tipo, texto) {
-      const el = document.getElementById(id);
-      el.className = "status-box";
-      el.textContent = texto || "";
-      if (tipo && texto) el.classList.add(tipo);
-    }
+        <div class="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <a href="index.html" class="w-full sm:w-auto bg-white hover:bg-slate-100 text-slate-950 text-sm font-extrabold px-8 py-4 rounded-2xl transition">
+            Ingresar a NEXUS ERP →
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
 
-    function abrirModalAdmin() {
-      vaultModal.classList.add("open");
-      vaultModal.setAttribute("aria-hidden", "false");
-      setTimeout(() => adminPinInput.focus(), 80);
-    }
+  <!-- FOOTER MINIMALISTA -->
+  <footer class="border-t border-slate-200 py-8">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 font-medium">
+      <div class="flex items-center gap-2">
+        <span class="font-extrabold text-slate-900">NEXUS ERP</span>
+        <span>•</span>
+        <span>Santiago, Chile</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="index.html" class="hover:text-slate-900 font-semibold transition">Acceso Clientes</a>
+        <a href="#capacidades" class="hover:text-slate-900 transition">Capacidades</a>
+      </div>
+    </div>
+  </footer>
 
-    function cerrarModalAdmin() {
-      vaultModal.classList.remove("open");
-      vaultModal.setAttribute("aria-hidden", "true");
-      adminPinInput.value = "";
-      mostrarFeedback("adminFeedback", "", "");
-    }
-
-    shieldBtn.addEventListener("click", () => {
-      tapCount += 1;
-      clearTimeout(tapTimer);
-      if (tapCount >= 3) {
-        tapCount = 0;
-        abrirModalAdmin();
-        return;
-      }
-      tapTimer = setTimeout(() => { tapCount = 0; }, 1100);
-    });
-
-    const iniciarHold = () => {
-      shieldBtn.classList.add("armed");
-      holdTimer = setTimeout(() => {
-        shieldBtn.classList.remove("armed");
-        abrirModalAdmin();
-      }, 1400);
-    };
-    const cancelarHold = () => {
-      shieldBtn.classList.remove("armed");
-      clearTimeout(holdTimer);
-    };
-
-    shieldBtn.addEventListener("mousedown", iniciarHold);
-    shieldBtn.addEventListener("mouseup", cancelarHold);
-    shieldBtn.addEventListener("mouseleave", cancelarHold);
-    shieldBtn.addEventListener("touchstart", iniciarHold, { passive: true });
-    shieldBtn.addEventListener("touchend", cancelarHold);
-    shieldBtn.addEventListener("touchcancel", cancelarHold);
-
-    document.addEventListener("keydown", (e) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        abrirModalAdmin();
-      } else if (e.key === "Escape" && vaultModal.classList.contains("open")) {
-        cerrarModalAdmin();
-      }
-    });
-
-    document.getElementById("closeVaultBtn").addEventListener("click", cerrarModalAdmin);
-    vaultModal.addEventListener("click", (e) => {
-      if (e.target === vaultModal) cerrarModalAdmin();
-    });
-
-    // Conexión API /api/auth
-    document.getElementById("empresaLoginForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = document.getElementById("btnIngresar");
-      const rut = rutInput.value.trim();
-      const clave = claveInput.value;
-
-      if (!rut || !clave) {
-        mostrarFeedback("loginFeedback", "error", "Completa tu RUT empresarial y clave de acceso.");
-        return;
-      }
-
-      btn.disabled = true;
-      mostrarFeedback("loginFeedback", "", "");
-
-      try {
-        const resp = await fetch(`${NEXUS_BRAND_CONFIG.apiBase}/auth/login-empresa`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rut, clave })
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || !data.ok) {
-          throw new Error(data.error || "Credenciales inválidas. Verifica tu RUT y clave.");
-        }
-
-        sessionStorage.setItem("nexus_custom_token", data.customToken || "");
-        sessionStorage.setItem("nexus_rut_empresa", data.rutEmpresa || rut);
-        sessionStorage.setItem("nexus_rol", data.rol || "empresa");
-
-        mostrarFeedback("loginFeedback", "success", "Acceso validado. Entrando...");
-        setTimeout(() => { window.location.href = NEXUS_BRAND_CONFIG.appRedirectUrl; }, 450);
-      } catch (err) {
-        mostrarFeedback("loginFeedback", "error", err.message || "Error de conexión con el servidor.");
-      } finally {
-        btn.disabled = false;
-      }
-    });
-
-    document.getElementById("adminLoginForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = document.getElementById("btnAdminEntrar");
-      const pin = adminPinInput.value.trim();
-      if (!pin) {
-        mostrarFeedback("adminFeedback", "error", "Ingresa la clave maestra.");
-        return;
-      }
-
-      btn.disabled = true;
-      mostrarFeedback("adminFeedback", "", "");
-
-      try {
-        const resp = await fetch(`${NEXUS_BRAND_CONFIG.apiBase}/auth/login-super-admin`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin, clave: pin })
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || !data.ok) {
-          throw new Error(data.error || "Clave maestra incorrecta.");
-        }
-
-        sessionStorage.setItem("nexus_custom_token", data.customToken || "");
-        sessionStorage.setItem("nexus_rol", "superAdmin");
-
-        mostrarFeedback("adminFeedback", "success", "Sesión maestra verificada.");
-        setTimeout(() => { window.location.href = `${NEXUS_BRAND_CONFIG.appRedirectUrl}?modo=master`; }, 450);
-      } catch (err) {
-        mostrarFeedback("adminFeedback", "error", err.message || "No se pudo validar el acceso.");
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  </script>
 </body>
 </html>
