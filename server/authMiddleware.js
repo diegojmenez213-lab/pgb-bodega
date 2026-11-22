@@ -1,5 +1,50 @@
+const crypto = require("crypto");
 const { getAuth } = require("./firebaseAdmin");
 const { limpiarRut, sha256Hex, safeEqualText } = require("./cryptoVault");
+
+function getSessionSecret() {
+  const key = String(process.env.NEXUS_MASTER_KEY || "").trim();
+  if (!key) {
+    throw new Error("NEXUS_MASTER_KEY no configurada en el servidor.");
+  }
+  return crypto.createHash("sha256").update(`nexus_session:${key}`).digest();
+}
+
+function signNexusSessionToken(payload = {}, ttlMs = 1000 * 60 * 60 * 24) {
+  const body = {
+    ...payload,
+    iat: Date.now(),
+    exp: Date.now() + ttlMs
+  };
+  const encoded = Buffer.from(JSON.stringify(body), "utf8").toString("base64url");
+  const sig = crypto
+    .createHmac("sha256", getSessionSecret())
+    .update(`nx.${encoded}`)
+    .digest("base64url");
+  return `nx.${encoded}.${sig}`;
+}
+
+function verifyNexusSessionToken(token) {
+  if (typeof token !== "string" || !token.startsWith("nx.")) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+
+  const [, encoded, sig] = parts;
+  const expectedSig = crypto
+    .createHmac("sha256", getSessionSecret())
+    .update(`nx.${encoded}`)
+    .digest("base64url");
+
+  if (!safeEqualText(sig, expectedSig)) return null;
+
+  try {
+    const data = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (!data || Number(data.exp || 0) <= Date.now()) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
 
 async function requireAuth(req, res, next) {
   try {
@@ -7,8 +52,23 @@ async function requireAuth(req, res, next) {
     if (!header.startsWith("Bearer ")) {
       return res.status(401).json({ ok: false, error: "Token de autenticación requerido." });
     }
-    const idToken = header.slice(7).trim();
-    const decoded = await getAuth().verifyIdToken(idToken);
+    const token = header.slice(7).trim();
+
+    if (token.startsWith("nx.")) {
+      const decoded = verifyNexusSessionToken(token);
+      if (!decoded) {
+        return res.status(401).json({ ok: false, error: "Sesión expirada o inválida. Vuelve a iniciar sesión." });
+      }
+      req.user = {
+        uid: decoded.uid || "nexus_user",
+        rol: decoded.rol || "empresa",
+        superAdmin: Boolean(decoded.superAdmin),
+        rutEmpresa: limpiarRut(decoded.rutEmpresa || "")
+      };
+      return next();
+    }
+
+    const decoded = await getAuth().verifyIdToken(token);
     req.user = {
       uid: decoded.uid,
       rol: decoded.rol || "empresa",
@@ -47,7 +107,13 @@ function requireCronSecret(req, res, next) {
 
 function resolveTenantRut(req) {
   if (req.user?.superAdmin) {
-    const requested = limpiarRut(req.body?.rutEmpresa || req.query?.rutEmpresa || req.params?.rutEmpresa || "");
+    const requested = limpiarRut(
+      req.headers["x-tenant-rut"] ||
+      req.body?.rutEmpresa ||
+      req.query?.rutEmpresa ||
+      req.params?.rutEmpresa ||
+      ""
+    );
     if (requested) return requested;
   }
   return limpiarRut(req.user?.rutEmpresa || "");
@@ -67,6 +133,8 @@ async function verificarPinSupervisorServer(db, rutEmpresa, pinIngresado) {
 }
 
 module.exports = {
+  signNexusSessionToken,
+  verifyNexusSessionToken,
   requireAuth,
   requireSuperAdmin,
   requireCronSecret,
