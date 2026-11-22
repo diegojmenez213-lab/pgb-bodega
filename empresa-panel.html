@@ -1158,6 +1158,42 @@
         setVendedorSeleccionado("");
       };
 
+      // Evita que el gesto "Atrás" en móvil saque al usuario al login cuando hay un modal o sub-vista abierta
+      const hayModalAbierto = Boolean(
+        dteVisualizando || modalNuevaVenta || modalPedidoSugerido || modalCierreCaja ||
+        productoEditando || ordenDevolucionModal || ordenRefacturarModal ||
+        mostrarModalAuthBackend || modalPinReq || ayudaApiModal || confirmarImpresionLote
+      );
+
+      useEffect(() => {
+        if (hayModalAbierto || vista !== "inicio") {
+          window.history.pushState({ nexusGuard: true }, "");
+        }
+      }, [hayModalAbierto, vista]);
+
+      useEffect(() => {
+        const onPopState = () => {
+          if (dteVisualizando) { setDteVisualizando(null); setModoImpresion(null); return; }
+          if (confirmarImpresionLote) { setConfirmarImpresionLote(false); setLoteParaImprimir([]); setModoImpresion(null); return; }
+          if (modalNuevaVenta) { cerrarYLimpiarModalVenta(); return; }
+          if (modalPedidoSugerido) { setModalPedidoSugerido(false); setPedidoParaImprimir([]); setModoImpresion(null); return; }
+          if (modalCierreCaja) { setModalCierreCaja(false); setPinCierreCaja(""); return; }
+          if (productoEditando) { setProductoEditando(null); return; }
+          if (ordenDevolucionModal) { setOrdenDevolucionModal(null); setPinDevolucion(""); return; }
+          if (ordenRefacturarModal) { setOrdenRefacturarModal(null); setPinRefactura(""); return; }
+          if (mostrarModalAuthBackend) { setMostrarModalAuthBackend(false); return; }
+          if (modalPinReq) { setModalPinReq(null); return; }
+          if (ayudaApiModal) { setAyudaApiModal(null); return; }
+          if (vista !== "inicio") { setVista("inicio"); return; }
+        };
+        window.addEventListener("popstate", onPopState);
+        return () => window.removeEventListener("popstate", onPopState);
+      }, [
+        dteVisualizando, confirmarImpresionLote, modalNuevaVenta, modalPedidoSugerido,
+        modalCierreCaja, productoEditando, ordenDevolucionModal, ordenRefacturarModal,
+        mostrarModalAuthBackend, modalPinReq, ayudaApiModal, vista
+      ]);
+
       // ================= REGISTRO DE VENTA ATÓMICO (RUNTRANSACTION: FOLIO + STOCK + COSTO INMUTABLE) =================
       const registrarOrdenOmnicanal = async (e) => {
         e.preventDefault();
@@ -1178,7 +1214,7 @@
           const esLider = canalNuevo === "Lider";
           const esRealSii = Boolean(estadoConexiones.sii);
           const cantFinal = Math.max(1, Number(cantidadNueva));
-          const totalFinal = Math.max(1, Number(totalNuevo));
+          const totalFinal = Math.max(1, Number(totalNuevo)) * cantFinal;
           const ahora = Date.now();
           const corteActual = calcularProximoCorteDespacho(horariosActivosDespacho, ahora);
 
@@ -2420,7 +2456,7 @@
       const borradoresPendientesMkt = ordenesRealesMkt.filter((o) => o.estadoFacturacion !== "EMITIDO");
 
       return (
-        <div className={`min-h-screen pb-24 lg:pb-10 transition-colors ${T.pageBg}`}>
+        <div className={`min-h-screen pb-24 lg:pb-10 print:min-h-0 print:pb-0 transition-colors ${T.pageBg}`}>
           {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN */}
           {modoImpresion === "dte" && dteVisualizando && (
             <div className="print-only bg-white p-2">
@@ -3133,8 +3169,11 @@
                     <input type="number" min="1" value={cantidadNueva} onChange={(e) => setCantidadNueva(e.target.value)} className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold ${T.input}`} required />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={`text-xs font-bold block mb-1 ${T.textSub}`}>Total CLP *</label>
+                    <label className={`text-xs font-bold block mb-1 ${T.textSub}`}>Precio Unitario CLP *</label>
                     <input type="number" min="1" value={totalNuevo} onChange={(e) => setTotalNuevo(e.target.value)} className={`w-full rounded-xl px-3 py-2.5 text-xs font-bold ${T.input}`} required />
+                    <span className="text-[11px] font-extrabold text-emerald-600 block mt-1">
+                      Total a facturar: ${(Math.max(1, Number(cantidadNueva || 1)) * Math.max(0, Number(totalNuevo || 0))).toLocaleString("es-CL")} CLP
+                    </span>
                   </div>
                 </div>
 
