@@ -83,7 +83,9 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    const NEXUS_API_BASE = "https://pgb-bodega.vercel.app/api";
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -106,6 +108,12 @@
       if (c.length < 2) return c;
       const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
       return `${cuerpo}-${c.slice(-1)}`;
+    };
+
+    const CANAL_LABEL = {
+      meli: "Mercado Libre",
+      falabella: "Falabella",
+      lider: "Lider"
     };
 
     // FECHA Y HORA LOCAL OFICIAL DE CHILE (EVITA DESFASE UTC DESPUÉS DE LAS 21:00)
@@ -321,15 +329,15 @@
         pasos: [
           "1. Entra a tu portal de OpenFactura (Haulmer) o proveedor DTE autorizado por el SII.",
           "2. Ve a Configuración → Integraciones / API Keys.",
-          "3. Copia tu API Key de Producción. Los folios CAF (Boleta 39, Factura 33 y NC 61) se asignan automáticamente."
+          "3. Copia tu API Key de Certificación o Producción. Se guardará cifrada con AES-256-GCM en Vercel."
         ]
       },
       meli: {
-        titulo: "Dónde obtener Client ID y Secret en Mercado Libre",
+        titulo: "Dónde obtener credenciales en Mercado Libre Chile",
         pasos: [
           "1. Ingresa a developers.mercadolibre.cl con la cuenta principal de la tienda.",
           "2. Entra a 'Mis Aplicaciones' → 'Crear nueva aplicación' (permisos: Órdenes, Mensajería, Ítems y Facturación).",
-          "3. Copia el App ID (Client ID) y el Client Secret."
+          "3. Copia App ID (Client ID), Client Secret y el Refresh Token autorizado."
         ]
       },
       falabella: {
@@ -341,11 +349,11 @@
         ]
       },
       lider: {
-        titulo: "Dónde obtener el Token en Lider / Walmart",
+        titulo: "Dónde obtener credenciales en Lider / Walmart",
         pasos: [
-          "1. Ingresa a marketplace.walmartchile.cl (Seller Center Lider).",
+          "1. Ingresa a tu portal Seller Center de Lider / Walmart Chile.",
           "2. Ve a Configuración → Credenciales API / Integración.",
-          "3. Copia el Token / Client Secret."
+          "3. Copia tu Client ID y Client Secret."
         ]
       }
     };
@@ -602,6 +610,22 @@
       const [vista, setVista] = useState("inicio");
       const [ahoraTick, setAhoraTick] = useState(() => Date.now());
 
+      // Sesión real con backend en Vercel
+      const [sesionBackendLista, setSesionBackendLista] = useState(false);
+      const [mostrarModalAuthBackend, setMostrarModalAuthBackend] = useState(false);
+      const [modoAuthBackend, setModoAuthBackend] = useState("empresa");
+      const [claveAuthBackend, setClaveAuthBackend] = useState("");
+      const [errorAuthBackend, setErrorAuthBackend] = useState("");
+      const [autenticandoBackend, setAutenticandoBackend] = useState(false);
+
+      // Estado real desde Vercel (/api/sii/estado, /api/marketplaces/estado, /api/marketplaces/ordenes)
+      const [estadoBackendSii, setEstadoBackendSii] = useState(null);
+      const [estadoBackendMkt, setEstadoBackendMkt] = useState(null);
+      const [ordenesRealesMkt, setOrdenesRealesMkt] = useState([]);
+      const [sincronizandoMkt, setSincronizandoMkt] = useState(false);
+      const [emitiendoDocId, setEmitiendoDocId] = useState(null);
+      const [avisoBackend, setAvisoBackend] = useState(null);
+
       // Escudo anti-doble clic en transacciones críticas (estado + ref síncrono)
       const [procesandoTx, setProcesandoTx] = useState(false);
       const txLockRef = useRef(false);
@@ -683,16 +707,20 @@
       const [excluidosPedido, setExcluidosPedido] = useState({});
       const [pedidoParaImprimir, setPedidoParaImprimir] = useState([]);
 
-      // Configuración
+      // Configuración (Bóveda Cifrada AES-256 + Emisor + Seguridad)
       const [subTabConfig, setSubTabConfig] = useState("apis");
       const [apisForm, setApisForm] = useState({
+        siiProveedor: "openfactura",
+        siiAmbiente: "certificacion",
+        siiApiKey: "",
         meliClientId: "",
         meliSecret: "",
+        meliRefreshToken: "",
+        meliSellerId: "",
         falabellaUser: "",
         falabellaApiKey: "",
-        liderApiKey: "",
-        siiProveedor: "OpenFactura (Haulmer)",
-        siiApiKey: "",
+        liderClientId: "",
+        liderClientSecret: "",
         siiModoAutomatico: false
       });
       const [datosEmisor, setDatosEmisor] = useState({
@@ -730,12 +758,56 @@
         }
       };
 
+      // Helper autenticado hacia Vercel
+      const nexusFetch = useCallback(async (path, options = {}) => {
+        const user = auth.currentUser;
+        if (!user || user.isAnonymous) {
+          throw new Error("Activa primero tu Sesión Segura del Servidor para operar con la bóveda cifrada y APIs reales.");
+        }
+        const idToken = await user.getIdToken();
+        const headers = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+          "x-tenant-rut": rutActivo,
+          ...(options.headers || {})
+        };
+        const resp = await fetch(`${NEXUS_API_BASE}${path}`, { ...options, headers });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) {
+          throw new Error(data.error || `Error del servidor (${resp.status})`);
+        }
+        return data;
+      }, [rutActivo]);
+
+      const refrescarEstadoBackend = useCallback(async () => {
+        const user = auth.currentUser;
+        if (!user || user.isAnonymous) return;
+        try {
+          const [siiRes, mktRes, ordRes] = await Promise.all([
+            nexusFetch("/sii/estado", { method: "GET" }).catch(() => null),
+            nexusFetch("/marketplaces/estado", { method: "GET" }).catch(() => null),
+            nexusFetch("/marketplaces/ordenes?limite=40", { method: "GET" }).catch(() => null)
+          ]);
+          if (siiRes) {
+            setEstadoBackendSii(siiRes);
+            setApisForm((prev) => ({
+              ...prev,
+              siiProveedor: siiRes.proveedor || prev.siiProveedor,
+              siiAmbiente: siiRes.ambiente || prev.siiAmbiente
+            }));
+          }
+          if (mktRes) setEstadoBackendMkt(mktRes.canales || null);
+          if (ordRes) setOrdenesRealesMkt(Array.isArray(ordRes.ordenes) ? ordRes.ordenes : []);
+        } catch (_) {}
+      }, [nexusFetch]);
+
       // Reloj vivo cada 30 segundos para los cortes de despacho
       useEffect(() => {
         const timer = setInterval(() => setAhoraTick(Date.now()), 30000);
         return () => clearInterval(timer);
       }, []);
 
+      // Listeners Firestore inmediatos + sesión Firebase (sin bloquear nunca)
       useEffect(() => {
         if (!rutActivo) {
           window.location.replace("index.html");
@@ -745,7 +817,7 @@
           window.location.replace("pgb-operacion.html");
           return;
         }
-        auth.signInAnonymously().catch(() => {});
+
         const empRef = db.collection("saas_empresas").doc(rutActivo);
 
         const u1 = empRef.onSnapshot((doc) => {
@@ -761,9 +833,11 @@
 
             if (!configInicializadaRef.current) {
               configInicializadaRef.current = true;
-              if (data.apis) setApisForm((prev) => ({ ...prev, ...data.apis }));
               if (data.datosEmisor) setDatosEmisor((prev) => ({ ...prev, ...data.datosEmisor }));
               if (data.despachosConfig) setDespachosConfig((prev) => ({ ...prev, ...data.despachosConfig }));
+              if (typeof data.apis?.siiModoAutomatico === "boolean") {
+                setApisForm((prev) => ({ ...prev, siiModoAutomatico: data.apis.siiModoAutomatico }));
+              }
               if (data.modulosActivos?.m8_omnicanal) {
                 setCanalNuevo("Mercado Libre");
               }
@@ -802,8 +876,41 @@
           setCuarentena(lista);
         });
 
-        return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
-      }, [rutActivo]);
+        let activo = true;
+        const iniciarSesion = async () => {
+          try {
+            const pendingToken = sessionStorage.getItem("nexus_custom_token");
+            if (pendingToken) {
+              await auth.signInWithCustomToken(pendingToken);
+              sessionStorage.removeItem("nexus_custom_token");
+            }
+          } catch (_) {}
+
+          const uAuth = auth.onAuthStateChanged((user) => {
+            if (!activo) return;
+            if (!user) {
+              auth.signInAnonymously().catch(() => {});
+              return;
+            }
+            const esReal = !user.isAnonymous;
+            setSesionBackendLista(esReal);
+            if (esReal) refrescarEstadoBackend();
+          });
+
+          return uAuth;
+        };
+
+        let limpiarAuth = () => {};
+        iniciarSesion().then((fn) => {
+          if (typeof fn === "function") limpiarAuth = fn;
+        });
+
+        return () => {
+          activo = false;
+          u1(); u2(); u3(); u4(); u5(); u6();
+          limpiarAuth();
+        };
+      }, [rutActivo, refrescarEstadoBackend]);
 
       const empRef = () => db.collection("saas_empresas").doc(rutActivo);
 
@@ -845,6 +952,128 @@
         window.location.href = destinoUrl;
       };
 
+      const activarSesionBackend = async (e) => {
+        e.preventDefault();
+        setAutenticandoBackend(true);
+        setErrorAuthBackend("");
+        try {
+          const endpoint = modoAuthBackend === "superAdmin"
+            ? `${NEXUS_API_BASE}/auth/login-super-admin`
+            : `${NEXUS_API_BASE}/auth/login-empresa`;
+          const payload = modoAuthBackend === "superAdmin"
+            ? { pin: claveAuthBackend.trim(), clave: claveAuthBackend.trim() }
+            : { rut: rutActivo, clave: claveAuthBackend };
+
+          const resp = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok || !data.customToken) {
+            throw new Error(data.error || "Credencial rechazada por el servidor.");
+          }
+
+          await auth.signInWithCustomToken(data.customToken);
+          setClaveAuthBackend("");
+          setMostrarModalAuthBackend(false);
+          setSesionBackendLista(true);
+          setAvisoBackend({ tipo: "ok", texto: "Sesión segura activada con Vercel. Bóveda AES-256 y sincronización listos." });
+          await refrescarEstadoBackend();
+        } catch (err) {
+          setErrorAuthBackend(err.message || "Error al conectar con Vercel.");
+        } finally {
+          setAutenticandoBackend(false);
+        }
+      };
+
+      const sincronizarBorradoresMarketplaces = async (canal = "todos") => {
+        if (!sesionBackendLista) {
+          setMostrarModalAuthBackend(true);
+          return;
+        }
+        setSincronizandoMkt(true);
+        setAvisoBackend(null);
+        try {
+          const res = await nexusFetch("/marketplaces/sincronizar", {
+            method: "POST",
+            body: JSON.stringify({ canal, limite: 25, autoEmitir: false })
+          });
+          const resumen = Object.entries(res.resultados || {})
+            .map(([c, info]) => {
+              const nom = CANAL_LABEL[c] || c;
+              if (info.estado === "SIN_CREDENCIALES") return `${nom}: sin llave`;
+              if (info.estado === "ERROR_CONEXION") return `${nom}: error (${info.ultimoError})`;
+              return `${nom}: ${info.totalLeidas || 0} órdenes (${info.nuevas || 0} nuevas en borrador)`;
+            })
+            .join(" • ");
+          await refrescarEstadoBackend();
+          setAvisoBackend({ tipo: "ok", texto: `Modo Borrador → ${resumen}` });
+        } catch (err) {
+          setAvisoBackend({ tipo: "error", texto: err.message });
+        } finally {
+          setSincronizandoMkt(false);
+        }
+      };
+
+      const emitirOrdenMarketplaceControlada = async (ord) => {
+        if (!sesionBackendLista) {
+          setMostrarModalAuthBackend(true);
+          return;
+        }
+        const docId = ord.docId || ord.id;
+        const tipoElegido = Number(ord.tipoDteSugerido || 39);
+        setEmitiendoDocId(docId);
+        setAvisoBackend(null);
+        try {
+          const res = await nexusFetch("/marketplaces/emitir-orden", {
+            method: "POST",
+            body: JSON.stringify({ docId, tipoDte: tipoElegido })
+          });
+          const dte = res.dte;
+          if (dte) {
+            const ahora = Date.now();
+            const nombreCanal = CANAL_LABEL[ord.canal] || ord.canal;
+            const cantTotal = (ord.items || []).reduce((a, b) => a + Number(b.cantidad || 1), 0) || 1;
+            const desc = (ord.items || []).map((i) => `${i.cantidad}x ${i.nombre}`).join(" + ").slice(0, 140) || "Pedido Marketplace";
+            await empRef().collection("ecommerce_ordenes").doc(`mkt_${docId}`).set({
+              canal: nombreCanal,
+              ordenExterna: String(ord.orderId),
+              comprador: ord.receptor?.razonSocial || "Consumidor Final",
+              rutComprador: tipoElegido === 33 ? (ord.receptor?.rut || "") : "",
+              direccionCliente: [ord.receptor?.direccion, ord.receptor?.comuna].filter(Boolean).join(", ") || "Santiago",
+              productoId: "marketplace",
+              codigoSku: ord.items?.[0]?.sku || "MKT",
+              productoNombre: desc,
+              cantidad: cantTotal,
+              totalClp: Number(ord.mntTotal || dte.mntTotal || 0),
+              tipoDte: Number(dte.tipoDte || tipoElegido),
+              folioSii: Number(dte.folio || 0),
+              timbradoSii: true,
+              enviadoMarketplace: ord.canal !== "lider",
+              esSimulacion: String(dte.proveedorUsado || "").toLowerCase() === "simulador" || dte.ambiente === "certificacion",
+              colaImpresion: ord.canal === "lider" ? "lider" : "general",
+              etiquetaImpresa: false,
+              fechaImpresion: "",
+              fechaImpresionTs: 0,
+              diaCerrado: false,
+              anuladaPorNc61: false,
+              devolucionInfo: null,
+              fechaIso: fechaIsoChile(ahora),
+              horaCorta: horaCortaChile(ahora),
+              fecha: fechaLegibleChile(ahora),
+              timestamp: ahora
+            }, { merge: true });
+          }
+          await refrescarEstadoBackend();
+          setAvisoBackend({ tipo: "ok", texto: `Orden #${ord.orderId} emitida (Folio #${dte?.folio || "-"}) y enviada a Facturas.` });
+        } catch (err) {
+          setAvisoBackend({ tipo: "error", texto: err.message });
+        } finally {
+          setEmitiendoDocId(null);
+        }
+      };
+
       const mods = empresa?.modulosActivos || {};
       const usaOmnicanal = Boolean(mods.m8_omnicanal);
       const usaColaLider = Boolean(mods.m11_colas_print);
@@ -863,7 +1092,6 @@
 
       const proximoCorte = useMemo(() => calcularProximoCorteDespacho(horariosActivosDespacho, ahoraTick), [horariosActivosDespacho, ahoraTick]);
 
-      // Solo muestra accesos multi-tenant reales y auditados (cero fugas a PGB ni enlaces 404)
       const areasHabilitadasPorSwitch = useMemo(() => {
         const lista = [];
         if (mods.m17_compras_prov || mods.m18_finanzas_bi) {
@@ -918,7 +1146,7 @@
         await empRef().update({ ordenMenu: nuevo });
       };
 
-      const pilotoAutomaticoActivo = Boolean(empresa?.apis?.siiModoAutomatico);
+      const pilotoAutomaticoActivo = Boolean(apisForm.siiModoAutomatico);
       const togglePilotoAutomatico = () => {
         const nuevoValor = !pilotoAutomaticoActivo;
         pedirAutorizacionSupervisor(
@@ -932,14 +1160,13 @@
       };
 
       const estadoConexiones = useMemo(() => {
-        const a = empresa?.apis || {};
         return {
-          sii: Boolean(a.siiApiKey),
-          meli: Boolean(a.meliClientId && a.meliSecret),
-          falabella: Boolean(a.falabellaUser && a.falabellaApiKey),
-          lider: Boolean(a.liderApiKey)
+          sii: Boolean(estadoBackendSii?.conectado),
+          meli: Boolean(estadoBackendMkt?.meli?.conectado),
+          falabella: Boolean(estadoBackendMkt?.falabella?.conectado),
+          lider: Boolean(estadoBackendMkt?.lider?.conectado)
         };
-      }, [empresa]);
+      }, [estadoBackendSii, estadoBackendMkt]);
 
       const faltanApis = !estadoConexiones.sii || (usaOmnicanal && !estadoConexiones.meli && !estadoConexiones.falabella && !estadoConexiones.lider);
 
@@ -1643,7 +1870,6 @@
         return ordenes.filter((o) => !o.diaCerrado && o.timbradoSii && !o.anuladaPorNc61).sort(ordenarPorFolioAsc);
       }, [ordenes]);
 
-      // Las 8 más recientes emitidas para mostrar en el panel de Inicio
       const ultimasOrdenesInicio = useMemo(() => {
         return ordenesJornadaActiva.slice(-8).reverse();
       }, [ordenesJornadaActiva]);
@@ -1695,7 +1921,7 @@
           .sort(ordenarPorFolioAsc);
       }, [ordenes, busquedaArchivo, fechaDesdeArchivo, fechaHastaArchivo]);
 
-      // CIERRE DE DÍA EN BLOQUES DE 450 (SIN LÍMITE DE 500 ESCRITURAS DE FIRESTORE)
+      // CIERRE DE DÍA EN BLOQUES DE 450
       const confirmarCierreDeDiaCaja = async (e) => {
         e.preventDefault();
         if (ordenesParaArchivarAlCierre.length === 0 || cerrandoDia) return;
@@ -1895,7 +2121,6 @@
         });
       };
 
-      // LEE ARRAYBUFFER ANTES DEL MODAL DE CLAVE + EVITA DUPLICADOS POR SKU Y NOMBRE
       const subirExcelCatalogo = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -1960,26 +2185,121 @@
         );
       };
 
+      // ================= GUARDADO EN BÓVEDA CIFRADA AES-256 (/api/auth/guardar-credenciales) =================
       const guardarApisYEmisor = (e) => {
         e.preventDefault();
         pedirAutorizacionSupervisor(
-          "Guardar Credenciales API y Emisor SII",
-          "Modificar llaves de SII, Mercado Libre, Falabella o Lider exige Clave de Supervisor.",
+          "Guardar en Bóveda Cifrada AES-256",
+          "Las credenciales se cifrarán en el servidor de Vercel y nunca quedarán en texto plano en Firestore.",
           async () => {
+            if (!sesionBackendLista) {
+              setMostrarModalAuthBackend(true);
+              throw new Error("Activa primero tu Sesión Segura del Servidor para cifrar credenciales en Vercel.");
+            }
             setGuardandoConfig(true);
             try {
-              const payloadApis = { ...apisForm, siiModoAutomatico: pilotoAutomaticoActivo };
-              await empRef().set({ apis: payloadApis, datosEmisor }, { merge: true });
-              alert("Conexiones API y datos del emisor guardados.");
-            } catch (err) {
-              alert(err.message);
+              const guardados = [];
+
+              if (apisForm.siiApiKey.trim()) {
+                await nexusFetch("/auth/guardar-credenciales", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    servicio: "sii",
+                    proveedor: apisForm.siiProveedor,
+                    ambiente: apisForm.siiAmbiente,
+                    credenciales: { apiKey: apisForm.siiApiKey.trim() },
+                    metadatos: {
+                      razonSocial: empresa?.nombre || "",
+                      giro: datosEmisor.giro,
+                      direccion: datosEmisor.direccion,
+                      comuna: datosEmisor.comuna
+                    }
+                  })
+                });
+                guardados.push(`SII (${apisForm.siiProveedor} / ${apisForm.siiAmbiente})`);
+              }
+
+              if (apisForm.meliClientId.trim() || apisForm.meliSecret.trim() || apisForm.meliRefreshToken.trim()) {
+                const credsMeli = {};
+                if (apisForm.meliClientId.trim()) credsMeli.clientId = apisForm.meliClientId.trim();
+                if (apisForm.meliSecret.trim()) credsMeli.clientSecret = apisForm.meliSecret.trim();
+                if (apisForm.meliRefreshToken.trim()) credsMeli.refreshToken = apisForm.meliRefreshToken.trim();
+                if (apisForm.meliSellerId.trim()) credsMeli.sellerId = apisForm.meliSellerId.trim();
+
+                await nexusFetch("/auth/guardar-credenciales", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    servicio: "meli",
+                    proveedor: "mercadolibre",
+                    ambiente: "produccion",
+                    credenciales: credsMeli,
+                    metadatos: { sellerId: apisForm.meliSellerId.trim() || "", autoEmitir: false }
+                  })
+                });
+                guardados.push("Mercado Libre");
+              }
+
+              if (apisForm.falabellaUser.trim() && apisForm.falabellaApiKey.trim()) {
+                await nexusFetch("/auth/guardar-credenciales", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    servicio: "falabella",
+                    proveedor: "falabella",
+                    ambiente: "produccion",
+                    credenciales: {
+                      userId: apisForm.falabellaUser.trim(),
+                      apiKey: apisForm.falabellaApiKey.trim()
+                    },
+                    metadatos: { autoEmitir: false }
+                  })
+                });
+                guardados.push("Falabella");
+              }
+
+              if (apisForm.liderClientId.trim() && apisForm.liderClientSecret.trim()) {
+                await nexusFetch("/auth/guardar-credenciales", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    servicio: "lider",
+                    proveedor: "walmart_chile",
+                    ambiente: "produccion",
+                    credenciales: {
+                      clientId: apisForm.liderClientId.trim(),
+                      clientSecret: apisForm.liderClientSecret.trim()
+                    },
+                    metadatos: { autoEmitir: false }
+                  })
+                });
+                guardados.push("Lider");
+              }
+
+              await empRef().set({
+                datosEmisor,
+                apis: { siiModoAutomatico: pilotoAutomaticoActivo }
+              }, { merge: true });
+
+              setApisForm((prev) => ({
+                ...prev,
+                siiApiKey: "",
+                meliSecret: "",
+                meliRefreshToken: "",
+                falabellaApiKey: "",
+                liderClientSecret: ""
+              }));
+
+              await refrescarEstadoBackend();
+              alert(
+                guardados.length
+                  ? `Cifrado AES-256 guardado en Vercel para: ${guardados.join(", ")}.`
+                  : "Datos del emisor guardados correctamente."
+              );
+            } finally {
+              setGuardandoConfig(false);
             }
-            setGuardandoConfig(false);
           }
         );
       };
 
-      // VALIDA CLAVE NUEVA + CONFIRMACIÓN + HORARIOS DE DESPACHO DEDUPLICADOS Y ORDENADOS
       const guardarSeguridadYDespachos = async (e) => {
         e.preventDefault();
         if (guardandoConfig) return;
@@ -2115,10 +2435,11 @@
       });
 
       const tienePinPersonalizado = Boolean(empresa.pinSupervisorHash || empresa.pinSupervisor);
+      const borradoresPendientesMkt = ordenesRealesMkt.filter((o) => o.estadoFacturacion !== "EMITIDO");
 
       return (
         <div className={`min-h-screen pb-24 lg:pb-10 transition-colors ${T.pageBg}`}>
-          {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN (SIEMPRE CON DATOS EMISOR GUARDADOS) */}
+          {/* CONTENEDORES EXCLUSIVOS DE IMPRESIÓN */}
           {modoImpresion === "dte" && dteVisualizando && (
             <div className="print-only bg-white p-2">
               <HojaDocumentoOficialSii orden={dteVisualizando} empresa={empresa} datosEmisor={datosEmisorImpresion} />
@@ -2136,6 +2457,60 @@
           {modoImpresion === "pedido" && pedidoParaImprimir.length > 0 && (
             <div className="print-only bg-white p-2">
               <HojaPedidoSugeridoPdf items={pedidoParaImprimir} empresa={empresa} filtroProveedor={filtroProvPedido} />
+            </div>
+          )}
+
+          {/* MODAL SESIÓN SEGURA BACKEND VERCEL */}
+          {mostrarModalAuthBackend && (
+            <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
+              <form onSubmit={activarSesionBackend} className={`${T.card} rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl`}>
+                <div className="flex items-start justify-between border-b border-slate-200/30 pb-3">
+                  <div>
+                    <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>
+                      Bóveda AES-256 & APIs
+                    </span>
+                    <h2 className={`text-base font-extrabold mt-1 ${T.textMain}`}>Activar Sesión Segura</h2>
+                  </div>
+                  <button type="button" onClick={() => setMostrarModalAuthBackend(false)} className={`text-xs font-bold px-2.5 py-1 rounded-xl cursor-pointer ${T.btnSec}`}>✕</button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl text-slate-900">
+                  <button
+                    type="button"
+                    onClick={() => setModoAuthBackend("empresa")}
+                    className={`py-2 rounded-lg text-xs font-bold cursor-pointer ${modoAuthBackend === "empresa" ? "bg-white shadow-sm" : "text-slate-600"}`}
+                  >
+                    Clave Empresa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoAuthBackend("superAdmin")}
+                    className={`py-2 rounded-lg text-xs font-bold cursor-pointer ${modoAuthBackend === "superAdmin" ? "bg-white shadow-sm" : "text-slate-600"}`}
+                  >
+                    PIN Maestro
+                  </button>
+                </div>
+
+                {errorAuthBackend && (
+                  <p className="text-xs font-bold text-rose-500 bg-rose-500/10 border border-rose-500/30 p-2.5 rounded-xl text-center">
+                    {errorAuthBackend}
+                  </p>
+                )}
+
+                <input
+                  type="password"
+                  value={claveAuthBackend}
+                  onChange={(e) => setClaveAuthBackend(e.target.value)}
+                  placeholder={modoAuthBackend === "superAdmin" ? "Ingresa PIN Maestro" : `Clave de ${empresa.nombre}`}
+                  className={`w-full rounded-xl px-4 py-3 text-xs font-bold outline-none ${T.input}`}
+                  autoFocus
+                  required
+                />
+
+                <button type="submit" disabled={autenticandoBackend} className={`w-full font-extrabold py-3 rounded-xl text-xs cursor-pointer disabled:opacity-40 ${T.btn}`}>
+                  {autenticandoBackend ? "Conectando..." : "Conectar con Vercel"}
+                </button>
+              </form>
             </div>
           )}
 
@@ -2347,7 +2722,7 @@
             </div>
           )}
 
-          {/* MODAL CORRECCIÓN DE RUT Y REFACTURACIÓN (NC 61 -> FACTURA 33 EXIGE CLAVE SUPERVISOR) */}
+          {/* MODAL CORRECCIÓN DE RUT Y REFACTURACIÓN */}
           {ordenRefacturarModal && (
             <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
               <form onSubmit={ejecutarCorreccionRutYRefactura} className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
@@ -2413,7 +2788,7 @@
             </div>
           )}
 
-          {/* MODAL EJECUTIVO DE CERRAR DÍA / CAJA (PROTEGIDO CON CLAVE SUPERVISOR) */}
+          {/* MODAL EJECUTIVO DE CERRAR DÍA / CAJA */}
           {modalCierreCaja && (
             <div className="fixed inset-0 z-50 bg-slate-950/75 flex items-center justify-center p-4 no-print">
               <form onSubmit={confirmarCierreDeDiaCaja} className={`${T.card} rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl`}>
@@ -2432,7 +2807,7 @@
                     <span className="font-extrabold text-amber-600 block">
                       ⚠️ Hay {ordenesRutInvalidoPendientes.length} orden(es) retenida(s) por RUT inválido
                     </span>
-                    <p className={T.sub}>
+                    <p className={T.textSub}>
                       Esas órdenes aún no están timbradas y seguirán abiertas hasta corregir el RUT o emitir Boleta 39.
                     </p>
                   </div>
@@ -2794,7 +3169,7 @@
             </div>
           )}
 
-          {/* CABECERA EJECUTIVA (ADAPTADA A MÓVIL COMPACTO Y PC PANORÁMICO) */}
+          {/* CABECERA EJECUTIVA */}
           <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 space-y-4 no-print">
             <div className={`${T.card} rounded-2xl p-3.5 sm:p-5 border-t-4 ${T.borderTop} flex flex-col lg:flex-row lg:items-center justify-between gap-3`}>
               <div className="flex items-center justify-between gap-2">
@@ -2808,6 +3183,17 @@
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${T.tag}`}>RUT {empresa.rut}</span>
                       <span className="text-[10px] font-bold text-emerald-600">Corte: {proximoCorte.salida}</span>
+                      {sesionBackendLista ? (
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">Bóveda Activa</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setErrorAuthBackend(""); setMostrarModalAuthBackend(true); }}
+                          className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-600/15 text-blue-600 underline cursor-pointer"
+                        >
+                          Activar Bóveda API
+                        </button>
+                      )}
                     </div>
                     <h1 className={`text-base sm:text-xl font-extrabold mt-0.5 truncate ${T.textMain}`}>{empresa.nombre}</h1>
                   </div>
@@ -2877,6 +3263,15 @@
                 </button>
               </div>
             </div>
+
+            {avisoBackend && (
+              <div className={`${T.card} rounded-2xl p-3.5 flex items-center justify-between gap-2 text-xs font-bold ${
+                avisoBackend.tipo === "error" ? "border-rose-500 text-rose-500" : "border-emerald-500 text-emerald-600"
+              }`}>
+                <span>{avisoBackend.texto}</span>
+                <button type="button" onClick={() => setAvisoBackend(null)} className="px-2 py-0.5 cursor-pointer">✕</button>
+              </div>
+            )}
 
             {/* ALERTA GLOBAL DE ÓRDENES CON RUT INVÁLIDO ESPERANDO CLIENTE */}
             {ordenesRutInvalidoPendientes.length > 0 && (
@@ -2957,6 +3352,67 @@
                   </div>
                 </div>
 
+                {/* BANDEJA DE PEDIDOS REALES EN MODO BORRADOR (SI HAY O ESTÁ HABILITADO OMNICANAL) */}
+                {(usaOmnicanal || borradoresPendientesMkt.length > 0) && (
+                  <div className={`${T.card} rounded-2xl p-5 space-y-3`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${T.tag}`}>
+                          Modo Borrador Seguro (Sin enviar a SII hasta aprobar)
+                        </span>
+                        <h2 className={`text-sm font-extrabold mt-1 ${T.textMain}`}>
+                          Pedidos Sincronizados de Marketplaces ({borradoresPendientesMkt.length} pendientes)
+                        </h2>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={sincronizandoMkt}
+                        onClick={() => sincronizarBorradoresMarketplaces("todos")}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer disabled:opacity-50 ${T.btn}`}
+                      >
+                        {sincronizandoMkt ? "Sincronizando..." : "↻ Sincronizar Pedidos (Borrador)"}
+                      </button>
+                    </div>
+
+                    {borradoresPendientesMkt.length === 0 ? (
+                      <p className={`text-xs ${T.textSub}`}>
+                        {sesionBackendLista
+                          ? "Sin borradores pendientes en este momento. Conecta tus llaves en Ajustes → Conexiones API & SII y presiona Sincronizar."
+                          : "Activa tu Sesión Segura arriba para consultar y sincronizar borradores desde Vercel."}
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-slate-200/40">
+                        {borradoresPendientesMkt.slice(0, 6).map((ord) => {
+                          const docId = ord.docId || ord.id;
+                          return (
+                            <div key={docId} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className={`font-extrabold ${T.textMain}`}>{CANAL_LABEL[ord.canal] || ord.canal} #{ord.orderId}</span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${T.tag}`}>
+                                    Sugerido: {Number(ord.tipoDteSugerido) === 33 ? "Factura 33" : "Boleta 39"}
+                                  </span>
+                                </div>
+                                <p className={`mt-0.5 ${T.textSub}`}>
+                                  {ord.receptor?.razonSocial || "Cliente"} • Total: <strong>${Number(ord.mntTotal || 0).toLocaleString("es-CL")}</strong>
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={emitiendoDocId === docId}
+                                onClick={() => emitirOrdenMarketplaceControlada(ord)}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer disabled:opacity-50 ${T.btn}`}
+                              >
+                                {emitiendoDocId === docId ? "Emitiendo..." : `Emitir ${Number(ord.tipoDteSugerido) === 33 ? "Factura 33" : "Boleta 39"}`}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                   <div className="lg:col-span-5 space-y-4">
                     {faltanApis && (
@@ -2965,7 +3421,7 @@
                           Configuración Inicial Pendiente
                         </span>
                         <p className={`text-xs ${T.textSub}`}>
-                          Conecta tus llaves de SII/OpenFactura y Marketplaces para sincronizar en vivo.
+                          Conecta tus llaves de SII y Marketplaces en la bóveda cifrada AES-256 para operar en vivo.
                         </p>
                         <button onClick={() => { setVista("config"); setSubTabConfig("apis"); }} className={`w-full font-bold py-2.5 rounded-xl text-xs cursor-pointer ${T.btn}`}>
                           Ir a Centro de APIs
@@ -3636,7 +4092,7 @@
               <div className="space-y-4">
                 <div className={`${T.card} rounded-2xl p-3 flex flex-wrap gap-2`}>
                   <button onClick={() => setSubTabConfig("apis")} className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabConfig === "apis" ? T.btn : T.btnSec}`}>
-                    Conexiones API & SII
+                    Bóveda API & SII
                   </button>
                   <button onClick={() => setSubTabConfig("seguridad")} className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer ${subTabConfig === "seguridad" ? T.btn : T.btnSec}`}>
                     Seguridad y Horarios Despacho
@@ -3653,46 +4109,89 @@
                   <form onSubmit={guardarApisYEmisor} className={`${T.card} rounded-2xl p-6 space-y-5`}>
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/30 pb-3">
                       <div>
-                        <h2 className={`text-base font-extrabold ${T.textMain}`}>Centro de Conexiones API y Facturación SII</h2>
-                        <p className={`text-xs ${T.textSub}`}>Guardar llaves o activar Piloto Automático requiere Clave de Supervisor.</p>
+                        <h2 className={`text-base font-extrabold ${T.textMain}`}>Bóveda Cifrada AES-256 (APIs & Facturación SII)</h2>
+                        <p className={`text-xs ${T.textSub}`}>
+                          Las llaves se envían cifradas a Vercel. Completa solo el bloque que quieras guardar o actualizar.
+                        </p>
                       </div>
-                      <div className={`${T.cardMuted} px-3.5 py-2 rounded-xl flex items-center gap-2.5`}>
-                        <span className={`text-xs font-bold ${T.textMain}`}>Piloto Automático</span>
-                        <SwitchToggle checked={pilotoAutomaticoActivo} onChange={togglePilotoAutomatico} colorClass={T.sw} />
+                      <div className="flex items-center gap-2.5">
+                        {!sesionBackendLista && (
+                          <button
+                            type="button"
+                            onClick={() => { setErrorAuthBackend(""); setMostrarModalAuthBackend(true); }}
+                            className="bg-blue-600 text-white text-xs font-extrabold px-3.5 py-2 rounded-xl cursor-pointer"
+                          >
+                            Activar Bóveda
+                          </button>
+                        )}
+                        <div className={`${T.cardMuted} px-3.5 py-2 rounded-xl flex items-center gap-2.5`}>
+                          <span className={`text-xs font-bold ${T.textMain}`}>Piloto Automático</span>
+                          <SwitchToggle checked={pilotoAutomaticoActivo} onChange={togglePilotoAutomatico} colorClass={T.sw} />
+                        </div>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* 1. SII */}
                       <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
                         <div className="flex items-center justify-between">
-                          <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>1. SII / OpenFactura</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>1. Proveedor SII</h3>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${estadoConexiones.sii ? "bg-emerald-500/15 text-emerald-600" : "bg-slate-200 text-slate-600"}`}>
+                              {estadoConexiones.sii ? `Conectado (${estadoBackendSii?.ambiente || "ok"})` : "Sin llave"}
+                            </span>
+                          </div>
                           <button type="button" onClick={() => setAyudaApiModal("sii")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                         </div>
-                        <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`}>
-                          <option>OpenFactura (Haulmer)</option>
-                          <option>SimpleFactura</option>
-                          <option>SII Directo (Certificado .PFX + CAF)</option>
-                        </select>
-                        <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="API Key OpenFactura / SII" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <select value={apisForm.siiProveedor} onChange={(e) => setApisForm({ ...apisForm, siiProveedor: e.target.value })} className={`w-full rounded-xl px-2.5 py-2 text-xs font-semibold ${T.input}`}>
+                            <option value="openfactura">OpenFactura (Haulmer)</option>
+                            <option value="simplefactura">SimpleFactura</option>
+                            <option value="libredte">LibreDTE</option>
+                            <option value="sii_directo">SII Directo</option>
+                            <option value="simulador">Simulador Interno</option>
+                          </select>
+                          <select value={apisForm.siiAmbiente} onChange={(e) => setApisForm({ ...apisForm, siiAmbiente: e.target.value })} className={`w-full rounded-xl px-2.5 py-2 text-xs font-semibold ${T.input}`}>
+                            <option value="certificacion">Certificación (Pruebas)</option>
+                            <option value="produccion">Producción (Real SII)</option>
+                          </select>
+                        </div>
+                        <input type="password" value={apisForm.siiApiKey} onChange={(e) => setApisForm({ ...apisForm, siiApiKey: e.target.value })} placeholder="Nueva API Key Proveedor SII" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                       </div>
 
                       {usaOmnicanal && (
                         <>
+                          {/* 2. MERCADO LIBRE */}
                           <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
                             <div className="flex items-center justify-between">
-                              <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>2. Mercado Libre Chile</h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>2. Mercado Libre Chile</h3>
+                                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${estadoConexiones.meli ? "bg-emerald-500/15 text-emerald-600" : "bg-slate-200 text-slate-600"}`}>
+                                  {estadoConexiones.meli ? "Conectado" : "Sin llave"}
+                                </span>
+                              </div>
                               <button type="button" onClick={() => setAyudaApiModal("meli")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                             </div>
-                            <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                            <div className="grid grid-cols-2 gap-2">
+                              <input type="text" value={apisForm.meliClientId} onChange={(e) => setApisForm({ ...apisForm, meliClientId: e.target.value })} placeholder="Client ID / App ID" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                              <input type="text" value={apisForm.meliSellerId} onChange={(e) => setApisForm({ ...apisForm, meliSellerId: e.target.value })} placeholder="Seller ID (opcional)" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                            </div>
                             <input type="password" value={apisForm.meliSecret} onChange={(e) => setApisForm({ ...apisForm, meliSecret: e.target.value })} placeholder="Client Secret" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                            <input type="password" value={apisForm.meliRefreshToken} onChange={(e) => setApisForm({ ...apisForm, meliRefreshToken: e.target.value })} placeholder="Refresh Token OAuth2" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                           </div>
 
+                          {/* 3. FALABELLA */}
                           <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
                             <div className="flex items-center justify-between">
-                              <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>3. Falabella Seller Center</h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>3. Falabella Seller Center</h3>
+                                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${estadoConexiones.falabella ? "bg-emerald-500/15 text-emerald-600" : "bg-slate-200 text-slate-600"}`}>
+                                  {estadoConexiones.falabella ? "Conectado" : "Sin llave"}
+                                </span>
+                              </div>
                               <button type="button" onClick={() => setAyudaApiModal("falabella")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                             </div>
-                            <input type="text" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                            <input type="email" value={apisForm.falabellaUser} onChange={(e) => setApisForm({ ...apisForm, falabellaUser: e.target.value })} placeholder="Correo Seller Center" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                             <input type="password" value={apisForm.falabellaApiKey} onChange={(e) => setApisForm({ ...apisForm, falabellaApiKey: e.target.value })} placeholder="API Key Falabella" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                           </div>
                         </>
@@ -3701,15 +4200,21 @@
                       {usaColaLider && (
                         <div className={`${T.cardMuted} rounded-xl p-4 space-y-2.5`}>
                           <div className="flex items-center justify-between">
-                            <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>4. Lider / Walmart Marketplace</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className={`text-xs font-extrabold uppercase ${T.textMain}`}>4. Lider / Walmart Marketplace</h3>
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${estadoConexiones.lider ? "bg-emerald-500/15 text-emerald-600" : "bg-slate-200 text-slate-600"}`}>
+                                {estadoConexiones.lider ? "Conectado" : "Sin llave"}
+                              </span>
+                            </div>
                             <button type="button" onClick={() => setAyudaApiModal("lider")} className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-extrabold flex items-center justify-center cursor-pointer">?</button>
                           </div>
-                          <input type="password" value={apisForm.liderApiKey} onChange={(e) => setApisForm({ ...apisForm, liderApiKey: e.target.value })} placeholder="Token / Client Secret Lider" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                          <input type="text" value={apisForm.liderClientId} onChange={(e) => setApisForm({ ...apisForm, liderClientId: e.target.value })} placeholder="Client ID Lider / Walmart" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
+                          <input type="password" value={apisForm.liderClientSecret} onChange={(e) => setApisForm({ ...apisForm, liderClientSecret: e.target.value })} placeholder="Client Secret Lider / Walmart" className={`w-full rounded-xl px-3 py-2 text-xs font-semibold ${T.input}`} />
                         </div>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200/30">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200/30">
                       <div>
                         <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Giro Comercial SII</label>
                         <input type="text" value={datosEmisor.giro} onChange={(e) => setDatosEmisor({ ...datosEmisor, giro: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
@@ -3718,10 +4223,14 @@
                         <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Dirección Casa Matriz</label>
                         <input type="text" value={datosEmisor.direccion} onChange={(e) => setDatosEmisor({ ...datosEmisor, direccion: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
                       </div>
+                      <div>
+                        <label className={`text-[11px] font-bold block mb-1 ${T.textSub}`}>Comuna</label>
+                        <input type="text" value={datosEmisor.comuna} onChange={(e) => setDatosEmisor({ ...datosEmisor, comuna: e.target.value })} className={`w-full rounded-xl px-3 py-2 text-xs font-bold ${T.input}`} />
+                      </div>
                     </div>
 
                     <button type="submit" disabled={guardandoConfig} className={`w-full font-extrabold py-3.5 rounded-xl text-xs cursor-pointer disabled:opacity-40 ${T.btn}`}>
-                      {guardandoConfig ? "Guardando..." : "Guardar Conexiones API y Datos del Emisor"}
+                      {guardandoConfig ? "Cifrando y Guardando..." : "Guardar en Bóveda Cifrada y Emisor"}
                     </button>
                   </form>
                 )}
