@@ -1167,21 +1167,14 @@
         setVendedorSeleccionado("");
       };
 
-      // Evita que el gesto "Atrás" en móvil saque al usuario al login cuando hay un modal o sub-vista abierta
-      const hayModalAbierto = Boolean(
-        dteVisualizando || modalNuevaVenta || modalPedidoSugerido || modalCierreCaja ||
-        productoEditando || ordenDevolucionModal || ordenRefacturarModal ||
-        mostrarModalAuthBackend || modalPinReq || ayudaApiModal || confirmarImpresionLote
-      );
-
+      // Bloquea el gesto/botón "Atrás" para permanecer siempre dentro del panel (solo se sale con el botón "Salir")
       useEffect(() => {
-        if (hayModalAbierto || vista !== "inicio") {
-          window.history.pushState({ nexusGuard: true }, "");
-        }
-      }, [hayModalAbierto, vista]);
+        window.history.pushState({ nexusStay: true }, "", window.location.href);
+      }, []);
 
       useEffect(() => {
         const onPopState = () => {
+          window.history.pushState({ nexusStay: true }, "", window.location.href);
           if (dteVisualizando) { setDteVisualizando(null); setModoImpresion(null); return; }
           if (confirmarImpresionLote) { setConfirmarImpresionLote(false); setLoteParaImprimir([]); setModoImpresion(null); return; }
           if (modalNuevaVenta) { cerrarYLimpiarModalVenta(); return; }
