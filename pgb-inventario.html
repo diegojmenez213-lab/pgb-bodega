@@ -39,7 +39,16 @@
     .print-only { display: none; }
     @media print {
       @page { size: auto; margin: 10mm; }
-      body { background: white !important; color: black !important; margin: 0; padding: 0; }
+      html, body {
+        background: white !important;
+        color: black !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        min-height: 0 !important;
+        height: auto !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
       .no-print { display: none !important; }
       .print-only { display: block !important; }
     }
@@ -144,6 +153,10 @@
       const [busqueda, setBusqueda] = useState("");
       const [guardando, setGuardando] = useState(false);
 
+      // Selección de productos para conteo y planilla PDF
+      const [seleccionadosIds, setSeleccionadosIds] = useState([]);
+      const [verSoloSeleccionados, setVerSoloSeleccionados] = useState(false);
+
       // Modal de autorización Supervisor (SHA-256) antes de sobrescribir stock
       const [modalPinAbierto, setModalPinAbierto] = useState(false);
       const [pinInput, setPinInput] = useState("");
@@ -199,7 +212,7 @@
         return ["TODOS", ...Array.from(set).sort()];
       }, [productos]);
 
-      const filtrados = useMemo(() => {
+      const filtradosBase = useMemo(() => {
         const q = busqueda.trim().toLowerCase();
         return productos.filter((p) => {
           if (filtroProveedor !== "TODOS" && p.proveedor !== filtroProveedor) return false;
@@ -207,6 +220,48 @@
           return (p.nombre || "").toLowerCase().includes(q) || (p.codigo || "").toLowerCase().includes(q);
         });
       }, [productos, filtroProveedor, busqueda]);
+
+      const filtrados = useMemo(() => {
+        if (!verSoloSeleccionados) return filtradosBase;
+        const setSel = new Set(seleccionadosIds);
+        return filtradosBase.filter((p) => setSel.has(p.id));
+      }, [filtradosBase, verSoloSeleccionados, seleccionadosIds]);
+
+      // Productos que irán a la planilla PDF: si hay seleccionados, solo esos; si no, los visibles filtrados
+      const productosParaImprimir = useMemo(() => {
+        if (seleccionadosIds.length > 0) {
+          const setSel = new Set(seleccionadosIds);
+          return productos.filter((p) => setSel.has(p.id));
+        }
+        return filtrados;
+      }, [productos, seleccionadosIds, filtrados]);
+
+      const toggleSeleccionProducto = (id) => {
+        setSeleccionadosIds((prev) =>
+          prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+      };
+
+      const seleccionarTodosVisibles = () => {
+        const idsVisibles = filtradosBase.map((p) => p.id);
+        setSeleccionadosIds((prev) => Array.from(new Set([...prev, ...idsVisibles])));
+      };
+
+      const deseleccionarVisibles = () => {
+        const setVisibles = new Set(filtradosBase.map((p) => p.id));
+        setSeleccionadosIds((prev) => prev.filter((id) => !setVisibles.has(id)));
+      };
+
+      const limpiarTodaSeleccion = () => {
+        setSeleccionadosIds([]);
+        setVerSoloSeleccionados(false);
+      };
+
+      const todosVisiblesMarcados = useMemo(() => {
+        if (filtradosBase.length === 0) return false;
+        const setSel = new Set(seleccionadosIds);
+        return filtradosBase.every((p) => setSel.has(p.id));
+      }, [filtradosBase, seleccionadosIds]);
 
       // Resumen en vivo de productos con conteo ingresado (solo productos vigentes en catálogo)
       const resumenContados = useMemo(() => {
@@ -339,7 +394,7 @@
       const tienePinPersonalizado = Boolean(empresa.pinSupervisorHash || empresa.pinSupervisor);
 
       return (
-        <div className={`min-h-screen pb-24 ${T.page}`}>
+        <div className={`min-h-screen pb-24 print:min-h-0 print:pb-0 ${T.page}`}>
           {/* PLANILLA EJECUTIVA PDF (SIEMPRE BLANCO Y NEGRO, SIN CORTAR NOMBRES NI INPUTS) */}
           <div className="print-only bg-white text-black p-6 text-xs">
             <div className="flex justify-between items-start gap-4 pb-4 border-b-2 border-slate-900">
@@ -353,8 +408,10 @@
               <div className="text-right">
                 <p className="text-sm font-extrabold uppercase">PLANILLA DE TOMA DE INVENTARIO FÍSICO</p>
                 <p className="text-[11px]">Fecha Emisión: {fechaIsoChile()}</p>
-                <p className="text-[11px]">Filtro Proveedor: {filtroProveedor === "TODOS" ? "Todos los proveedores" : filtroProveedor}</p>
-                <p className="text-[11px]">Total SKUs en Planilla: {filtrados.length}</p>
+                <p className="text-[11px]">
+                  Alcance: {seleccionadosIds.length > 0 ? `Selección manual (${productosParaImprimir.length} SKUs)` : filtroProveedor === "TODOS" ? "Todos los proveedores" : filtroProveedor}
+                </p>
+                <p className="text-[11px]">Total SKUs en Planilla: {productosParaImprimir.length}</p>
               </div>
             </div>
 
@@ -370,7 +427,7 @@
                 </tr>
               </thead>
               <tbody>
-                {filtrados.map((p) => {
+                {productosParaImprimir.map((p) => {
                   const sist = Number(p.stockOnline ?? 0);
                   const tieneVal = conteos[p.id] !== undefined && conteos[p.id] !== "";
                   const fis = tieneVal ? parseInt(conteos[p.id], 10) : null;
@@ -477,13 +534,13 @@
                 </div>
                 <h1 className={`text-xl font-extrabold ${T.main}`}>Control de Inventario y Toma Física</h1>
                 <p className={`text-xs mt-0.5 ${T.sub}`}>
-                  Ingresa las cantidades reales contadas en estantería. Guardar requiere Clave de Supervisor y deja registro en Auditoría.
+                  Marca con casillas los productos o el proveedor que vas a contar. Guardar requiere Clave de Supervisor y deja registro en Auditoría.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => window.print()} className={`text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer ${T.sec}`}>
-                  Imprimir Planilla PDF
+                  {seleccionadosIds.length > 0 ? `Imprimir Selección PDF (${seleccionadosIds.length})` : "Imprimir Planilla PDF"}
                 </button>
                 <button
                   onClick={abrirConfirmacionGuardar}
@@ -510,41 +567,99 @@
               </div>
             )}
 
-            <div className={`${T.card} rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3`}>
-              <input
-                type="text"
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar SKU o producto..."
-                className={`sm:col-span-2 rounded-xl px-4 py-2 text-xs font-semibold outline-none ${T.input}`}
-              />
-              <select value={filtroProveedor} onChange={(e) => setFiltroProveedor(e.target.value)} className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}>
-                {proveedores.map((pr) => <option key={pr} value={pr}>{pr === "TODOS" ? "Todos los proveedores" : pr}</option>)}
-              </select>
+            {/* BUSCADOR, FILTRO POR PROVEEDOR Y BARRA DE SELECCIÓN */}
+            <div className={`${T.card} rounded-2xl p-4 space-y-3`}>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="Buscar SKU o producto..."
+                  className={`sm:col-span-2 rounded-xl px-4 py-2 text-xs font-semibold outline-none ${T.input}`}
+                />
+                <select value={filtroProveedor} onChange={(e) => setFiltroProveedor(e.target.value)} className={`rounded-xl px-3 py-2 text-xs font-bold ${T.input}`}>
+                  {proveedores.map((pr) => <option key={pr} value={pr}>{pr === "TODOS" ? "Todos los proveedores" : pr}</option>)}
+                </select>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/40">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={todosVisiblesMarcados ? deseleccionarVisibles : seleccionarTodosVisibles}
+                    disabled={filtradosBase.length === 0}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer disabled:opacity-40 ${T.sec}`}
+                  >
+                    {todosVisiblesMarcados
+                      ? `Quitar visibles (${filtradosBase.length})`
+                      : filtroProveedor === "TODOS"
+                        ? `Seleccionar visibles (${filtradosBase.length})`
+                        : `Seleccionar ${filtroProveedor} (${filtradosBase.length})`}
+                  </button>
+
+                  {seleccionadosIds.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setVerSoloSeleccionados((v) => !v)}
+                        className={`text-xs font-extrabold px-3 py-1.5 rounded-xl cursor-pointer ${verSoloSeleccionados ? T.btn : T.sec}`}
+                      >
+                        {verSoloSeleccionados ? `Viendo seleccionados (${seleccionadosIds.length})` : `Ver solo seleccionados (${seleccionadosIds.length})`}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={limpiarTodaSeleccion}
+                        className="text-xs font-bold text-rose-500 px-2 py-1.5 underline cursor-pointer"
+                      >
+                        Limpiar selección
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <span className={`text-[11px] font-bold ${T.sub}`}>
+                  Mostrando {filtrados.length} de {productos.length} SKUs
+                </span>
+              </div>
             </div>
 
-            <div className={`${T.card} rounded-2xl p-5`}>
+            <div className={`${T.card} rounded-2xl p-4 sm:p-5`}>
               <div className="divide-y divide-slate-200/40">
                 {filtrados.length === 0 ? (
-                  <p className={`text-xs text-center py-8 ${T.sub}`}>No hay productos registrados en el catálogo.</p>
+                  <p className={`text-xs text-center py-8 ${T.sub}`}>
+                    {verSoloSeleccionados ? "No hay productos seleccionados con el filtro actual." : "No hay productos registrados en el catálogo."}
+                  </p>
                 ) : (
                   filtrados.map((p) => {
                     const sist = Number(p.stockOnline ?? 0);
                     const valStr = conteos[p.id] ?? "";
                     const tieneVal = valStr !== "";
                     const diff = tieneVal ? parseInt(valStr, 10) - sist : null;
+                    const seleccionado = seleccionadosIds.includes(p.id);
                     return (
-                      <div key={p.id} className="py-3 flex items-center justify-between gap-3 text-xs">
-                        <div className="min-w-0">
-                          <span className={`font-extrabold block truncate ${T.main}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
-                          <span className={`text-[11px] ${T.sub}`}>
-                            {p.proveedor || "General"} • Stock Sistema: <strong>{sist}</strong>
-                            {tieneVal && (
-                              <span className={`ml-2 font-extrabold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-sky-600" : "text-rose-500"}`}>
-                                • {diff === 0 ? "Cuadrado ✓" : `Dif: ${diff > 0 ? "+" : ""}${diff}`}
-                              </span>
-                            )}
-                          </span>
+                      <div key={p.id} className={`py-3 flex items-center justify-between gap-2.5 text-xs ${seleccionado ? "bg-blue-50/40 -mx-2 px-2 rounded-xl" : ""}`}>
+                        <div
+                          onClick={() => toggleSeleccionProducto(p.id)}
+                          className="flex items-start gap-2.5 min-w-0 flex-1 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={seleccionado}
+                            onChange={() => {}}
+                            className="w-4 h-4 mt-0.5 shrink-0 cursor-pointer accent-blue-700"
+                          />
+                          <div className="min-w-0">
+                            <span className={`font-extrabold block truncate ${T.main}`}>{p.codigo ? `[${p.codigo}] ` : ""}{p.nombre}</span>
+                            <span className={`text-[11px] ${T.sub}`}>
+                              {p.proveedor || "General"} • Stock Sistema: <strong>{sist}</strong>
+                              {tieneVal && (
+                                <span className={`ml-2 font-extrabold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-sky-600" : "text-rose-500"}`}>
+                                  • {diff === 0 ? "Cuadrado ✓" : `Dif: ${diff > 0 ? "+" : ""}${diff}`}
+                                </span>
+                              )}
+                            </span>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <input
@@ -553,7 +668,7 @@
                             placeholder="Físico"
                             value={valStr}
                             onChange={(e) => actualizarConteoInput(p.id, e.target.value)}
-                            className={`w-24 rounded-xl px-3 py-2 text-xs font-extrabold text-center outline-none ${T.input} ${tieneVal ? "border-amber-500" : ""}`}
+                            className={`w-20 sm:w-24 rounded-xl px-2.5 py-2 text-xs font-extrabold text-center outline-none ${T.input} ${tieneVal ? "border-amber-500" : ""}`}
                           />
                         </div>
                       </div>
