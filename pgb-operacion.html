@@ -248,9 +248,7 @@
     ];
 
     const ACCIONES_DISPONIBLES = [
-      "Ajustar Inventario en Bodega",
       "Enviar / Reponer Producto al Cliente",
-      "Descuento en Factura / Cuenta Corriente",
       "Nota de Crédito (Tributaria)",
       "Chofer Retorna Producto a Bodega"
     ];
@@ -389,7 +387,7 @@
       const [danioTotalForm, setDanioTotalForm] = useState(true);
       const [cantDanadaParcial, setCantDanadaParcial] = useState(1);
 
-      const [accionesSeleccionadas, setAccionesSeleccionadas] = useState(["Ajustar Inventario en Bodega"]);
+      const [accionesSeleccionadas, setAccionesSeleccionadas] = useState(["Nota de Crédito (Tributaria)"]);
       const [notas, setNotas] = useState("");
 
       const sincronizandoRef = useRef(false);
@@ -569,7 +567,7 @@
         } else if (nuevoMotivo === "CruceVentas") {
           setAccionesSeleccionadas(["Chofer Retorna Producto a Bodega", "Enviar / Reponer Producto al Cliente"]);
         } else if (!editandoId) {
-          setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
+          setAccionesSeleccionadas(["Nota de Crédito (Tributaria)"]);
         }
       };
 
@@ -585,7 +583,7 @@
         setArmador(ARMADORES[0]);
         setVendedor(VENDEDORES[0]);
         setMotivo("Faltante");
-        setAccionesSeleccionadas(["Ajustar Inventario en Bodega"]);
+        setAccionesSeleccionadas(["Nota de Crédito (Tributaria)"]);
         setCausaDanio(CAUSAS_DANIO_RUTA[0]);
         setDanioTotalForm(true);
         setCantDanadaParcial(1);
@@ -992,13 +990,7 @@
 
           if (clienteNorm) await registrarClienteEnCatalogo(clienteNorm);
 
-          const motivoObj = MOTIVOS.find(m => m.id === motivo);
-          const requiereFisico = motivoObj ? motivoObj.fisico : true;
-          const requiereAjusteInv = accionesSeleccionadas.includes("Ajustar Inventario en Bodega");
-
           let infoDanioObj = null;
-          let cantidadParaConteo = cantPrincipal;
-          let unidadParaConteo = uniPrincipal;
 
           if (motivo === "Daño/Merma") {
             const esManipulacion = causaDanio.includes("manipulación");
@@ -1011,21 +1003,6 @@
               cantidadDanada: danioTotalForm ? Number(cantidad) : Number(cantDanadaParcial),
               unidadDanada: danioTotalForm ? unidad : (unidad === "Unidad" ? "Unidad" : "Unidad suelta")
             };
-
-            if (!danioTotalForm) {
-              cantidadParaConteo = Number(cantDanadaParcial);
-              unidadParaConteo = unidad === "Unidad" ? "Unidad" : "Unidad suelta";
-            }
-          }
-
-          // Al crear incidencia nueva suma a conteo pendiente; al editar evita duplicar cantidades
-          if (!editandoId) {
-            if (requiereFisico && requiereAjusteInv && !["AceptadoPorCliente", ...MOTIVOS_VENTAS_IDS].includes(motivo)) {
-              await registrarConteoPendiente(prodPrincipal, unidadParaConteo, cantidadParaConteo, factura.trim(), infoProdPrincipal);
-            }
-            if ((motivo === "Cruce") && prodCruceNorm && requiereAjusteInv) {
-              await registrarConteoPendiente(prodCruceNorm, unidadCruce, Number(cantidadCruce), factura.trim(), infoProdCruce);
-            }
           }
 
           const checksIniciales = {};
@@ -1532,7 +1509,9 @@
           setDanioTotalForm(item.detalleDanio.esDanioTotal !== undefined ? item.detalleDanio.esDanioTotal : true);
           setCantDanadaParcial(item.detalleDanio.cantidadDanada || 1);
         }
-        setAccionesSeleccionadas(item.acciones || [item.accionResolucion || ACCIONES_DISPONIBLES[0]]);
+        const accionesFiltradasEdit = (item.acciones || [item.accionResolucion || "Nota de Crédito (Tributaria)"])
+          .filter(ac => ACCIONES_DISPONIBLES.includes(ac));
+        setAccionesSeleccionadas(accionesFiltradasEdit.length > 0 ? accionesFiltradasEdit : ["Nota de Crédito (Tributaria)"]);
         setNotas(item.notas || "");
         setVista("nuevo"); window.scrollTo({ top: 0, behavior: "smooth" });
       };
@@ -1808,8 +1787,9 @@
         };
 
         incidencias.forEach(inc => {
+          const requiereAjuste = (inc.acciones || []).includes("Ajustar Inventario en Bodega");
           const ajusteYaHecho = inc.checksAcciones?.["Ajustar Inventario en Bodega"]?.completado;
-          if (ajusteYaHecho) return;
+          if (!requiereAjuste || ajusteYaHecho) return;
 
           if (inc.motivo === "Faltante") sumar(inc.producto, inc.unidad, inc.cantidad, "SOBRA_EN_BODEGA", inc.factura);
           else if (inc.motivo === "Sobrante") sumar(inc.producto, inc.unidad, inc.cantidad, "FALTA_EN_BODEGA", inc.factura);
@@ -2678,7 +2658,7 @@
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {incidenciasFiltradas.map(item => {
                         const abierto = tarjetasAbiertas[item.id] || false;
-                        const accionesLista = item.acciones || [item.accionResolucion || "Ajustar Inventario en Bodega"];
+                        const accionesLista = item.acciones || [item.accionResolucion || "Nota de Crédito (Tributaria)"];
                         const checksMap = item.checksAcciones || {};
                         const incluyeRetorno = accionesLista.includes("Chofer Retorna Producto a Bodega");
                         const estaRecibiendo = recibiendoRetornoId === item.id;
