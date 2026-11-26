@@ -250,7 +250,6 @@ function mapearFilaExcel(row, proveedorForzado = "") {
     )
   );
 
-  // Filtro anti-encabezados: descarta filas separadoras de sección (sin precio ni stock)
   if (costoUsd <= 0 && stockPlanta <= 0 && (!codigoRaw || codigoRaw.endsWith(":") || codigoRaw.length > 28)) {
     return null;
   }
@@ -264,7 +263,6 @@ function mapearFilaExcel(row, proveedorForzado = "") {
     .toUpperCase();
   const provId = normalizarIdProveedor(provFinal) || "GENERAL";
 
-  // ID aislado por proveedor para evitar colisiones si dos proveedores repiten códigos
   const docIdAislado = limpiarDocId(`${provId}__${limpiarDocId(codigo)}`);
 
   return {
@@ -344,10 +342,10 @@ export async function mount(root, state) {
 
   root.innerHTML = `
     <div class="space-y-4 max-w-6xl mx-auto">
-      <!-- Inventarios completamente separados -->
+      <!-- Inventarios: Almacén (conteo manual) vs Planta (listas por proveedor) -->
       <div class="grid grid-cols-2 gap-2">
         <button id="tabAlmacen" type="button" class="p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-slate-950 text-white border-slate-950">
-          <div class="text-[10px] font-extrabold uppercase tracking-wider opacity-75">Inventario Independiente</div>
+          <div class="text-[10px] font-extrabold uppercase tracking-wider opacity-75">Control Manual en Conteo</div>
           <div class="text-sm font-extrabold">Almacén Físico</div>
         </button>
         <button id="tabPlanta" type="button" class="p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-400">
@@ -356,7 +354,7 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- Cabecera y botón Actualizar Excel -->
+      <!-- Cabecera -->
       <div class="ve-card p-3.5 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -365,8 +363,8 @@ export async function mount(root, state) {
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <input id="fileExcelCat" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
-            <button id="btnAbrirPanelExcel" type="button" class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
-              ↑ Actualizar Excel
+            <button id="btnAbrirPanelExcel" type="button" class="hidden px-4 py-2 rounded-xl bg-sky-900 hover:bg-sky-800 text-white text-xs font-extrabold cursor-pointer">
+              ↑ Actualizar Excel Planta
             </button>
             <button id="btnRecargarCat" type="button" class="px-2.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold cursor-pointer">
               ↻
@@ -374,10 +372,10 @@ export async function mount(root, state) {
           </div>
         </div>
 
-        <!-- Selector Inteligente de Proveedor para subir Excel -->
+        <!-- Selector Inteligente de Proveedor para subir Excel de Planta -->
         <div id="panelSelectorProveedor" class="hidden p-3 rounded-xl bg-slate-50 border border-slate-300 space-y-2.5">
           <div class="flex items-center justify-between gap-2">
-            <div class="text-xs font-extrabold text-slate-900">1. Selecciona o crea el Proveedor de este Excel</div>
+            <div class="text-xs font-extrabold text-slate-900">1. Selecciona o crea el Proveedor de la lista de Planta</div>
             <button id="btnCerrarPanelExcel" type="button" class="text-xs font-bold text-slate-500 cursor-pointer">✕</button>
           </div>
 
@@ -432,7 +430,7 @@ export async function mount(root, state) {
       <div id="panelCambiosPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Últimas Novedades por Proveedor</h2>
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Últimas Novedades de Planta por Proveedor</h2>
             <p id="metaUltimaAct" class="text-[11px] text-sky-800 font-semibold"></p>
           </div>
           <button id="btnLimpiarNovedades" type="button" class="px-2.5 py-1 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-extrabold cursor-pointer">
@@ -440,13 +438,9 @@ export async function mount(root, state) {
           </button>
         </div>
 
-        <!-- Pestañas de proveedores con reporte vigente -->
         <div id="tabsReportesProv" class="flex flex-wrap gap-1.5"></div>
-
-        <!-- Aviso limpio cuando fue Carga Inicial -->
         <div id="boxCargaInicial" class="hidden p-3 rounded-xl bg-white border border-emerald-200 text-xs text-slate-700"></div>
 
-        <!-- Badges + Grid de cambios (solo para actualizaciones posteriores) -->
         <div id="boxCambiosDetalle" class="space-y-2.5">
           <div id="resumenBadgesCambios" class="flex flex-wrap gap-1.5 text-[11px] font-extrabold"></div>
 
@@ -457,17 +451,17 @@ export async function mount(root, state) {
             </div>
 
             <div class="bg-white rounded-xl border border-emerald-200 p-2.5 space-y-1">
-              <div class="font-extrabold text-emerald-800">✦ Productos Nuevos (con Costo)</div>
+              <div class="font-extrabold text-emerald-800">✦ Productos Nuevos (creados en Almacén en 0)</div>
               <div id="listNuevosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
             </div>
 
             <div class="bg-white rounded-xl border border-sky-200 p-2.5 space-y-1">
-              <div class="font-extrabold text-sky-800">↑ No Había y Ahora Sí (Reingresos)</div>
+              <div class="font-extrabold text-sky-800">↑ No Había en Planta y Ahora Sí</div>
               <div id="listLlegaronPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
             </div>
 
             <div class="bg-white rounded-xl border border-rose-200 p-2.5 space-y-1">
-              <div class="font-extrabold text-rose-800">↓ Había Antes y Ya No Hay</div>
+              <div class="font-extrabold text-rose-800">↓ Había en Planta y Ya No Hay</div>
               <div id="listAgotadosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
             </div>
           </div>
@@ -601,7 +595,9 @@ export async function mount(root, state) {
       : "p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-400";
 
     tituloInv.textContent = esAlm ? "Inventario Almacén Físico" : "Inventario Planta (Por Proveedor)";
-    btnAbrirExcel.textContent = esAlm ? "↑ Actualizar Excel Almacén (En 0)" : "↑ Actualizar Excel Planta";
+    // El Excel siempre se carga desde Planta
+    btnAbrirExcel.classList.toggle("hidden", esAlm);
+    if (esAlm) panelProv.classList.add("hidden");
   }
 
   function renderPanelCambios() {
@@ -645,8 +641,8 @@ export async function mount(root, state) {
       boxInicial.innerHTML = `
         <div class="font-extrabold text-emerald-800 mb-1">✓ Carga Inicial de ${r.proveedor}</div>
         <div>
-          Se registraron <strong>${r.totalCargados || 0} productos</strong> con su precio costo, <strong>Almacén en 0</strong> (listo para conteo) y el <strong>stock de Planta</strong> enviado en el Excel.
-          La próxima vez que actualices a este proveedor, aquí verás automáticamente qué subió de precio, qué llegó y qué se agotó.
+          Se registraron <strong>${r.totalCargados || 0} productos</strong> con su precio costo, <strong>Almacén en 0</strong> (para controlarlo manualmente en Conteo) y el <strong>stock de Planta</strong> enviado en el Excel.
+          Al volver a actualizar a este proveedor más adelante, verás aquí las novedades de Planta sin tocar tu stock de Almacén.
         </div>
       `;
       return;
@@ -668,8 +664,8 @@ export async function mount(root, state) {
     root.querySelector("#resumenBadgesCambios").innerHTML = `
       <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900">Subió precio: ${cntSub}</span>
       <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900">Nuevos: ${cntNue}</span>
-      <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-900">Reingresos: ${cntLle}</span>
-      <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900">Agotados: ${cntAgo}</span>
+      <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-900">Llegaron a Planta: ${cntLle}</span>
+      <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900">Ya no hay en Planta: ${cntAgo}</span>
     `;
 
     root.querySelector("#listSubieronPrecio").innerHTML = subieronPrecio.length
@@ -696,8 +692,8 @@ export async function mount(root, state) {
       : `<div class="text-slate-400 py-2">${vacio}</div>`;
 
     root.querySelector("#listNuevosPlanta").innerHTML = pintLista(nuevos, "Sin productos nuevos en este Excel.", true);
-    root.querySelector("#listLlegaronPlanta").innerHTML = pintLista(llegaron, "Ningún producto sin existencia reingresó.", true);
-    root.querySelector("#listAgotadosPlanta").innerHTML = pintLista(agotados, "Ningún producto pasó a sin existencia.", false);
+    root.querySelector("#listLlegaronPlanta").innerHTML = pintLista(llegaron, "Ningún producto sin existencia reingresó en Planta.", true);
+    root.querySelector("#listAgotadosPlanta").innerHTML = pintLista(agotados, "Ningún producto pasó a sin existencia en Planta.", false);
   }
 
   root.querySelector("#tabsReportesProv").addEventListener("click", (e) => {
@@ -780,11 +776,14 @@ export async function mount(root, state) {
     renderPanelCambios();
 
     const filtrados = obtenerFiltrados();
-    root.querySelector("#subResumenCat").textContent =
-      `${filtrados.length} productos en ${origen === "almacen" ? "Almacén Físico" : "Planta"} • ${proveedores.length} proveedor(es)`;
+    root.querySelector("#subResumenCat").textContent = origen === "almacen"
+      ? `${filtrados.length} productos en Almacén Físico (control manual en Conteo) • ${proveedores.length} proveedor(es)`
+      : `${filtrados.length} productos en Planta • ${proveedores.length} proveedor(es)`;
 
     if (!filtrados.length) {
-      contEl.innerHTML = `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">No hay productos cargados. Toca "↑ Actualizar Excel" arriba.</div>`;
+      contEl.innerHTML = origen === "almacen"
+        ? `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Almacén sin productos aún. Ve a la pestaña <strong>Planta</strong> y sube el Excel del proveedor para crearlos en 0.</div>`
+        : `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">No hay productos cargados en Planta. Toca "↑ Actualizar Excel Planta" arriba.</div>`;
       return;
     }
 
@@ -847,17 +846,14 @@ export async function mount(root, state) {
         return alert("No se encontraron productos válidos en el Excel.");
       }
 
-      const esAlmacen = origen === "almacen";
       const productosDelProveedor = productos.filter(
         (p) => normalizarIdProveedor(p.proveedor || "") === provId || p.proveedorId === provId
       );
       const esCargaInicial = productosDelProveedor.length === 0;
 
       const msg = esCargaInicial
-        ? `Carga Inicial para ${provNombre}:\nSe registrarán ${itemsExcel.length} productos con Almacén en 0 y el stock de Planta del Excel. ¿Continuar?`
-        : (esAlmacen
-          ? `Proveedor: ${provNombre}\nSe cargarán ${itemsExcel.length} productos en Almacén (en 0 para conteo físico). ¿Continuar?`
-          : `Proveedor: ${provNombre}\nSe actualizará Planta con ${itemsExcel.length} productos y se reemplazará el reporte de novedades anterior de este proveedor. ¿Continuar?`);
+        ? `Carga Inicial de Planta para ${provNombre}:\nSe registrarán ${itemsExcel.length} productos con su stock de Planta y se crearán en Almacén en 0 para contarlos manualmente. ¿Continuar?`
+        : `Actualizar Planta para ${provNombre}:\nSe procesarán ${itemsExcel.length} productos. Tu stock manual de Almacén NO se modificará; solo se crearán en 0 los productos nuevos que no existían. ¿Continuar?`;
 
       if (!confirm(msg)) {
         progWrap.classList.add("hidden");
@@ -914,19 +910,17 @@ export async function mount(root, state) {
               });
             }
 
-            if (!esAlmacen) {
-              if (prevPlanta <= 0 && it.stockPlanta > 0) {
-                llegaron.push({
-                  codigo: prev.codigo || it.codigo,
-                  descripcion: it.descripcion || prev.descripcion,
-                  costoUsd: nuevoCosto
-                });
-              } else if (prevPlanta > 0 && it.stockPlanta <= 0) {
-                agotados.push({
-                  codigo: prev.codigo || it.codigo,
-                  descripcion: it.descripcion || prev.descripcion
-                });
-              }
+            if (prevPlanta <= 0 && it.stockPlanta > 0) {
+              llegaron.push({
+                codigo: prev.codigo || it.codigo,
+                descripcion: it.descripcion || prev.descripcion,
+                costoUsd: nuevoCosto
+              });
+            } else if (prevPlanta > 0 && it.stockPlanta <= 0) {
+              agotados.push({
+                codigo: prev.codigo || it.codigo,
+                descripcion: it.descripcion || prev.descripcion
+              });
             }
           }
         }
@@ -935,7 +929,7 @@ export async function mount(root, state) {
       }
 
       const faltantesEnExcel = [];
-      if (!esAlmacen && !esCargaInicial) {
+      if (!esCargaInicial) {
         for (const prev of productosDelProveedor) {
           if (!idsVistosEnExcel.has(prev.id) && Number(prev.stockPlanta || 0) > 0) {
             faltantesEnExcel.push(prev);
@@ -966,19 +960,15 @@ export async function mount(root, state) {
             proveedor: provNombre,
             proveedorId: provId,
             costoUsd: it.costoUsd,
+            stockPlanta: it.stockPlanta,
             actualizadoEn: serverTimestamp()
           };
 
-          if (esAlmacen) {
+          // Si el producto no existía en Almacén, se crea en 0 para conteo manual;
+          // si ya existía, NO se toca stockAlmacen ni contado.
+          if (!prev) {
             payload.stockAlmacen = 0;
             payload.contado = false;
-            if (!prev) payload.stockPlanta = it.stockPlanta;
-          } else {
-            payload.stockPlanta = it.stockPlanta;
-            if (!prev) {
-              payload.stockAlmacen = 0;
-              payload.contado = false;
-            }
           }
 
           batch.set(doc(colRef, targetId), payload, { merge: true });
@@ -991,7 +981,7 @@ export async function mount(root, state) {
         progTxt.textContent = `Guardando ${hechas} de ${totalOps}...`;
       }
 
-      if (!esAlmacen && faltantesEnExcel.length) {
+      if (faltantesEnExcel.length) {
         for (let i = 0; i < faltantesEnExcel.length; i += LOTE) {
           const slice = faltantesEnExcel.slice(i, i + LOTE);
           const batch = writeBatch(db);
@@ -1009,7 +999,7 @@ export async function mount(root, state) {
         proveedorId: provId,
         fechaIso: new Date().toISOString().slice(0, 10),
         actualizadoTs: Date.now(),
-        origenActualizado: origen,
+        origenActualizado: "planta",
         esCargaInicial,
         totalCargados: itemsExcel.length,
         crucesInteligentes,
@@ -1032,8 +1022,8 @@ export async function mount(root, state) {
       progWrap.classList.add("hidden");
       alert(
         esCargaInicial
-          ? `¡Carga inicial de ${provNombre} lista!\n• ${itemsExcel.length} productos registrados (Almacén en 0 y Planta actualizada).`
-          : `¡Actualización de ${provNombre} completada!\n• Nuevos: ${nuevos.length}\n• Subieron de precio costo: ${subieronPrecio.length}\n• No había y ahora sí: ${llegaron.length}\n• Había y ya no hay: ${agotados.length}` +
+          ? `¡Carga inicial de ${provNombre} lista!\n• ${itemsExcel.length} productos registrados en Planta y creados en Almacén en 0 para contar.`
+          : `¡Planta actualizada para ${provNombre}!\n• Nuevos en Almacén (en 0): ${nuevos.length}\n• Subieron de precio costo: ${subieronPrecio.length}\n• No había y ahora sí en Planta: ${llegaron.length}\n• Había y ya no hay en Planta: ${agotados.length}` +
             (crucesInteligentes > 0 ? `\n• Cruces inteligentes: ${crucesInteligentes}` : "")
       );
       await cargarCatalogo();
