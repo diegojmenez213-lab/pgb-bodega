@@ -21,13 +21,28 @@ function diasEntre(inicioTs, finTs) {
   return Math.max(0, (finTs - inicioTs) / 86400000);
 }
 
+function formatearFechaHora(ts, fechaIso = "") {
+  if (!ts) return fechaIso || "---";
+  try {
+    return new Intl.DateTimeFormat("es-VE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    }).format(new Date(Number(ts)));
+  } catch {
+    return fechaIso || "---";
+  }
+}
+
 function inicioRangoTs(filtro, ahora = Date.now()) {
   const d = new Date(ahora);
   if (filtro === "semana") {
     const diaSemana = d.getDay();
     const diffLunes = (diaSemana + 6) % 7;
-    const inicio = new Date(d.getFullYear(), d.getMonth(), d.getDate() - diffLunes).getTime();
-    return inicio;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diffLunes).getTime();
   }
   if (filtro === "mes") {
     return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
@@ -45,7 +60,7 @@ export async function mount(root, state) {
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Analítica & Cierre de Caja</h1>
           <p class="text-xs text-slate-500">
-            Revisa lo que va del día, filtra por período, cierra caja para archivar el día y evalúa puntuales vs. atrasados en crédito.
+            Cuadra ventas + abonos de facturas anteriores con fecha y hora exacta, cierra caja y evalúa el historial de crédito.
           </p>
         </div>
         <button id="btnCerrarCaja" type="button" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer">
@@ -73,21 +88,39 @@ export async function mount(root, state) {
         </div>
 
         <div class="ve-card p-4">
-          <div class="text-[10px] font-extrabold uppercase text-slate-400">Utilidad Estimada</div>
-          <div id="kpiUtilidadUsd" class="font-mono-ve text-xl font-extrabold text-emerald-700 mt-1">$0.00</div>
-          <div id="kpiMargenPct" class="text-xs font-bold text-slate-500 mt-0.5">Margen: 0%</div>
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Abonos de Facturas Anteriores</div>
+          <div id="kpiAbonosUsd" class="font-mono-ve text-xl font-extrabold text-sky-700 mt-1">$0.00</div>
+          <div id="kpiAbonosCount" class="text-xs font-bold text-slate-500 mt-0.5">0 abonos en caja</div>
         </div>
 
         <div class="ve-card p-4">
-          <div class="text-[10px] font-extrabold uppercase text-slate-400">Abonos Cobrados</div>
-          <div id="kpiAbonosUsd" class="font-mono-ve text-xl font-extrabold text-sky-700 mt-1">$0.00</div>
-          <div id="kpiNotasCount" class="text-xs font-bold text-slate-500 mt-0.5">0 notas válidas</div>
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Total Ingreso Real en Caja</div>
+          <div id="kpiCajaTotalUsd" class="font-mono-ve text-xl font-extrabold text-emerald-700 mt-1">$0.00</div>
+          <div id="kpiUtilidadSub" class="text-xs font-bold text-slate-500 mt-0.5">Utilidad: $0.00</div>
         </div>
 
         <div class="ve-card p-4">
           <div class="text-[10px] font-extrabold uppercase text-slate-400">Cartera a Crédito Activa</div>
           <div id="kpiCreditoUsd" class="font-mono-ve text-xl font-extrabold text-rose-700 mt-1">$0.00</div>
           <div id="kpiClientesCred" class="text-xs font-bold text-slate-500 mt-0.5">0 clientes con crédito</div>
+        </div>
+      </div>
+
+      <!-- Detalle exacto de abonos cobrados en caja -->
+      <div class="ve-card p-4 space-y-2.5 border-sky-200">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-900">
+              Abonos Cobrados en Caja (Facturas Pendientes)
+            </h2>
+            <p class="text-[11px] text-slate-500">
+              Cada abono muestra cliente, número de nota pendiente, método de pago, fecha y hora para cuadrar el efectivo/transferencias.
+            </p>
+          </div>
+          <span id="badgeAbonosCaja" class="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-900 text-[11px] font-extrabold">0</span>
+        </div>
+        <div id="listaAbonosCaja" class="space-y-1.5 max-h-72 overflow-y-auto">
+          <div class="text-xs text-slate-400 py-4 text-center">Sin abonos cobrados en este período.</div>
         </div>
       </div>
 
@@ -148,30 +181,32 @@ export async function mount(root, state) {
     return validas.filter((n) => Number(n.creadoTs || 0) >= desdeTs);
   }
 
-  function calcularAbonosEnRango(notasRaw) {
+  function obtenerAbonosEnRango(notasRaw) {
     const desdeTs = rangoActual === "jornada"
       ? (cierres[0]?.cerradoTs || 0)
       : inicioRangoTs(rangoActual);
 
-    let totalAbonos = 0;
+    const lista = [];
     for (const n of notasRaw) {
-      if (n.anulada) continue;
-      if (Array.isArray(n.abonos)) {
-        for (const ab of n.abonos) {
-          const ts = Number(ab.ts || 0);
-          if (!desdeTs || ts >= desdeTs) {
-            totalAbonos += Number(ab.montoUsd || 0);
-          }
-        }
-      }
-      if (Array.isArray(n.pagos)) {
-        const enRango = rangoActual === "jornada" ? !n.cierreId : (!desdeTs || Number(n.creadoTs || 0) >= desdeTs);
-        if (enRango) {
-          totalAbonos += n.pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
+      if (n.anulada || !Array.isArray(n.abonos)) continue;
+      for (const ab of n.abonos) {
+        const ts = Number(ab.ts || 0);
+        if (!desdeTs || ts > desdeTs) {
+          lista.push({
+            folio: n.folio || n.id,
+            clienteNombre: n.cliente?.nombre || "Consumidor Final",
+            clienteDoc: n.cliente?.documento || "",
+            montoUsd: Number(ab.montoUsd || 0),
+            metodo: ab.metodo || "Efectivo USD",
+            usandoSaldoFavor: Boolean(ab.usandoSaldoFavor),
+            fechaHoraTxt: ab.fechaHoraTxt || formatearFechaHora(ts, ab.fechaIso),
+            usuario: ab.usuario || "Admin",
+            ts
+          });
         }
       }
     }
-    return Number(totalAbonos.toFixed(2));
+    return lista.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   }
 
   function pintarAnalitica() {
@@ -182,16 +217,23 @@ export async function mount(root, state) {
 
     const ultimoCierre = cierres[0];
     root.querySelector("#infoCierreReciente").textContent = ultimoCierre
-      ? `Último cierre: ${ultimoCierre.fechaHoraTxt || ultimoCierre.fechaIso || ""} ($${Number(ultimoCierre.totalVentasUsd || 0).toFixed(2)})`
+      ? `Último cierre: ${ultimoCierre.fechaHoraTxt || ultimoCierre.fechaIso || ""} ($${Number(ultimoCierre.totalVentasUsd || 0).toFixed(2)} ventas + $${Number(ultimoCierre.totalAbonosUsd || 0).toFixed(2)} abonos)`
       : "Aún no se ha realizado ningún cierre de caja.";
 
     const notasRango = filtrarNotasPorRango(todasNotas);
+    const abonosRango = obtenerAbonosEnRango(todasNotas);
+
     const ventasUsd = notasRango.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
     const utilidadUsd = notasRango.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
-    const abonosUsd = calcularAbonosEnRango(todasNotas);
-    const margen = ventasUsd > 0 ? ((utilidadUsd / ventasUsd) * 100).toFixed(1) : "0.0";
+    const pagosNotasRangoUsd = notasRango.reduce(
+      (acc, n) => acc + (Array.isArray(n.pagos) ? n.pagos.reduce((s, p) => s + Number(p.montoUsd || 0), 0) : 0),
+      0
+    );
+    const abonosEfectivoCajaUsd = abonosRango
+      .filter((a) => !a.usandoSaldoFavor)
+      .reduce((acc, a) => acc + a.montoUsd, 0);
+    const totalCajaRealUsd = Number((pagosNotasRangoUsd + abonosEfectivoCajaUsd).toFixed(2));
 
-    // Cartera activa global y evaluación crediticia sobre todas las notas a crédito
     const porCliente = new Map();
     let carteraActivaUsd = 0;
 
@@ -258,12 +300,31 @@ export async function mount(root, state) {
 
     root.querySelector("#kpiVentasUsd").textContent = `$${ventasUsd.toFixed(2)}`;
     root.querySelector("#kpiVentasBs").textContent = tasas.bcvActiva ? `Bs. ${(ventasUsd * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
-    root.querySelector("#kpiUtilidadUsd").textContent = `$${utilidadUsd.toFixed(2)}`;
-    root.querySelector("#kpiMargenPct").textContent = `Margen: ${margen}%`;
-    root.querySelector("#kpiAbonosUsd").textContent = `$${abonosUsd.toFixed(2)}`;
-    root.querySelector("#kpiNotasCount").textContent = `${notasRango.length} notas válidas`;
+    root.querySelector("#kpiAbonosUsd").textContent = `$${abonosEfectivoCajaUsd.toFixed(2)}`;
+    root.querySelector("#kpiAbonosCount").textContent = `${abonosRango.length} abono(s) registrado(s)`;
+    root.querySelector("#kpiCajaTotalUsd").textContent = `$${totalCajaRealUsd.toFixed(2)}`;
+    root.querySelector("#kpiUtilidadSub").textContent = `Utilidad: $${utilidadUsd.toFixed(2)} (${notasRango.length} notas)`;
     root.querySelector("#kpiCreditoUsd").textContent = `$${carteraActivaUsd.toFixed(2)}`;
     root.querySelector("#kpiClientesCred").textContent = `${evaluados.length} clientes con crédito`;
+
+    root.querySelector("#badgeAbonosCaja").textContent = String(abonosRango.length);
+    root.querySelector("#listaAbonosCaja").innerHTML = abonosRango.length
+      ? abonosRango.map((a) => `
+        <div class="p-2.5 rounded-xl bg-sky-50/70 border border-sky-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="min-w-0 flex-1">
+            <div class="font-extrabold text-slate-900">
+              Abono de ${a.clienteNombre} • <span class="font-mono-ve text-sky-900">Nota pendiente #${a.folio}</span>
+            </div>
+            <div class="text-[11px] text-slate-600 font-mono-ve">
+              ${a.fechaHoraTxt} • <strong>${a.metodo}</strong> • por ${a.usuario}
+            </div>
+          </div>
+          <div class="font-mono-ve text-sm font-extrabold text-emerald-700 shrink-0">
+            +$${a.montoUsd.toFixed(2)}
+          </div>
+        </div>
+      `).join("")
+      : `<div class="text-xs text-slate-400 py-4 text-center">Sin abonos cobrados en este período.</div>`;
 
     root.querySelector("#badgePeores").textContent = String(peores.length);
     root.querySelector("#badgeMejores").textContent = String(mejores.length);
@@ -307,10 +368,10 @@ export async function mount(root, state) {
         <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div>
             <span class="font-mono-ve font-extrabold text-slate-900">${ci.id}</span>
-            <span class="text-slate-500 ml-2">${ci.fechaHoraTxt || ci.fechaIso || ""} • ${ci.cantidadNotas || 0} notas • por ${ci.usuario || "Admin"}</span>
+            <span class="text-slate-500 ml-2">${ci.fechaHoraTxt || ci.fechaIso || ""} • ${ci.cantidadNotas || 0} notas • ${ci.cantidadAbonos || 0} abonos • por ${ci.usuario || "Admin"}</span>
           </div>
           <div class="font-mono-ve font-extrabold text-slate-900">
-            Ventas: $${Number(ci.totalVentasUsd || 0).toFixed(2)} • Utilidad: <span class="text-emerald-700">$${Number(ci.totalUtilidadUsd || 0).toFixed(2)}</span>
+            Ventas: $${Number(ci.totalVentasUsd || 0).toFixed(2)} • Abonos: <span class="text-sky-700">$${Number(ci.totalAbonosUsd || 0).toFixed(2)}</span>
           </div>
         </div>
       `).join("")
@@ -332,14 +393,18 @@ export async function mount(root, state) {
 
   root.querySelector("#btnCerrarCaja").addEventListener("click", async () => {
     const abiertas = todasNotas.filter((n) => !n.anulada && !n.cierreId);
-    if (!abiertas.length) {
-      return alert("No hay notas abiertas en la jornada actual para cerrar.");
+    const abonosAbiertos = obtenerAbonosEnRango(todasNotas);
+    if (!abiertas.length && !abonosAbiertos.length) {
+      return alert("No hay notas ni abonos abiertos en la jornada actual para cerrar.");
     }
 
     const totalVentas = abiertas.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
     const totalUtilidad = abiertas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
+    const totalAbonos = abonosAbiertos
+      .filter((a) => !a.usandoSaldoFavor)
+      .reduce((acc, a) => acc + a.montoUsd, 0);
 
-    if (!confirm(`¿Cerrar caja con ${abiertas.length} nota(s) por $${totalVentas.toFixed(2)}? Quedarán archivadas para empezar un nuevo día.`)) {
+    if (!confirm(`¿Cerrar caja con ${abiertas.length} nota(s) ($${totalVentas.toFixed(2)}) y ${abonosAbiertos.length} abono(s) ($${totalAbonos.toFixed(2)})?`)) {
       return;
     }
 
@@ -349,14 +414,7 @@ export async function mount(root, state) {
     try {
       const now = Date.now();
       const cierreId = `CIERRE-${new Date(now).toISOString().slice(0, 10)}-${String(now).slice(-4)}`;
-      const fechaHoraTxt = new Intl.DateTimeFormat("es-VE", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true
-      }).format(new Date(now));
+      const fechaHoraTxt = formatearFechaHora(now);
 
       const batch = writeBatch(db);
       batch.set(doc(cierresCol, cierreId), {
@@ -365,7 +423,9 @@ export async function mount(root, state) {
         fechaHoraTxt,
         cerradoTs: now,
         cantidadNotas: abiertas.length,
+        cantidadAbonos: abonosAbiertos.length,
         totalVentasUsd: Number(totalVentas.toFixed(2)),
+        totalAbonosUsd: Number(totalAbonos.toFixed(2)),
         totalUtilidadUsd: Number(totalUtilidad.toFixed(2)),
         usuario: state.sesion?.usuario || "Administrador",
         creadoEn: serverTimestamp()
@@ -385,7 +445,7 @@ export async function mount(root, state) {
       if (state.empresa) state.empresa.jornadaActivaId = nuevaJornadaId;
 
       await cargarDatos();
-      alert(`Caja cerrada (${cierreId}). Todo lo del día quedó archivado y la jornada actual quedó limpia.`);
+      alert(`Caja cerrada (${cierreId}). Ventas y abonos del día quedaron archivados.`);
     } catch (err) {
       alert("Error al cerrar caja: " + err.message);
     } finally {
