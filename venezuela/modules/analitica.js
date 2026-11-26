@@ -1,5 +1,14 @@
 // venezuela/modules/analitica.js
-import { getTenantRefs, getDocs, normalizarIdVE } from "../core/db.js";
+import {
+  db,
+  getTenantRefs,
+  collection,
+  doc,
+  getDocs,
+  writeBatch,
+  normalizarIdVE,
+  serverTimestamp
+} from "../core/db.js";
 
 function getTasaActiva(state) {
   const t = state.tasas || {};
@@ -12,22 +21,53 @@ function diasEntre(inicioTs, finTs) {
   return Math.max(0, (finTs - inicioTs) / 86400000);
 }
 
+function inicioRangoTs(filtro, ahora = Date.now()) {
+  const d = new Date(ahora);
+  if (filtro === "semana") {
+    const diaSemana = d.getDay();
+    const diffLunes = (diaSemana + 6) % 7;
+    const inicio = new Date(d.getFullYear(), d.getMonth(), d.getDate() - diffLunes).getTime();
+    return inicio;
+  }
+  if (filtro === "mes") {
+    return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  }
+  return 0;
+}
+
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
+  const cierresCol = collection(db, "empresas", state.sesion.tenantId, "cierresCaja");
 
   root.innerHTML = `
     <div class="space-y-5 max-w-6xl mx-auto">
-      <div>
-        <h1 class="text-lg font-extrabold text-slate-900">Analítica & Comportamiento de Crédito</h1>
-        <p class="text-xs text-slate-500">
-          Revisa tus ingresos, utilidad y qué clientes pagan a tiempo o antes vs. quiénes se pasan de los días de crédito.
-        </p>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 class="text-lg font-extrabold text-slate-900">Analítica & Cierre de Caja</h1>
+          <p class="text-xs text-slate-500">
+            Revisa lo que va del día, filtra por período, cierra caja para archivar el día y evalúa puntuales vs. atrasados en crédito.
+          </p>
+        </div>
+        <button id="btnCerrarCaja" type="button" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer">
+          🔒 Cerrar Caja (<span id="cntNotasAbiertas">0</span> notas)
+        </button>
       </div>
 
-      <!-- KPIs generales -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <!-- Filtros de fecha / jornada -->
+      <div class="ve-card p-3 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap gap-1.5" id="filtroRangoBtns">
+          <button type="button" data-rango="jornada" class="btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">Jornada Actual</button>
+          <button type="button" data-rango="semana" class="btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer">Esta Semana</button>
+          <button type="button" data-rango="mes" class="btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer">Este Mes</button>
+          <button type="button" data-rango="todo" class="btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer">Todo el Historial</button>
+        </div>
+        <div id="infoCierreReciente" class="text-[11px] font-bold text-slate-500"></div>
+      </div>
+
+      <!-- KPIs del rango -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="ve-card p-4">
-          <div class="text-[10px] font-extrabold uppercase text-slate-400">Ventas Totales (USD)</div>
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Ventas del Período (USD)</div>
           <div id="kpiVentasUsd" class="font-mono-ve text-xl font-extrabold text-slate-900 mt-1">$0.00</div>
           <div id="kpiVentasBs" class="font-mono-ve text-xs font-bold text-slate-500 mt-0.5">Bs. 0.00</div>
         </div>
@@ -36,6 +76,12 @@ export async function mount(root, state) {
           <div class="text-[10px] font-extrabold uppercase text-slate-400">Utilidad Estimada</div>
           <div id="kpiUtilidadUsd" class="font-mono-ve text-xl font-extrabold text-emerald-700 mt-1">$0.00</div>
           <div id="kpiMargenPct" class="text-xs font-bold text-slate-500 mt-0.5">Margen: 0%</div>
+        </div>
+
+        <div class="ve-card p-4">
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Abonos Cobrados</div>
+          <div id="kpiAbonosUsd" class="font-mono-ve text-xl font-extrabold text-sky-700 mt-1">$0.00</div>
+          <div id="kpiNotasCount" class="text-xs font-bold text-slate-500 mt-0.5">0 notas válidas</div>
         </div>
 
         <div class="ve-card p-4">
@@ -77,132 +123,287 @@ export async function mount(root, state) {
           </div>
         </div>
       </div>
+
+      <!-- Cierres de caja archivados -->
+      <div class="ve-card p-4 space-y-2.5">
+        <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Cierres de Caja Archivados</h2>
+        <div id="listaCierres" class="space-y-2">
+          <div class="text-xs text-slate-400 py-4 text-center">Sin cierres registrados aún.</div>
+        </div>
+      </div>
     </div>
   `;
 
-  const snapNotas = await getDocs(refs.notasEntrega());
-  const notas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const ahora = Date.now();
-  const tasas = getTasaActiva(state);
+  let rangoActual = "jornada";
+  let todasNotas = [];
+  let cierres = [];
 
-  const ventasUsd = notas.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
-  const utilidadUsd = notas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
-  const margen = ventasUsd > 0 ? ((utilidadUsd / ventasUsd) * 100).toFixed(1) : "0.0";
-
-  // Agrupar notas que tuvieron condición de crédito o saldo pendiente
-  const porCliente = new Map();
-  let carteraActivaUsd = 0;
-
-  for (const n of notas) {
-    const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
-    if (saldo > 0.01) carteraActivaUsd += saldo;
-
-    const fueCredito = Boolean(n.esCredito) || Number(n.diasCredito || 0) > 0 || saldo > 0.01 || (Array.isArray(n.abonos) && n.abonos.length > 0);
-    if (!fueCredito) continue;
-
-    const docId = normalizarIdVE(n.cliente?.documento || "") || "V-00000000";
-    const nombre = (n.cliente?.nombre || "").trim() || "Consumidor Final";
-    const plazo = Math.max(1, Number(n.diasCredito || 15));
-    const inicioTs = Number(n.creadoTs || 0);
-
-    // Si ya está saldada, usamos la fecha de saldo o el último abono; si sigue abierta, medimos hasta hoy
-    let finReferenciaTs = ahora;
-    if (saldo <= 0.01) {
-      const ultimoAbonoTs = Array.isArray(n.abonos) && n.abonos.length
-        ? Math.max(...n.abonos.map((a) => Number(a.ts || 0)))
-        : 0;
-      finReferenciaTs = Number(n.saldadaTs || ultimoAbonoTs || n.venceTs || inicioTs);
+  function filtrarNotasPorRango(notasRaw) {
+    const validas = notasRaw.filter((n) => !n.anulada);
+    if (rangoActual === "jornada") {
+      return validas.filter((n) => !n.cierreId);
     }
-
-    const diasTomados = diasEntre(inicioTs, finReferenciaTs);
-    const diferenciaDias = Number((diasTomados - plazo).toFixed(1)); // > 0 significa que se pasó del plazo
-
-    if (!porCliente.has(docId)) {
-      porCliente.set(docId, {
-        documento: docId,
-        nombre,
-        totalCreditoUsd: 0,
-        saldoPendienteUsd: 0,
-        operaciones: 0,
-        vecesPasado: 0,
-        sumaExcesoDias: 0,
-        sumaDiasTomados: 0,
-        sumaPlazos: 0
-      });
-    }
-
-    const c = porCliente.get(docId);
-    c.totalCreditoUsd += Number(n.totalUsd || 0);
-    c.saldoPendienteUsd += saldo;
-    c.operaciones += 1;
-    c.sumaDiasTomados += diasTomados;
-    c.sumaPlazos += plazo;
-    if (diferenciaDias > 0.5) {
-      c.vecesPasado += 1;
-      c.sumaExcesoDias += diferenciaDias;
-    }
+    const desdeTs = inicioRangoTs(rangoActual);
+    if (!desdeTs) return validas;
+    return validas.filter((n) => Number(n.creadoTs || 0) >= desdeTs);
   }
 
-  const evaluados = Array.from(porCliente.values()).map((c) => {
-    const promDias = c.operaciones ? (c.sumaDiasTomados / c.operaciones).toFixed(1) : "0.0";
-    const promPlazo = c.operaciones ? (c.sumaPlazos / c.operaciones).toFixed(0) : "15";
-    const promExceso = c.vecesPasado ? (c.sumaExcesoDias / c.vecesPasado).toFixed(1) : "0.0";
-    const scoreAtraso = c.sumaExcesoDias + (c.saldoPendienteUsd > 0.01 && c.vecesPasado > 0 ? 15 : 0);
-    return { ...c, promDias, promPlazo, promExceso, scoreAtraso };
+  function calcularAbonosEnRango(notasRaw) {
+    const desdeTs = rangoActual === "jornada"
+      ? (cierres[0]?.cerradoTs || 0)
+      : inicioRangoTs(rangoActual);
+
+    let totalAbonos = 0;
+    for (const n of notasRaw) {
+      if (n.anulada) continue;
+      if (Array.isArray(n.abonos)) {
+        for (const ab of n.abonos) {
+          const ts = Number(ab.ts || 0);
+          if (!desdeTs || ts >= desdeTs) {
+            totalAbonos += Number(ab.montoUsd || 0);
+          }
+        }
+      }
+      if (Array.isArray(n.pagos)) {
+        const enRango = rangoActual === "jornada" ? !n.cierreId : (!desdeTs || Number(n.creadoTs || 0) >= desdeTs);
+        if (enRango) {
+          totalAbonos += n.pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
+        }
+      }
+    }
+    return Number(totalAbonos.toFixed(2));
+  }
+
+  function pintarAnalitica() {
+    const ahora = Date.now();
+    const tasas = getTasaActiva(state);
+    const notasAbiertas = todasNotas.filter((n) => !n.anulada && !n.cierreId);
+    root.querySelector("#cntNotasAbiertas").textContent = String(notasAbiertas.length);
+
+    const ultimoCierre = cierres[0];
+    root.querySelector("#infoCierreReciente").textContent = ultimoCierre
+      ? `Último cierre: ${ultimoCierre.fechaHoraTxt || ultimoCierre.fechaIso || ""} ($${Number(ultimoCierre.totalVentasUsd || 0).toFixed(2)})`
+      : "Aún no se ha realizado ningún cierre de caja.";
+
+    const notasRango = filtrarNotasPorRango(todasNotas);
+    const ventasUsd = notasRango.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
+    const utilidadUsd = notasRango.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
+    const abonosUsd = calcularAbonosEnRango(todasNotas);
+    const margen = ventasUsd > 0 ? ((utilidadUsd / ventasUsd) * 100).toFixed(1) : "0.0";
+
+    // Cartera activa global y evaluación crediticia sobre todas las notas a crédito
+    const porCliente = new Map();
+    let carteraActivaUsd = 0;
+
+    for (const n of todasNotas) {
+      if (n.anulada) continue;
+      const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
+      if (saldo > 0.01) carteraActivaUsd += saldo;
+
+      const fueCredito = Boolean(n.esCredito) || Number(n.diasCredito || 0) > 0 || saldo > 0.01 || (Array.isArray(n.abonos) && n.abonos.length > 0);
+      if (!fueCredito) continue;
+
+      const docId = normalizarIdVE(n.cliente?.documento || "") || "V-00000000";
+      const nombre = (n.cliente?.nombre || "").trim() || "Consumidor Final";
+      const plazo = Math.max(1, Number(n.diasCredito || 15));
+      const inicioTs = Number(n.creadoTs || 0);
+
+      let finReferenciaTs = ahora;
+      if (saldo <= 0.01) {
+        const ultimoAbonoTs = Array.isArray(n.abonos) && n.abonos.length
+          ? Math.max(...n.abonos.map((a) => Number(a.ts || 0)))
+          : 0;
+        finReferenciaTs = Number(n.saldadaTs || ultimoAbonoTs || n.venceTs || inicioTs);
+      }
+
+      const diasTomados = diasEntre(inicioTs, finReferenciaTs);
+      const diferenciaDias = Number((diasTomados - plazo).toFixed(1));
+
+      if (!porCliente.has(docId)) {
+        porCliente.set(docId, {
+          documento: docId,
+          nombre,
+          totalCreditoUsd: 0,
+          saldoPendienteUsd: 0,
+          operaciones: 0,
+          vecesPasado: 0,
+          sumaExcesoDias: 0,
+          sumaDiasTomados: 0,
+          sumaPlazos: 0
+        });
+      }
+
+      const c = porCliente.get(docId);
+      c.totalCreditoUsd += Number(n.totalUsd || 0);
+      c.saldoPendienteUsd += saldo;
+      c.operaciones += 1;
+      c.sumaDiasTomados += diasTomados;
+      c.sumaPlazos += plazo;
+      if (diferenciaDias > 0.5) {
+        c.vecesPasado += 1;
+        c.sumaExcesoDias += diferenciaDias;
+      }
+    }
+
+    const evaluados = Array.from(porCliente.values()).map((c) => {
+      const promDias = c.operaciones ? (c.sumaDiasTomados / c.operaciones).toFixed(1) : "0.0";
+      const promPlazo = c.operaciones ? (c.sumaPlazos / c.operaciones).toFixed(0) : "15";
+      const promExceso = c.vecesPasado ? (c.sumaExcesoDias / c.vecesPasado).toFixed(1) : "0.0";
+      const scoreAtraso = c.sumaExcesoDias + (c.saldoPendienteUsd > 0.01 && c.vecesPasado > 0 ? 15 : 0);
+      return { ...c, promDias, promPlazo, promExceso, scoreAtraso };
+    });
+
+    const peores = evaluados.filter((c) => c.vecesPasado > 0).sort((a, b) => b.scoreAtraso - a.scoreAtraso);
+    const mejores = evaluados.filter((c) => c.vecesPasado === 0).sort((a, b) => b.totalCreditoUsd - a.totalCreditoUsd);
+
+    root.querySelector("#kpiVentasUsd").textContent = `$${ventasUsd.toFixed(2)}`;
+    root.querySelector("#kpiVentasBs").textContent = tasas.bcvActiva ? `Bs. ${(ventasUsd * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
+    root.querySelector("#kpiUtilidadUsd").textContent = `$${utilidadUsd.toFixed(2)}`;
+    root.querySelector("#kpiMargenPct").textContent = `Margen: ${margen}%`;
+    root.querySelector("#kpiAbonosUsd").textContent = `$${abonosUsd.toFixed(2)}`;
+    root.querySelector("#kpiNotasCount").textContent = `${notasRango.length} notas válidas`;
+    root.querySelector("#kpiCreditoUsd").textContent = `$${carteraActivaUsd.toFixed(2)}`;
+    root.querySelector("#kpiClientesCred").textContent = `${evaluados.length} clientes con crédito`;
+
+    root.querySelector("#badgePeores").textContent = String(peores.length);
+    root.querySelector("#badgeMejores").textContent = String(mejores.length);
+
+    root.querySelector("#listaPeoresClientes").innerHTML = peores.length
+      ? peores.map((c) => `
+        <div class="p-3 rounded-xl bg-rose-50/60 border border-rose-200 flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-extrabold text-slate-900 truncate">${c.nombre} <span class="font-mono-ve text-[10px] text-slate-500">(${c.documento})</span></div>
+            <div class="text-[11px] text-rose-800 font-semibold mt-0.5">
+              Se pasó en <strong>${c.vecesPasado}</strong> de ${c.operaciones} crédito(s) • Prom. exceso: <strong>+${c.promExceso}d</strong> (tarda ~${c.promDias}d vs plazo ${c.promPlazo}d)
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="font-mono-ve text-xs font-extrabold text-rose-700">$${c.totalCreditoUsd.toFixed(2)}</div>
+            ${c.saldoPendienteUsd > 0.01 ? `<div class="font-mono-ve text-[10px] font-bold text-rose-900">Debe: $${c.saldoPendienteUsd.toFixed(2)}</div>` : `<div class="text-[10px] font-bold text-slate-500">Al día hoy</div>`}
+          </div>
+        </div>
+      `).join("")
+      : `<div class="text-xs text-slate-400 py-6 text-center">Ningún cliente se ha pasado de sus días de crédito.</div>`;
+
+    root.querySelector("#listaMejoresClientes").innerHTML = mejores.length
+      ? mejores.map((c) => `
+        <div class="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-extrabold text-slate-900 truncate">${c.nombre} <span class="font-mono-ve text-[10px] text-slate-500">(${c.documento})</span></div>
+            <div class="text-[11px] text-emerald-800 font-semibold mt-0.5">
+              <strong>100% puntual</strong> en ${c.operaciones} crédito(s) • Prom. pago: <strong>${c.promDias}d</strong> (plazo ${c.promPlazo}d)
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="font-mono-ve text-xs font-extrabold text-emerald-800">$${c.totalCreditoUsd.toFixed(2)}</div>
+            ${c.saldoPendienteUsd > 0.01 ? `<div class="font-mono-ve text-[10px] font-bold text-amber-800">Pendiente: $${c.saldoPendienteUsd.toFixed(2)}</div>` : `<div class="text-[10px] font-bold text-emerald-700">Pagado</div>`}
+          </div>
+        </div>
+      `).join("")
+      : `<div class="text-xs text-slate-400 py-6 text-center">Aún no hay clientes con historial puntual a crédito.</div>`;
+
+    root.querySelector("#listaCierres").innerHTML = cierres.length
+      ? cierres.slice(0, 10).map((ci) => `
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div>
+            <span class="font-mono-ve font-extrabold text-slate-900">${ci.id}</span>
+            <span class="text-slate-500 ml-2">${ci.fechaHoraTxt || ci.fechaIso || ""} • ${ci.cantidadNotas || 0} notas • por ${ci.usuario || "Admin"}</span>
+          </div>
+          <div class="font-mono-ve font-extrabold text-slate-900">
+            Ventas: $${Number(ci.totalVentasUsd || 0).toFixed(2)} • Utilidad: <span class="text-emerald-700">$${Number(ci.totalUtilidadUsd || 0).toFixed(2)}</span>
+          </div>
+        </div>
+      `).join("")
+      : `<div class="text-xs text-slate-400 py-4 text-center">Sin cierres registrados aún.</div>`;
+  }
+
+  root.querySelector("#filtroRangoBtns").addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-rango");
+    if (!btn) return;
+    rangoActual = btn.dataset.rango;
+    root.querySelectorAll(".btn-rango").forEach((b) => {
+      const act = b.dataset.rango === rangoActual;
+      b.className = act
+        ? "btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer"
+        : "btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer";
+    });
+    pintarAnalitica();
   });
 
-  const peores = evaluados
-    .filter((c) => c.vecesPasado > 0)
-    .sort((a, b) => b.scoreAtraso - a.scoreAtraso);
+  root.querySelector("#btnCerrarCaja").addEventListener("click", async () => {
+    const abiertas = todasNotas.filter((n) => !n.anulada && !n.cierreId);
+    if (!abiertas.length) {
+      return alert("No hay notas abiertas en la jornada actual para cerrar.");
+    }
 
-  const mejores = evaluados
-    .filter((c) => c.vecesPasado === 0)
-    .sort((a, b) => b.totalCreditoUsd - a.totalCreditoUsd);
+    const totalVentas = abiertas.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
+    const totalUtilidad = abiertas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
 
-  root.querySelector("#kpiVentasUsd").textContent = `$${ventasUsd.toFixed(2)}`;
-  root.querySelector("#kpiVentasBs").textContent = tasas.bcvActiva ? `Bs. ${(ventasUsd * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
-  root.querySelector("#kpiUtilidadUsd").textContent = `$${utilidadUsd.toFixed(2)}`;
-  root.querySelector("#kpiMargenPct").textContent = `Margen: ${margen}%`;
-  root.querySelector("#kpiCreditoUsd").textContent = `$${carteraActivaUsd.toFixed(2)}`;
-  root.querySelector("#kpiClientesCred").textContent = `${evaluados.length} clientes con historial a crédito`;
+    if (!confirm(`¿Cerrar caja con ${abiertas.length} nota(s) por $${totalVentas.toFixed(2)}? Quedarán archivadas para empezar un nuevo día.`)) {
+      return;
+    }
 
-  root.querySelector("#badgePeores").textContent = String(peores.length);
-  root.querySelector("#badgeMejores").textContent = String(mejores.length);
+    const btn = root.querySelector("#btnCerrarCaja");
+    btn.disabled = true;
 
-  const contPeores = root.querySelector("#listaPeoresClientes");
-  const contMejores = root.querySelector("#listaMejoresClientes");
+    try {
+      const now = Date.now();
+      const cierreId = `CIERRE-${new Date(now).toISOString().slice(0, 10)}-${String(now).slice(-4)}`;
+      const fechaHoraTxt = new Intl.DateTimeFormat("es-VE", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+      }).format(new Date(now));
 
-  contPeores.innerHTML = peores.length
-    ? peores.map((c) => `
-      <div class="p-3 rounded-xl bg-rose-50/60 border border-rose-200 flex items-center justify-between gap-2">
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-extrabold text-slate-900 truncate">${c.nombre} <span class="font-mono-ve text-[10px] text-slate-500">(${c.documento})</span></div>
-          <div class="text-[11px] text-rose-800 font-semibold mt-0.5">
-            Se pasó en <strong>${c.vecesPasado}</strong> de ${c.operaciones} crédito(s) • Prom. exceso: <strong>+${c.promExceso}d</strong> (tarda ~${c.promDias}d vs plazo ${c.promPlazo}d)
-          </div>
-        </div>
-        <div class="text-right shrink-0">
-          <div class="font-mono-ve text-xs font-extrabold text-rose-700">$${c.totalCreditoUsd.toFixed(2)}</div>
-          ${c.saldoPendienteUsd > 0.01 ? `<div class="font-mono-ve text-[10px] font-bold text-rose-900">Debe: $${c.saldoPendienteUsd.toFixed(2)}</div>` : `<div class="text-[10px] font-bold text-slate-500">Al día hoy</div>`}
-        </div>
-      </div>
-    `).join("")
-    : `<div class="text-xs text-slate-400 py-6 text-center">Ningún cliente se ha pasado de sus días de crédito.</div>`;
+      const batch = writeBatch(db);
+      batch.set(doc(cierresCol, cierreId), {
+        cierreId,
+        fechaIso: new Date(now).toISOString().slice(0, 10),
+        fechaHoraTxt,
+        cerradoTs: now,
+        cantidadNotas: abiertas.length,
+        totalVentasUsd: Number(totalVentas.toFixed(2)),
+        totalUtilidadUsd: Number(totalUtilidad.toFixed(2)),
+        usuario: state.sesion?.usuario || "Administrador",
+        creadoEn: serverTimestamp()
+      });
 
-  contMejores.innerHTML = mejores.length
-    ? mejores.map((c) => `
-      <div class="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 flex items-center justify-between gap-2">
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-extrabold text-slate-900 truncate">${c.nombre} <span class="font-mono-ve text-[10px] text-slate-500">(${c.documento})</span></div>
-          <div class="text-[11px] text-emerald-800 font-semibold mt-0.5">
-            <strong>100% puntual</strong> en ${c.operaciones} crédito(s) • Prom. pago: <strong>${c.promDias}d</strong> (plazo ${c.promPlazo}d)
-          </div>
-        </div>
-        <div class="text-right shrink-0">
-          <div class="font-mono-ve text-xs font-extrabold text-emerald-800">$${c.totalCreditoUsd.toFixed(2)}</div>
-          ${c.saldoPendienteUsd > 0.01 ? `<div class="font-mono-ve text-[10px] font-bold text-amber-800">Pendiente: $${c.saldoPendienteUsd.toFixed(2)}</div>` : `<div class="text-[10px] font-bold text-emerald-700">Pagado</div>`}
-        </div>
-      </div>
-    `).join("")
-    : `<div class="text-xs text-slate-400 py-6 text-center">Aún no hay clientes con historial puntual a crédito.</div>`;
+      for (const n of abiertas) {
+        batch.set(doc(refs.notasEntrega(), n.id), {
+          cierreId,
+          cerradoEnTs: now
+        }, { merge: true });
+      }
+
+      const nuevaJornadaId = new Date(now + 86400000).toISOString().slice(0, 10);
+      batch.set(refs.empresaRef, { jornadaActivaId: nuevaJornadaId }, { merge: true });
+
+      await batch.commit();
+      if (state.empresa) state.empresa.jornadaActivaId = nuevaJornadaId;
+
+      await cargarDatos();
+      alert(`Caja cerrada (${cierreId}). Todo lo del día quedó archivado y la jornada actual quedó limpia.`);
+    } catch (err) {
+      alert("Error al cerrar caja: " + err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function cargarDatos() {
+    const [snapNotas, snapCierres] = await Promise.all([
+      getDocs(refs.notasEntrega()),
+      getDocs(cierresCol)
+    ]);
+    todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+    cierres = snapCierres.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.cerradoTs || 0) - (a.cerradoTs || 0));
+    pintarAnalitica();
+  }
+
+  await cargarDatos();
 }
