@@ -68,14 +68,9 @@ function guardarTemaDispositivo(tenantId, temaId) {
   } catch {}
 }
 
-function aplicarTemaVisual(temaId, state = null) {
+// Solo previsualiza visualmente el tema (no guarda en localStorage hasta pulsar Guardar)
+function aplicarTemaVisual(temaId) {
   const tema = TEMAS_PRO.find((t) => t.id === temaId) || TEMAS_PRO[0];
-  if (state?.empresa) {
-    state.empresa.temaColor = tema.id;
-  }
-  if (state?.sesion?.tenantId) {
-    guardarTemaDispositivo(state.sesion.tenantId, tema.id);
-  }
 
   const rootEl = document.documentElement;
   rootEl.style.setProperty("--ve-primario", tema.primario);
@@ -161,12 +156,13 @@ function leerPngComoBase64(file) {
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
-  let temaSeleccionado = leerTemaDispositivo(state.sesion.tenantId);
+  let temaGuardado = leerTemaDispositivo(state.sesion.tenantId);
+  let temaSeleccionado = temaGuardado;
   let logoPlataforma =
     state.empresa?.logoPlataformaBase64 || state.empresa?.logoBase64 || state.empresa?.logoUrl || "";
   let logoDocumento = state.empresa?.logoDocumentoBase64 || "";
 
-  aplicarTemaVisual(temaSeleccionado, state);
+  aplicarTemaVisual(temaGuardado);
 
   root.innerHTML = `
     <div class="space-y-5 max-w-5xl mx-auto">
@@ -174,21 +170,21 @@ export async function mount(root, state) {
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Configuración y Personalización</h1>
           <p class="text-xs text-slate-500">
-            El tema aplica solo en este dispositivo; los logos PNG se guardan para toda la empresa.
+            El tema aplica solo en este dispositivo al guardar; los logos PNG se comparten para toda la empresa.
           </p>
         </div>
         <button id="btnRestablecerTema" type="button" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer">
-          ↺ Restablecer Tema Predeterminado
+          ↺ Previsualizar Tema Predeterminado
         </button>
       </div>
 
       <div class="ve-card space-y-3">
-        <div class="flex items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
               Tema de Color (Solo Este Dispositivo)
             </h2>
-            <p class="text-[11px] text-slate-500">Cada teléfono o PC conserva su propio color elegido.</p>
+            <p class="text-[11px] text-slate-500">Toca un color para previsualizar. Si sales sin guardar, volverá al tema anterior.</p>
           </div>
           <span id="badgeTemaActivo" class="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-800"></span>
         </div>
@@ -257,7 +253,16 @@ export async function mount(root, state) {
 
   function marcarTemaUI() {
     const actual = TEMAS_PRO.find((t) => t.id === temaSeleccionado) || TEMAS_PRO[0];
-    root.querySelector("#badgeTemaActivo").textContent = `Tema: ${actual.nombre}`;
+    const badge = root.querySelector("#badgeTemaActivo");
+    const sinGuardar = temaSeleccionado !== temaGuardado;
+
+    badge.textContent = sinGuardar
+      ? `Vista previa: ${actual.nombre} (sin guardar)`
+      : `Guardado: ${actual.nombre}`;
+    badge.className = sinGuardar
+      ? "text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-amber-100 text-amber-900"
+      : "text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-800";
+
     root.querySelectorAll(".tema-card").forEach((card) => {
       const esSel = card.dataset.tema === temaSeleccionado;
       card.className = esSel
@@ -282,7 +287,7 @@ export async function mount(root, state) {
     if (logoDocumento) {
       notaDoc.textContent = "Usando PNG propio para Notas de Entrega y Cotizaciones.";
     } else if (logoPlataforma) {
-      notaDoc.textContent = "Sin PNG propio de documento: se mostrará automáticamente el logo de la plataforma para no dejarlo vacío.";
+      notaDoc.textContent = "Sin PNG propio de documento: se mostrará automáticamente el logo de la plataforma.";
     } else {
       notaDoc.textContent = "Si cargas el logo de la plataforma y dejas este vacío, se usará el de la plataforma automáticamente.";
     }
@@ -295,14 +300,14 @@ export async function mount(root, state) {
     card.addEventListener("click", () => {
       temaSeleccionado = card.dataset.tema;
       marcarTemaUI();
-      aplicarTemaVisual(temaSeleccionado, state);
+      aplicarTemaVisual(temaSeleccionado);
     });
   });
 
   root.querySelector("#btnRestablecerTema").addEventListener("click", () => {
     temaSeleccionado = TEMA_PREDETERMINADO;
     marcarTemaUI();
-    aplicarTemaVisual(temaSeleccionado, state);
+    aplicarTemaVisual(temaSeleccionado);
   });
 
   root.querySelector("#btnQuitarLogoPlat").addEventListener("click", () => {
@@ -352,6 +357,7 @@ export async function mount(root, state) {
 
     try {
       guardarTemaDispositivo(state.sesion.tenantId, temaSeleccionado);
+      temaGuardado = temaSeleccionado;
 
       await setDoc(
         refs.empresaRef,
@@ -371,8 +377,9 @@ export async function mount(root, state) {
         state.empresa.logoBase64 = logoPlataforma;
       }
 
-      aplicarTemaVisual(temaSeleccionado, state);
+      aplicarTemaVisual(temaSeleccionado);
       sincronizarLogoBarraLateral(logoPlataforma, state.empresa?.nombre || state.sesion?.nombreEmpresa);
+      marcarTemaUI();
       renderVistasLogos();
 
       alert("Guardado: el tema quedó aplicado en este dispositivo y los logos quedaron actualizados para la empresa.");
