@@ -27,12 +27,12 @@ export async function mount(root, state) {
     <div class="space-y-4 max-w-6xl mx-auto">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 class="text-lg font-extrabold text-slate-900">Cotizaciones (Vigencia 72h)</h1>
-          <p class="text-xs text-slate-500">Presupuestos rápidos sin descontar stock. Se auto-eliminan al vencer 72 horas.</p>
+          <h1 class="text-lg font-extrabold text-slate-900">Cotizaciones (PDF • 72h)</h1>
+          <p class="text-xs text-slate-500">Genera cotizaciones en PDF sin descontar stock. Vigencia de 72 horas.</p>
         </div>
         <div class="flex gap-1.5">
-          <button id="tabNuevaCot" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">+ Nueva Cotización</button>
-          <button id="tabListaCot" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 cursor-pointer">Activas (<span id="countCot">0</span>)</button>
+          <button id="tabNuevaCot" type="button" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">+ Nueva Cotización</button>
+          <button id="tabListaCot" type="button" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 cursor-pointer">Activas (<span id="countCot">0</span>)</button>
         </div>
       </div>
 
@@ -40,10 +40,9 @@ export async function mount(root, state) {
       <section id="viewNuevaCot" class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div class="lg:col-span-7 space-y-3">
           <div class="ve-card p-3 space-y-2">
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input id="cotCliDoc" type="text" placeholder="Cédula / RIF *" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
               <input id="cotCliNom" type="text" placeholder="Nombre del Cliente *" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-              <input id="cotCliTel" type="text" placeholder="WhatsApp (opcional)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold" />
             </div>
             <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
               <div class="flex items-center gap-2 text-xs font-bold">
@@ -71,7 +70,7 @@ export async function mount(root, state) {
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
               <h2 class="text-sm font-extrabold text-slate-900">Detalle del Presupuesto</h2>
-              <button id="btnLimpiarCot" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar</button>
+              <button id="btnLimpiarCot" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar</button>
             </div>
 
             <div id="cotItems" class="space-y-2 max-h-72 overflow-y-auto">
@@ -97,11 +96,11 @@ export async function mount(root, state) {
             </div>
 
             <div class="grid grid-cols-2 gap-2 pt-1">
-              <button id="btnGuardarCot" class="py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
+              <button id="btnGuardarCot" type="button" class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-xs font-extrabold cursor-pointer">
                 Guardar 72h
               </button>
-              <button id="btnWsCot" class="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">
-                WhatsApp
+              <button id="btnGenerarPdfCot" type="button" class="py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
+                Generar PDF
               </button>
             </div>
           </div>
@@ -125,7 +124,6 @@ export async function mount(root, state) {
 
   const docEl = root.querySelector("#cotCliDoc");
   const nomEl = root.querySelector("#cotCliNom");
-  const telEl = root.querySelector("#cotCliTel");
   const tarifaEl = root.querySelector("#cotTarifa");
   const badgeCli = root.querySelector("#cotCliBadge");
   const busqEl = root.querySelector("#cotBusqProd");
@@ -257,7 +255,6 @@ export async function mount(root, state) {
     if (cli) {
       docEl.value = cli.id;
       nomEl.value = cli.nombre || "";
-      telEl.value = cli.telefono || "";
       factorActual = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
       badgeCli.textContent = `✓ Cliente registrado (${cli.tarifa || "detal"})`;
       badgeCli.classList.remove("hidden");
@@ -277,17 +274,23 @@ export async function mount(root, state) {
     renderCarrito();
   });
 
-  root.querySelector("#btnGuardarCot").addEventListener("click", async () => {
+  async function persistirCotizacion() {
     const docCli = normalizarIdVE(docEl.value);
     const nomCli = nomEl.value.trim();
-    if (!docCli || !nomCli) return alert("Ingresa Cédula/RIF y Nombre del cliente.");
-    if (!carrito.length) return alert("Agrega al menos un producto.");
+    if (!docCli || !nomCli) {
+      alert("Ingresa Cédula/RIF y Nombre del cliente.");
+      return null;
+    }
+    if (!carrito.length) {
+      alert("Agrega al menos un producto.");
+      return null;
+    }
 
     const folio = `COT-${String(Date.now()).slice(-6)}`;
     const now = Date.now();
     const payload = {
       folio,
-      cliente: { documento: docCli, nombre: nomCli, telefono: telEl.value.trim() },
+      cliente: { documento: docCli, nombre: nomCli },
       items: carrito,
       totalUsd: calcularTotal(),
       monedas: obtenerMonedas(),
@@ -297,31 +300,36 @@ export async function mount(root, state) {
     };
 
     await setDoc(doc(refs.cotizaciones(), folio), payload);
-    alert(`Cotización ${folio} guardada (válida por 72 horas).`);
+    await cargarCotizaciones();
+    return payload;
+  }
+
+  root.querySelector("#btnGuardarCot").addEventListener("click", async () => {
+    const saved = await persistirCotizacion();
+    if (!saved) return;
+    alert(`Cotización ${saved.folio} guardada (válida por 72 horas).`);
     carrito = [];
     renderCarrito();
-    await cargarCotizaciones();
   });
 
-  root.querySelector("#btnWsCot").addEventListener("click", () => {
-    if (!carrito.length) return alert("Agrega productos primero.");
-    const nomCli = nomEl.value.trim() || "Cliente";
-    const total = calcularTotal();
-    const tasas = getTasaActiva(state);
-    const lineas = [
-      `*COTIZACIÓN - ${state.empresa?.nombre || "NEXUS"}*`,
-      `Cliente: ${nomCli}`,
-      `----------------`,
-      ...carrito.map((it) => `• ${it.cantidad}x ${it.codigo} - ${it.descripcion.slice(0, 30)}: $${(it.cantidad * it.precioUsd).toFixed(2)}`),
-      `----------------`,
-      `*TOTAL USD: $${total.toFixed(2)}*`,
-      tasas.bcvActiva ? `*Ref. Bs. (BCV ${tasas.bcvActiva.toFixed(2)}): Bs. ${(total * tasas.bcvActiva).toFixed(2)}*` : "",
-      `_Presupuesto válido por 72 horas._`
-    ].filter(Boolean).join("\n");
+  root.querySelector("#btnGenerarPdfCot").addEventListener("click", async () => {
+    const saved = await persistirCotizacion();
+    if (!saved) return;
 
-    const tel = telEl.value.replace(/\D/g, "");
-    const url = tel ? `https://wa.me/${tel.startsWith("58") ? tel : "58" + tel.replace(/^0/, "")}?text=${encodeURIComponent(lineas)}` : `https://wa.me/?text=${encodeURIComponent(lineas)}`;
-    window.open(url, "_blank");
+    imprimirDocumentoCarta({
+      tipo: "COTIZACIÓN",
+      folio: saved.folio,
+      empresa: state.empresa,
+      cliente: saved.cliente,
+      items: saved.items,
+      totalUsd: saved.totalUsd,
+      monedas: saved.monedas,
+      tasas: getTasaActiva(state),
+      observaciones: "Presupuesto válido por 72 horas. Guarda este PDF para enviarlo por WhatsApp o correo."
+    });
+
+    carrito = [];
+    renderCarrito();
   });
 
   function renderListaCot() {
@@ -346,7 +354,7 @@ export async function mount(root, state) {
             <div class="text-[11px] text-slate-500 mt-0.5">${c.items?.length || 0} ítems • Total: <strong class="text-slate-900">$${Number(c.totalUsd || 0).toFixed(2)}</strong></div>
           </div>
           <div class="flex items-center gap-1.5">
-            <button type="button" class="btn-pdf px-2.5 py-1.5 rounded-xl bg-slate-100 text-xs font-bold cursor-pointer">PDF</button>
+            <button type="button" class="btn-pdf px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">Generar PDF</button>
             <button type="button" class="btn-a-caja px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-extrabold cursor-pointer">Pasar a Caja →</button>
             <button type="button" class="btn-del-cot px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold cursor-pointer">✕</button>
           </div>
@@ -375,7 +383,9 @@ export async function mount(root, state) {
       });
     } else if (e.target.closest(".btn-a-caja")) {
       state.cotizacionPendiente = cot;
-      document.querySelector('[data-route="caja-pos"]')?.click();
+      if (typeof window.NEXUS_VE_NAV === "function") {
+        window.NEXUS_VE_NAV("caja-pos");
+      }
     } else if (e.target.closest(".btn-del-cot")) {
       if (!confirm(`¿Eliminar cotización ${cot.folio}?`)) return;
       await deleteDoc(doc(refs.cotizaciones(), cot.id));
@@ -383,7 +393,6 @@ export async function mount(root, state) {
     }
   });
 
-  // Tabs
   const tabNueva = root.querySelector("#tabNuevaCot");
   const tabLista = root.querySelector("#tabListaCot");
   const viewNueva = root.querySelector("#viewNuevaCot");
