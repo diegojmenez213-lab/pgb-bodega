@@ -660,7 +660,7 @@ export async function mount(root, state) {
         batch.set(doc(refs.notasEntrega(), n.id), { cierreId, cerradoEnTs: now }, { merge: true });
       }
 
-      // Sellar cierreId en abonos abiertos para no depender del reloj
+      // Sellar cierreId en abonos abiertos y apagar bandera tieneAbonosSinCerrar
       const notasConAbonosAbiertos = new Set(abonosAbiertos.map((a) => a.notaId));
       for (const notaId of notasConAbonosAbiertos) {
         const nota = todasNotas.find((x) => x.id === notaId);
@@ -668,7 +668,10 @@ export async function mount(root, state) {
         const abonosSellados = nota.abonos.map((ab) => (
           ab.cierreId === null || ab.cierreId === undefined ? { ...ab, cierreId } : ab
         ));
-        batch.set(doc(refs.notasEntrega(), notaId), { abonos: abonosSellados }, { merge: true });
+        batch.set(doc(refs.notasEntrega(), notaId), {
+          abonos: abonosSellados,
+          tieneAbonosSinCerrar: false
+        }, { merge: true });
       }
 
       for (const g of gastosAbiertos) {
@@ -708,15 +711,16 @@ export async function mount(root, state) {
         .sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
       archivoCompletoCargado = true;
     } else {
-      // Ventana rápida: últimos 3 meses + deudas activas + jornada abierta
-      const [snapRecientes, snapDeudas, snapAbiertas, snapGastos] = await Promise.all([
+      // Ventana rápida: últimos 3 meses + deudas activas + jornada abierta + abonos sin cerrar
+      const [snapRecientes, snapDeudas, snapAbiertas, snapAbonosPend, snapGastos] = await Promise.all([
         getDocs(query(refs.notasEntrega(), where("creadoTs", ">=", hace90Dias))),
         getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
         getDocs(query(refs.notasEntrega(), where("cierreId", "==", null))),
+        getDocs(query(refs.notasEntrega(), where("tieneAbonosSinCerrar", "==", true))),
         getDocs(query(refs.gastosCaja(), where("creadoTs", ">=", hace90Dias)))
       ]);
       const mapaNotas = new Map();
-      for (const s of [snapRecientes, snapDeudas, snapAbiertas]) {
+      for (const s of [snapRecientes, snapDeudas, snapAbiertas, snapAbonosPend]) {
         s.forEach((d) => mapaNotas.set(d.id, { id: d.id, ...d.data() }));
       }
       todasNotas = Array.from(mapaNotas.values());
