@@ -30,6 +30,14 @@ function normalizarTexto(txt) {
     .trim();
 }
 
+function normalizarCodigoClave(cod) {
+  return String(cod || "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
 function limpiarDocId(codigo) {
   return String(codigo || "")
     .trim()
@@ -44,12 +52,164 @@ function parseNumero(val) {
     .replace(/[^0-9.,-]/g, "")
     .trim();
   if (!limpia) return 0;
+
   if (limpia.includes(",") && limpia.includes(".")) {
-    const n = parseFloat(limpia.replace(/\./g, "").replace(",", "."));
-    return Number.isFinite(n) ? n : 0;
+    const ultComa = limpia.lastIndexOf(",");
+    const ultPunto = limpia.lastIndexOf(".");
+    if (ultComa > ultPunto) {
+      const n = parseFloat(limpia.replace(/\./g, "").replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    } else {
+      const n = parseFloat(limpia.replace(/,/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    }
   }
   const n = parseFloat(limpia.replace(",", "."));
   return Number.isFinite(n) ? n : 0;
+}
+
+// ============================================================
+// MOTOR INTELIGENTE DE CRUCE (CÓDIGO + MEDIDAS + PARECIDO)
+// ============================================================
+const STOPWORDS = new Set([
+  "de", "del", "la", "el", "los", "las", "para", "con", "sin", "en", "por", "tipo", "und", "pza", "unidad"
+]);
+
+function extraerFirmaTecnica(descripcion = "", marca = "") {
+  const raw = `${descripcion} ${marca && marca !== "GENÉRICO" ? marca : ""}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    // Unifica fracciones mixtas: "3.1/2" o "3 1/2" -> "3_1/2"
+    .replace(/(\d+)[.\s-]+(\d+\/\d+)/g, "$1_$2")
+    // Separa operadores de medidas (*, x, ×)
+    .replace(/[*×]/g, " ")
+    .replace(/(\d)x(\d)/g, "$1 $2");
+
+  // Extrae medidas y números clave (ej. "5/8", "3_1/2", "16", "12mm" -> "12")
+  const medidasMatch = raw.match(/\d+_\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?/g) || [];
+  const medidas = Array.from(new Set(medidasMatch)).sort();
+
+  // Palabras descriptivas relevantes (sin números puros ni conectores)
+  const palabras = raw
+    .replace(/[^a-z0-9/_]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
+
+  const palabrasSet = new Set(palabras);
+  const textoLimpio = palabras.join(" ");
+
+  // Bigramas para similitud de cadena (coeficiente Dice)
+  const bigramas = new Set();
+  const plano = textoLimpio.replace(/\s+/g, "");
+  for (let i = 0; i < plano.length - 1; i++) {
+    bigramas.add(plano.slice(i, i + 2));
+  }
+
+  return { medidas, palabrasSet, bigramas, textoLimpio };
+}
+
+function similitudConjuntos(setA, setB) {
+  if (!setA.size || !setB.size) return 0;
+  let inter = 0;
+  for (const x of setA) {
+    if (setB.has(x)) inter++;
+  }
+  return (2 * inter) / (setA.size + setB.size);
+}
+
+function medidasCompatibles(medA, medB) {
+  if (!medA.length && !medB.length) return true;
+  if (medA.length !== medB.length) return false;
+  for (let i = 0; i < medA.length; i++) {
+    if (medA[i] !== medB[i]) return false;
+  }
+  return true;
+}
+
+function crearIndiceExistentes(productosExistentes) {
+  const porId = new Map();
+  const porCodigoClave = new Map();
+  const indiceTokens = new Map();
+  const firmas = new Map();
+
+  for (const p of productosExistentes) {
+    porId.set(p.id, p);
+    const ck = normalizarCodigoClave(p.codigo || p.id);
+    if (ck && ck.length >= 3) porCodigoClave.set(ck, p);
+
+    const firma = extraerFirmaTecnica(p.descripcion || "", p.marca || "");
+    firmas.set(p.id, firma);
+
+    // Indexa por medidas y palabras para búsquedas instantáneas sin O(N^2)
+    const claves = [...firma.medidas, ...firma.palabrasSet];
+    for (const cl of claves) {
+      if (!indiceTokens.has(cl)) indiceTokens.set(cl, []);
+      indiceTokens.get(cl).push(p);
+    }
+  }
+
+  function buscarCoincidencia(itemExcel, idsYaEmparejados) {
+    // Nivel 1A: ID exacto
+    if (porId.has(itemExcel.id) && !idsYaEmparejados.has(itemExcel.id)) {
+      return { prod: porId.get(itemExcel.id), metodo: "codigo" };
+    }
+
+    // Nivel 1B: Código normalizado (sin guiones ni espacios)
+    const ck = normalizarCodigoClave(itemExcel.codigo);
+    if (ck && ck.length >= 3 && porCodigoClave.has(ck)) {
+      const cand = porCodigoClave.get(ck);
+      if (!idsYaEmparejados.has(cand.id)) {
+        return { prod: cand, metodo: "codigo_norm" };
+      }
+    }
+
+    // Nivel 2 y 3: Medidas exactas + Parecido extremo de nombre
+    const firmaNuevo = extraerFirmaTecnica(itemExcel.descripcion, itemExcel.marca);
+    if (!firmaNuevo.palabrasSet.size) return null;
+
+    const candidatos = new Set();
+    const clavesBusqueda = firmaNuevo.medidas.length
+      ? firmaNuevo.medidas
+      : Array.from(firmaNuevo.palabrasSet).slice(0, 4);
+
+    for (const cl of clavesBusqueda) {
+      const lista = indiceTokens.get(cl);
+      if (lista) {
+        for (const c of lista) {
+          if (!idsYaEmparejados.has(c.id)) candidatos.add(c);
+        }
+      }
+    }
+
+    let mejorProd = null;
+    let mejorScore = 0;
+    let metodoGanador = "";
+
+    for (const cand of candidatos) {
+      const firmaCand = firmas.get(cand.id);
+      if (!firmaCand) continue;
+
+      // Seguridad técnica: si tienen medidas/números, deben coincidir exactamente
+      if (!medidasCompatibles(firmaNuevo.medidas, firmaCand.medidas)) continue;
+
+      const simPalabras = similitudConjuntos(firmaNuevo.palabrasSet, firmaCand.palabrasSet);
+      const simBigramas = similitudConjuntos(firmaNuevo.bigramas, firmaCand.bigramas);
+      const score = simPalabras * 0.65 + simBigramas * 0.35;
+
+      // Si comparten medidas técnicas exactas exigimos >= 0.72; si no hay medidas, exigimos >= 0.85
+      const umbral = firmaNuevo.medidas.length > 0 ? 0.72 : 0.85;
+      if (score >= umbral && score > mejorScore) {
+        mejorScore = score;
+        mejorProd = cand;
+        metodoGanador = firmaNuevo.medidas.length > 0 ? "medidas_nombre" : "parecido_extremo";
+      }
+    }
+
+    return mejorProd ? { prod: mejorProd, metodo: metodoGanador, score: mejorScore } : null;
+  }
+
+  return { buscarCoincidencia };
 }
 
 function mapearFilaExcel(row) {
@@ -62,7 +222,7 @@ function mapearFilaExcel(row) {
     return k ? row[k] : "";
   };
 
-  const codigo = String(
+  const codigoRaw = String(
     buscar(["codigo", "cod", "sku", "ref", "parte", "nro parte", "num parte", "item", "id"]) || ""
   )
     .trim()
@@ -72,11 +232,15 @@ function mapearFilaExcel(row) {
     buscar(["descripcion", "nombre", "producto", "detalle", "articulo", "repuesto", "concepto"]) || ""
   ).trim();
 
-  if (!codigo && !descripcion) return null;
+  if (!codigoRaw && !descripcion) return null;
+
+  const sinCodigo = !codigoRaw;
+  const codigo = codigoRaw || limpiarDocId(descripcion);
 
   return {
-    id: limpiarDocId(codigo || descripcion),
-    codigo: codigo || limpiarDocId(descripcion),
+    id: limpiarDocId(codigo),
+    codigo,
+    sinCodigo,
     descripcion: descripcion || codigo,
     categoria: String(
       buscar(["categoria", "grupo", "linea", "familia", "rubro", "tipo"]) || "SIN CATEGORÍA"
@@ -93,8 +257,10 @@ function mapearFilaExcel(row) {
     )
       .trim()
       .toUpperCase(),
-    costoUsd: parseNumero(
-      buscar(["costo", "precio", "valor", "usd", "pvp", "neto", "unitario", "monto"])
+    costoUsd: Number(
+      parseNumero(
+        buscar(["costo", "precio", "valor", "usd", "pvp", "neto", "unitario", "monto"])
+      ).toFixed(2)
     ),
     stockPlanta: Math.max(
       0,
@@ -204,7 +370,7 @@ export async function mount(root, state) {
 
         <!-- Filtros -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
-          <input id="busqCat" type="text" placeholder="Buscar código o descripción..." class="lg:col-span-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-slate-900" />
+          <input id="busqCat" type="text" placeholder="Buscar código, medida o descripción..." class="lg:col-span-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-slate-900" />
           <select id="filtroCat" class="bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
             <option value="">Todas las Categorías</option>
           </select>
@@ -215,30 +381,35 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Registro de cambios vigente de Planta -->
+      <!-- Registro de cambios inteligente (Última Actualización) -->
       <div id="panelCambiosPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Registro de Cambios (Última Actualización de Planta)</h2>
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Novedades de la Última Actualización Excel</h2>
             <p id="metaUltimaAct" class="text-[11px] text-sky-800 font-semibold"></p>
           </div>
           <div id="resumenBadgesCambios" class="flex flex-wrap gap-1.5 text-[11px] font-extrabold"></div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+          <div class="bg-white rounded-xl border border-amber-300 p-2.5 space-y-1">
+            <div class="font-extrabold text-amber-900">📈 Subieron de Precio Costo</div>
+            <div id="listSubieronPrecio" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+          </div>
+
           <div class="bg-white rounded-xl border border-emerald-200 p-2.5 space-y-1">
-            <div class="font-extrabold text-emerald-800">✦ Productos Nuevos (cargados en Almacén en 0)</div>
-            <div id="listNuevosPlanta" class="max-h-36 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            <div class="font-extrabold text-emerald-800">✦ Productos Nuevos (con Costo)</div>
+            <div id="listNuevosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
           </div>
 
           <div class="bg-white rounded-xl border border-sky-200 p-2.5 space-y-1">
-            <div class="font-extrabold text-sky-800">↑ Llegaron / Sin Existencia Antes</div>
-            <div id="listLlegaronPlanta" class="max-h-36 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            <div class="font-extrabold text-sky-800">↑ No Había y Ahora Sí (Reingresos)</div>
+            <div id="listLlegaronPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
           </div>
 
           <div class="bg-white rounded-xl border border-rose-200 p-2.5 space-y-1">
-            <div class="font-extrabold text-rose-800">↓ Había Antes y Ahora No Hay</div>
-            <div id="listAgotadosPlanta" class="max-h-36 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            <div class="font-extrabold text-rose-800">↓ Había Antes y Ya No Hay</div>
+            <div id="listAgotadosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
           </div>
         </div>
       </div>
@@ -276,11 +447,11 @@ export async function mount(root, state) {
 
     tituloInv.textContent = esAlm ? "Inventario Almacén Físico" : "Inventario Planta (Proveedor)";
     btnAct.textContent = esAlm ? "↑ Actualizar Excel Almacén (En 0)" : "↑ Actualizar Excel Planta";
-    panelCambios.classList.toggle("hidden", esAlm || !ultimoReportePlanta);
+    panelCambios.classList.toggle("hidden", !ultimoReportePlanta);
   }
 
   function renderPanelCambios() {
-    if (!ultimoReportePlanta || origen !== "planta") {
+    if (!ultimoReportePlanta) {
       panelCambios.classList.add("hidden");
       return;
     }
@@ -289,23 +460,45 @@ export async function mount(root, state) {
     const nuevos = r.nuevos || [];
     const llegaron = r.llegaron || [];
     const agotados = r.agotados || [];
+    const subieronPrecio = r.subieronPrecio || [];
+    const crucesInteligentes = Number(r.crucesInteligentes || 0);
 
     root.querySelector("#metaUltimaAct").textContent =
-      `Archivo: ${r.archivo || "Excel"} • Fecha: ${r.fechaIso || "---"} (se reemplazan los cambios anteriores al volver a actualizar)`;
+      `Archivo: ${r.archivo || "Excel"} • Fecha: ${r.fechaIso || "---"}${crucesInteligentes > 0 ? ` • ${crucesInteligentes} cruce(s) inteligente(s) por medidas/nombre` : ""}`;
 
     root.querySelector("#resumenBadgesCambios").innerHTML = `
+      <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900">Subió precio: ${subieronPrecio.length}</span>
       <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900">Nuevos: ${nuevos.length}</span>
-      <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-900">Llegaron: ${llegaron.length}</span>
-      <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900">No hay: ${agotados.length}</span>
+      <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-900">Reingresos: ${llegaron.length}</span>
+      <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900">Agotados: ${agotados.length}</span>
     `;
 
-    const pintLista = (arr, vacio) => arr.length
-      ? arr.slice(0, 80).map((x) => `<div class="py-0.5 border-b border-slate-100 last:border-0"><strong class="font-mono-ve">${x.codigo}</strong> - ${x.descripcion}</div>`).join("")
+    root.querySelector("#listSubieronPrecio").innerHTML = subieronPrecio.length
+      ? subieronPrecio.slice(0, 100).map((x) => `
+          <div class="py-1 border-b border-slate-100 last:border-0 flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <strong class="font-mono-ve text-slate-900">${x.codigo}</strong> - ${x.descripcion}
+            </div>
+            <div class="font-mono-ve text-right shrink-0 text-amber-900 font-extrabold">
+              $${Number(x.costoAnterior || 0).toFixed(2)} → $${Number(x.costoNuevo || 0).toFixed(2)}
+              <span class="text-rose-600">(+${Number(x.pctSubida || 0).toFixed(1)}%)</span>
+            </div>
+          </div>
+        `).join("")
+      : `<div class="text-slate-400 py-2">Ningún producto subió de precio costo.</div>`;
+
+    const pintLista = (arr, vacio, mostrarCosto = true) => arr.length
+      ? arr.slice(0, 100).map((x) => `
+          <div class="py-0.5 border-b border-slate-100 last:border-0 flex items-center justify-between gap-2">
+            <div class="min-w-0 truncate"><strong class="font-mono-ve">${x.codigo}</strong> - ${x.descripcion}</div>
+            ${mostrarCosto && x.costoUsd !== undefined ? `<span class="font-mono-ve font-extrabold text-slate-700 shrink-0">$${Number(x.costoUsd || 0).toFixed(2)}</span>` : ""}
+          </div>
+        `).join("")
       : `<div class="text-slate-400 py-2">${vacio}</div>`;
 
-    root.querySelector("#listNuevosPlanta").innerHTML = pintLista(nuevos, "Sin productos nuevos en este Excel.");
-    root.querySelector("#listLlegaronPlanta").innerHTML = pintLista(llegaron, "Ningún producto sin existencia reingresó.");
-    root.querySelector("#listAgotadosPlanta").innerHTML = pintLista(agotados, "Ningún producto pasó a sin existencia.");
+    root.querySelector("#listNuevosPlanta").innerHTML = pintLista(nuevos, "Sin productos nuevos en este Excel.", true);
+    root.querySelector("#listLlegaronPlanta").innerHTML = pintLista(llegaron, "Ningún producto sin existencia reingresó.", true);
+    root.querySelector("#listAgotadosPlanta").innerHTML = pintLista(agotados, "Ningún producto pasó a sin existencia.", false);
   }
 
   function poblarCategorias() {
@@ -348,6 +541,7 @@ export async function mount(root, state) {
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo || p.id}</span>
             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600">${p.marca || "GENÉRICO"}</span>
+            <span class="text-[10px] font-mono-ve font-extrabold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900">Costo: $${costo.toFixed(2)}</span>
           </div>
           <div class="text-xs font-semibold text-slate-800 mt-0.5">${p.descripcion || ""}</div>
         </div>
@@ -415,7 +609,7 @@ export async function mount(root, state) {
     const progPct = root.querySelector("#progExcelPct");
     const progTxt = root.querySelector("#progExcelTxt");
     progWrap.classList.remove("hidden");
-    progTxt.textContent = `Leyendo ${file.name}...`;
+    progTxt.textContent = `Analizando ${file.name} con motor inteligente...`;
 
     try {
       const XLSX = await cargarSheetJS();
@@ -438,50 +632,106 @@ export async function mount(root, state) {
 
       const esAlmacen = origen === "almacen";
       const msg = esAlmacen
-        ? `Se cargarán ${itemsExcel.length} productos con Almacén en 0 para el conteo físico. ¿Continuar?`
-        : `Se actualizará Planta con ${itemsExcel.length} productos (sin afectar stock de Almacén). Los productos nuevos se crearán en Almacén con stock 0 y se reemplazarán los cambios anteriores. ¿Continuar?`;
+        ? `Se procesarán ${itemsExcel.length} productos con cruce inteligente (Almacén en 0 para conteo físico). ¿Continuar?`
+        : `Se actualizará Planta con ${itemsExcel.length} productos usando cruce inteligente (código, medidas y nombre) sin alterar tu stock de Almacén. ¿Continuar?`;
 
       if (!confirm(msg)) {
         progWrap.classList.add("hidden");
         return;
       }
 
-      const anterioresMap = new Map(productos.map((p) => [p.id, p]));
+      // Cruce inteligente de cada fila del Excel contra el catálogo actual
+      const indice = crearIndiceExistentes(productos);
+      const idsVistosEnExcel = new Set();
+      const operaciones = [];
+
       const nuevos = [];
       const llegaron = [];
       const agotados = [];
+      const subieronPrecio = [];
+      let crucesInteligentes = 0;
 
-      if (!esAlmacen) {
-        for (const it of itemsExcel) {
-          const prev = anterioresMap.get(it.id);
-          const prevPlanta = Number(prev?.stockPlanta || 0);
-          if (!prev) {
-            nuevos.push({ codigo: it.codigo, descripcion: it.descripcion });
-          } else if (prevPlanta <= 0 && it.stockPlanta > 0) {
-            llegaron.push({ codigo: it.codigo, descripcion: it.descripcion });
-          } else if (prevPlanta > 0 && it.stockPlanta <= 0) {
-            agotados.push({ codigo: it.codigo, descripcion: it.descripcion });
+      for (const it of itemsExcel) {
+        const match = indice.buscarCoincidencia(it, idsVistosEnExcel);
+        const prev = match ? match.prod : null;
+        const targetId = prev ? prev.id : it.id;
+        idsVistosEnExcel.add(targetId);
+
+        if (match && (match.metodo === "medidas_nombre" || match.metodo === "parecido_extremo")) {
+          crucesInteligentes++;
+        }
+
+        const prevCosto = Number(prev?.costoUsd || 0);
+        const nuevoCosto = Number(it.costoUsd || 0);
+        const prevPlanta = Number(prev?.stockPlanta || 0);
+
+        if (!prev) {
+          nuevos.push({
+            codigo: it.codigo,
+            descripcion: it.descripcion,
+            costoUsd: nuevoCosto
+          });
+        } else {
+          // Alerta de aumento de precio costo
+          if (prevCosto > 0 && nuevoCosto > prevCosto + 0.009) {
+            const pctSubida = ((nuevoCosto - prevCosto) / prevCosto) * 100;
+            subieronPrecio.push({
+              codigo: prev.codigo || it.codigo,
+              descripcion: it.descripcion || prev.descripcion,
+              costoAnterior: prevCosto,
+              costoNuevo: nuevoCosto,
+              pctSubida: Number(pctSubida.toFixed(1))
+            });
+          }
+
+          if (!esAlmacen) {
+            if (prevPlanta <= 0 && it.stockPlanta > 0) {
+              llegaron.push({
+                codigo: prev.codigo || it.codigo,
+                descripcion: it.descripcion || prev.descripcion,
+                costoUsd: nuevoCosto
+              });
+            } else if (prevPlanta > 0 && it.stockPlanta <= 0) {
+              agotados.push({
+                codigo: prev.codigo || it.codigo,
+                descripcion: it.descripcion || prev.descripcion
+              });
+            }
           }
         }
-        for (const [id, prev] of anterioresMap.entries()) {
-          if (!mapaExcel.has(id) && Number(prev.stockPlanta || 0) > 0) {
-            agotados.push({ codigo: prev.codigo || id, descripcion: prev.descripcion || "" });
+
+        operaciones.push({ targetId, prev, it });
+      }
+
+      // Productos que tenían stock en Planta y desaparecieron del Excel
+      const faltantesEnExcel = [];
+      if (!esAlmacen) {
+        for (const prev of productos) {
+          if (!idsVistosEnExcel.has(prev.id) && Number(prev.stockPlanta || 0) > 0) {
+            faltantesEnExcel.push(prev);
+            agotados.push({
+              codigo: prev.codigo || prev.id,
+              descripcion: prev.descripcion || ""
+            });
           }
         }
       }
 
+      // Ordenar subidas de precio de mayor porcentaje a menor
+      subieronPrecio.sort((a, b) => b.pctSubida - a.pctSubida);
+
       const colRef = refs.catalogo();
       const LOTE = 400;
-      const totalOps = itemsExcel.length + (!esAlmacen ? agotados.length : 0);
+      const totalOps = operaciones.length + faltantesEnExcel.length;
       let hechas = 0;
 
-      for (let i = 0; i < itemsExcel.length; i += LOTE) {
-        const slice = itemsExcel.slice(i, i + LOTE);
+      for (let i = 0; i < operaciones.length; i += LOTE) {
+        const slice = operaciones.slice(i, i + LOTE);
         const batch = writeBatch(db);
-        for (const it of slice) {
-          const prev = anterioresMap.get(it.id);
+        for (const { targetId, prev, it } of slice) {
           const payload = {
-            codigo: it.codigo,
+            // Conserva el código real anterior si el Excel vino sin código
+            codigo: it.sinCodigo && prev?.codigo ? prev.codigo : it.codigo,
             descripcion: it.descripcion,
             categoria: it.categoria,
             marca: it.marca,
@@ -502,20 +752,17 @@ export async function mount(root, state) {
             }
           }
 
-          batch.set(doc(colRef, it.id), payload, { merge: true });
+          batch.set(doc(colRef, targetId), payload, { merge: true });
         }
         await batch.commit();
         hechas += slice.length;
         const pct = Math.min(100, Math.round((hechas / Math.max(1, totalOps)) * 100));
         progBar.style.width = `${pct}%`;
         progPct.textContent = `${pct}%`;
-        progTxt.textContent = `Actualizando ${hechas} de ${totalOps}...`;
+        progTxt.textContent = `Guardando ${hechas} de ${totalOps}...`;
       }
 
-      if (!esAlmacen) {
-        const faltantesEnExcel = Array.from(anterioresMap.values()).filter(
-          (p) => !mapaExcel.has(p.id) && Number(p.stockPlanta || 0) > 0
-        );
+      if (!esAlmacen && faltantesEnExcel.length) {
         for (let i = 0; i < faltantesEnExcel.length; i += LOTE) {
           const slice = faltantesEnExcel.slice(i, i + LOTE);
           const batch = writeBatch(db);
@@ -525,24 +772,30 @@ export async function mount(root, state) {
           await batch.commit();
           hechas += slice.length;
         }
-
-        const reportePayload = {
-          archivo: file.name,
-          fechaIso: new Date().toISOString().slice(0, 10),
-          nuevos,
-          llegaron,
-          agotados,
-          actualizadoEn: serverTimestamp()
-        };
-        await setDoc(doc(refs.historialNovedades(), "ultimo_planta"), reportePayload);
-        ultimoReportePlanta = reportePayload;
       }
+
+      const reportePayload = {
+        archivo: file.name,
+        fechaIso: new Date().toISOString().slice(0, 10),
+        origenActualizado: origen,
+        crucesInteligentes,
+        nuevos,
+        llegaron,
+        agotados,
+        subieronPrecio,
+        actualizadoEn: serverTimestamp()
+      };
+      await setDoc(doc(refs.historialNovedades(), "ultimo_planta"), reportePayload);
+      ultimoReportePlanta = reportePayload;
 
       progWrap.classList.add("hidden");
       alert(
-        esAlmacen
-          ? `¡Listo! ${itemsExcel.length} productos cargados en Almacén (en 0) por categoría.`
-          : `¡Planta actualizada! Nuevos en Almacén (en 0): ${nuevos.length} • Llegaron: ${llegaron.length} • Sin existencia: ${agotados.length}.`
+        `¡Actualización completada!\n` +
+        `• Nuevos: ${nuevos.length}\n` +
+        `• Subieron de precio costo: ${subieronPrecio.length}\n` +
+        `• No había y ahora sí: ${llegaron.length}\n` +
+        `• Había y ya no hay: ${agotados.length}\n` +
+        (crucesInteligentes > 0 ? `• Cruces inteligentes (sin código exacto): ${crucesInteligentes}` : "")
       );
       await cargarCatalogo();
     } catch (err) {
