@@ -12,7 +12,6 @@ import {
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
-import { imprimirDocumentoCarta, imprimirTicket80mm } from "./documentos-pdf.js";
 
 function getTasaActiva(state) {
   const t = state.tasas || {};
@@ -292,22 +291,8 @@ export async function mount(root, state) {
               </div>
             </div>
 
-            <div class="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-600">
-              <div class="flex gap-2">
-                <label class="flex items-center gap-1"><input type="checkbox" class="pos-mon" value="USD" checked /> USD</label>
-                <label class="flex items-center gap-1"><input type="checkbox" class="pos-mon" value="BS" checked /> Bs.</label>
-                <label class="flex items-center gap-1"><input type="checkbox" class="pos-mon" value="USDT" /> USDT</label>
-                <label class="flex items-center gap-1"><input type="checkbox" class="pos-mon" value="EUR" /> EUR</label>
-              </div>
-              <select id="posFormatoPrint" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-bold">
-                <option value="carta">PDF Carta</option>
-                <option value="ticket">Ticket 80mm</option>
-                <option value="ninguno">Solo guardar</option>
-              </select>
-            </div>
-
             <button id="btnEmitirNota" type="button" class="w-full py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold uppercase tracking-wider cursor-pointer">
-              Emitir Nota de Entrega (F9)
+              Confirmar Venta y Ver Notas (F9)
             </button>
           </div>
         </div>
@@ -1019,18 +1004,24 @@ export async function mount(root, state) {
     emitiendo = true;
     const btn = root.querySelector("#btnEmitirNota");
     btn.disabled = true;
-    btn.textContent = "Emitiendo...";
+    btn.textContent = "Guardando venta...";
 
     try {
       const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
       const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
       const saldoPendienteUsd = esCredito ? restanteHoy : 0;
-      const monedas = Array.from(root.querySelectorAll(".pos-mon:checked")).map((el) => el.value);
+
+      // Monedas automáticas para el PDF: siempre USD y Bs., más USDT si pagó con Binance
+      const monedas = ["USD", "BS"];
+      if (pagosValidos.some((p) => p.metodo.toLowerCase().includes("usdt"))) {
+        monedas.push("USDT");
+      }
+
       const now = Date.now();
       const jornadaId = state.empresa?.jornadaActivaId || new Date().toISOString().slice(0, 10);
       const cotIdAEliminar = cotizacionOrigenId;
 
-      const { folio, nuevoNum } = await runTransaction(db, async (tx) => {
+      const { nuevoNum } = await runTransaction(db, async (tx) => {
         const empSnap = await tx.get(refs.empresaRef);
         const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || 0);
         const sigNum = actual + 1;
@@ -1066,7 +1057,7 @@ export async function mount(root, state) {
           utilidadUsd,
           multiplicador: factorActual,
           tasaBcvUsada: tasas.bcvActiva,
-          monedas: monedas.length ? monedas : ["USD", "BS"],
+          monedas,
           usuario: state.sesion.usuario || "Administrador",
           creadoEn: serverTimestamp()
         });
@@ -1115,59 +1106,22 @@ export async function mount(root, state) {
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
       actualizarFolioUI();
 
-      for (const it of carrito) {
-        const prod = catalogo.find((p) => p.id === it.id);
-        if (prod && it.origen === "almacen") {
-          prod.stockAlmacen = (Number(prod.stockAlmacen) || 0) - Number(it.cantidad || 1);
-        }
-      }
-
-      const [snapDeudas, snapCli] = await Promise.all([
-        getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
-        getDocs(refs.clientes())
-      ]);
-      deudasActivas = snapDeudas.docs.map((d) => ({ id: d.id, ...d.data() }));
-      clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
-
       if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
         await window.NEXUS_VE_REFRESH_ALERTAS();
       }
 
-      const formato = root.querySelector("#posFormatoPrint").value;
-      const partesObs = [];
-      if (usadoFavor > 0.01) partesObs.push(`Saldo a favor descontado: $${usadoFavor.toFixed(2)}.`);
-      if (vueltoEntregadoUsd > 0.01) partesObs.push(`Vuelto entregado: $${vueltoEntregadoUsd.toFixed(2)}.`);
-      if (sobrepagoGenerado > 0.01) partesObs.push(`Sobrepago acreditado a saldo a favor: +$${sobrepagoGenerado.toFixed(2)}.`);
-      if (esCredito && saldoPendienteUsd > 0.01) {
-        partesObs.push(`Venta a crédito (${diasCredito} días). Saldo pendiente: $${saldoPendienteUsd.toFixed(2)}.`);
-      }
-
-      const docData = {
-        tipo: "NOTA DE ENTREGA",
-        folio,
-        empresa: state.empresa,
-        cliente: { documento: docCli, nombre: nomCli },
-        items: carrito,
-        totalUsd,
-        monedas: monedas.length ? monedas : ["USD", "BS"],
-        tasas,
-        pagos: pagosValidos,
-        observaciones: partesObs.join(" ")
-      };
-
-      if (formato === "carta") imprimirDocumentoCarta(docData);
-      else if (formato === "ticket") imprimirTicket80mm(docData);
-      else alert(`Nota de Entrega N° ${folio} emitida correctamente.`);
-
       limpiarCaja();
-      refrescarEstadoClienteActual();
-      renderBusqueda();
+
+      // Redirige directo a Ventas Realizadas (la primera nota es la recién emitida)
+      if (typeof window.NEXUS_VE_NAV === "function") {
+        window.NEXUS_VE_NAV("inventario-planta");
+      }
     } catch (err) {
       alert("Error emitiendo Nota de Entrega: " + err.message);
     } finally {
       emitiendo = false;
       btn.disabled = false;
-      btn.textContent = "Emitir Nota de Entrega (F9)";
+      btn.textContent = "Confirmar Venta y Ver Notas (F9)";
     }
   }
 
