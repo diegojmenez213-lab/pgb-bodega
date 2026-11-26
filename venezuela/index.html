@@ -24,13 +24,18 @@
       <nav class="ve-nav" id="pcNav">
         <div class="ve-nav-group">Operación</div>
         <button class="ve-nav-btn active" data-route="caja-pos"><span>🧾</span> Caja / Nota de Entrega</button>
-        <button class="ve-nav-btn" data-route="cotizaciones"><span>📄</span> Cotizaciones (72h)</button>
+        <button class="ve-nav-btn" data-route="cotizaciones"><span>📄</span> Cotizaciones (PDF)</button>
+        <button class="ve-nav-btn" data-route="deudores">
+          <span>💳</span>
+          <span class="flex-1 text-left">Deudores Activos</span>
+          <span id="badgeDeudaVencida" class="hidden px-1.5 py-0.5 text-[10px] font-extrabold rounded-full bg-rose-600 text-white">0</span>
+        </button>
         <button class="ve-nav-btn" data-route="clientes"><span>👥</span> Clientes</button>
 
         <div class="ve-nav-group">Inventario</div>
-        <button class="ve-nav-btn" data-route="catalogo"><span>📦</span> Catálogo (Almacén / Planta)</button>
-        <button class="ve-nav-btn" data-route="conteo-bodega"><span>✅</span> Conteo Digital</button>
-        <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Actualizar Planta</button>
+        <button class="ve-nav-btn" data-route="catalogo"><span>📦</span> Almacén / Planta</button>
+        <button class="ve-nav-btn" data-route="conteo-bodega"><span>✅</span> Conteo Almacén</button>
+        <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Historial Novedades</button>
 
         <div class="ve-nav-group">Gerencia</div>
         <button class="ve-nav-btn" data-route="analitica"><span>📈</span> Analítica & Cierre</button>
@@ -50,31 +55,34 @@
 
     <!-- Contenedor principal -->
     <div class="ve-main-wrap">
-      <!-- Barra superior de Tasas en Vivo -->
       <header class="ve-topbar">
         <div class="ve-rates-strip" id="ratesStrip">
-          <button type="button" id="pillBcvHoy" class="ve-rate-pill active-bcv" title="Usar tasa BCV vigente de hoy">
+          <button type="button" id="pillBcvHoy" class="ve-rate-pill active-bcv">
             <span class="ve-rate-label">BCV Hoy</span>
             <span id="valBcvHoy" class="font-mono-ve">--.--</span>
           </button>
 
-          <button type="button" id="pillBcvNext" class="ve-rate-pill next-bcv hidden" title="Usar tasa BCV del próximo día hábil">
+          <button type="button" id="pillBcvNext" class="ve-rate-pill next-bcv hidden">
             <span class="ve-rate-label">BCV Mañana</span>
             <span id="valBcvNext" class="font-mono-ve">--.--</span>
           </button>
 
-          <div class="ve-rate-pill" title="Euro BCV">
+          <div class="ve-rate-pill">
             <span class="ve-rate-label">EUR</span>
             <span id="valEur" class="font-mono-ve">--.--</span>
           </div>
 
-          <div class="ve-rate-pill" title="Referencia USDT">
+          <div class="ve-rate-pill">
             <span class="ve-rate-label">USDT</span>
             <span id="valUsdt" class="font-mono-ve">--.--</span>
           </div>
         </div>
 
         <div class="flex items-center gap-2 ml-auto">
+          <button type="button" id="btnAlertaVencidos" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-extrabold cursor-pointer">
+            <span>⚠️</span>
+            <span id="txtAlertaVencidos">+30d sin pagar</span>
+          </button>
           <span id="relojCaracas" class="text-[11px] font-mono-ve font-bold text-slate-500 hidden sm:inline">--:-- VE</span>
           <button type="button" id="btnRefrescarTasas" class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
             ↻ Tasas
@@ -82,7 +90,6 @@
         </div>
       </header>
 
-      <!-- Vista del módulo activo -->
       <main id="veModuleRoot" class="ve-content">
         <div class="ve-card text-center py-12 text-slate-500 text-sm font-semibold">
           Inicializando entorno seguro de Venezuela...
@@ -94,9 +101,12 @@
   <!-- Barra inferior fija (Móvil) -->
   <nav class="ve-bottom-nav" id="mobNav">
     <button class="ve-mob-btn active" data-route="caja-pos"><span class="text-base">🧾</span>Caja</button>
-    <button class="ve-mob-btn" data-route="catalogo"><span class="text-base">📦</span>Catálogo</button>
+    <button class="ve-mob-btn" data-route="catalogo"><span class="text-base">📦</span>Inventario</button>
+    <button class="ve-mob-btn relative" data-route="deudores">
+      <span class="text-base">💳</span>Deudores
+      <span id="mobDotVencidos" class="hidden absolute top-1 right-3 w-2 h-2 rounded-full bg-rose-600"></span>
+    </button>
     <button class="ve-mob-btn" data-route="cotizaciones"><span class="text-base">📄</span>Cotizar</button>
-    <button class="ve-mob-btn" data-route="conteo-bodega"><span class="text-base">✅</span>Conteo</button>
     <button class="ve-mob-btn" id="btnMobMore"><span class="text-base">☰</span>Más</button>
   </nav>
 
@@ -110,8 +120,9 @@
         </div>
         <button id="btnCloseDrawer" class="text-xs font-bold text-slate-500 px-2 py-1">Cerrar ✕</button>
       </div>
-      <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Actualizar Planta (Excel)</button>
-      <button class="ve-nav-btn" data-route="clientes"><span>👥</span> Clientes y Tarifas</button>
+      <button class="ve-nav-btn" data-route="conteo-bodega"><span>✅</span> Conteo Digital Almacén</button>
+      <button class="ve-nav-btn" data-route="clientes"><span>👥</span> Clientes</button>
+      <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Historial de Novedades</button>
       <button class="ve-nav-btn" data-route="analitica"><span>📈</span> Analítica & Cierre</button>
       <button class="ve-nav-btn" data-route="pedido-sugerido"><span>🧠</span> Pedido Sugerido</button>
       <div class="pt-2 border-t border-slate-200">
@@ -124,42 +135,87 @@
 
   <script type="module">
     import { verificarAccesoVE, cerrarSesionVE } from "./core/auth-tenant.js";
+    import { getTenantRefs, getDocs } from "./core/db.js";
+
+    const DIAS_30_MS = 30 * 24 * 60 * 60 * 1000;
 
     const state = {
       sesion: null,
       empresa: null,
       rutaActual: "caja-pos",
-      modoTasaBCV: "hoy", // "hoy" | "manana"
-      tasas: { bcvHoy: 0, bcvManana: 0, eur: 0, usdt: 0, actualizado: "" }
+      modoTasaBCV: "hoy",
+      tasas: { bcvHoy: 0, bcvManana: 0, eur: 0, usdt: 0, actualizado: "" },
+      vencidos30Count: 0
     };
 
     window.NEXUS_VE_STATE = state;
 
     const NOMBRES_RUTAS = {
       "caja-pos": "Caja / Nota de Entrega",
-      "cotizaciones": "Cotizaciones (72h)",
+      "cotizaciones": "Cotizaciones (PDF)",
+      "deudores": "Deudores Activos",
       "clientes": "Clientes",
-      "catalogo": "Catálogo (Almacén / Planta)",
+      "catalogo": "Inventario (Almacén / Planta)",
       "conteo-bodega": "Conteo Digital de Almacén",
-      "inventario-planta": "Actualizar Planta (Excel)",
+      "inventario-planta": "Historial de Novedades",
       "analitica": "Analítica Financiera & Cierre",
       "pedido-sugerido": "Pedido Sugerido"
     };
+
+    async function revisarAlertasDeudores() {
+      if (!state.sesion?.tenantId) return;
+      try {
+        const refs = getTenantRefs(state.sesion.tenantId);
+        const snap = await getDocs(refs.notasEntrega());
+        const ahora = Date.now();
+        let vencidos = 0;
+
+        snap.forEach((d) => {
+          const n = d.data();
+          const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
+          if (saldo > 0.01) {
+            const baseTs = Number(n.creadoTs || 0);
+            const dias = baseTs ? (ahora - baseTs) / 86400000 : 0;
+            if (dias >= 30 || (n.venceTs && ahora > n.venceTs && dias >= 30)) {
+              vencidos++;
+            }
+          }
+        });
+
+        state.vencidos30Count = vencidos;
+        const badge = document.getElementById("badgeDeudaVencida");
+        const topBtn = document.getElementById("btnAlertaVencidos");
+        const topTxt = document.getElementById("txtAlertaVencidos");
+        const mobDot = document.getElementById("mobDotVencidos");
+
+        if (vencidos > 0) {
+          badge.textContent = String(vencidos);
+          badge.classList.remove("hidden");
+          topBtn.classList.remove("hidden");
+          topBtn.classList.add("inline-flex");
+          topTxt.textContent = `${vencidos} deuda(s) +30d`;
+          mobDot.classList.remove("hidden");
+        } else {
+          badge.classList.add("hidden");
+          topBtn.classList.add("hidden");
+          topBtn.classList.remove("inline-flex");
+          mobDot.classList.add("hidden");
+        }
+      } catch (e) {
+        console.warn("Revisión de deudores:", e);
+      }
+    }
+
+    window.NEXUS_VE_REFRESH_ALERTAS = revisarAlertasDeudores;
 
     function actualizarRelojCaracas() {
       const el = document.getElementById("relojCaracas");
       if (!el) return;
       try {
-        const hora = new Intl.DateTimeFormat("es-VE", {
-          timeZone: "America/Caracas",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true
-        }).format(new Date());
-        el.textContent = `${hora} VE`;
-      } catch {
-        el.textContent = "";
-      }
+        el.textContent = `${new Intl.DateTimeFormat("es-VE", {
+          timeZone: "America/Caracas", hour: "2-digit", minute: "2-digit", hour12: true
+        }).format(new Date())} VE`;
+      } catch { el.textContent = ""; }
     }
 
     function pintarTasas() {
@@ -175,7 +231,6 @@
       } else {
         pillNext.classList.add("hidden");
       }
-
       document.getElementById("pillBcvHoy").classList.toggle("active-bcv", state.modoTasaBCV === "hoy");
       pillNext.classList.toggle("active-bcv", state.modoTasaBCV === "manana");
     }
@@ -195,7 +250,7 @@
         pintarTasas();
         window.dispatchEvent(new CustomEvent("nexus-ve-tasas-updated", { detail: state.tasas }));
       } catch (err) {
-        console.warn("No se pudieron consultar tasas en vivo:", err);
+        console.warn("Error tasas:", err);
       }
     }
 
@@ -215,25 +270,20 @@
 
       try {
         const mod = await import(`./modules/${route}.js`);
-        if (typeof mod.mount === "function") {
-          await mod.mount(root, state);
-        } else if (typeof mod.default === "function") {
-          await mod.default(root, state);
-        } else {
-          throw new Error("El módulo no exporta mount()");
-        }
+        if (typeof mod.mount === "function") await mod.mount(root, state);
+        else if (typeof mod.default === "function") await mod.default(root, state);
       } catch (err) {
         root.innerHTML = `
           <div class="ve-card max-w-xl mx-auto text-center space-y-2 py-10">
-            <div class="text-xs font-extrabold uppercase tracking-wider text-slate-400">Módulo en construcción</div>
+            <div class="text-xs font-extrabold uppercase tracking-wider text-slate-400">Módulo pendiente</div>
             <h2 class="text-lg font-extrabold text-slate-900">${NOMBRES_RUTAS[route] || route}</h2>
-            <p class="text-xs text-slate-500">
-              Aún no se ha creado el archivo <span class="font-mono-ve text-slate-700">venezuela/modules/${route}.js</span>.
-            </p>
+            <p class="text-xs text-slate-500">Falta crear <span class="font-mono-ve">venezuela/modules/${route}.js</span>.</p>
           </div>
         `;
       }
     }
+
+    window.NEXUS_VE_NAV = abrirModulo;
 
     async function iniciar() {
       const acceso = await verificarAccesoVE();
@@ -253,45 +303,28 @@
       document.getElementById("userLabel").textContent = acceso.sesion.usuario || "Administrador";
 
       if (logo) {
-        const wrap = document.getElementById("brandLogoWrap");
-        wrap.outerHTML = `<img src="${logo}" alt="Logo" class="ve-brand-logo" />`;
+        document.getElementById("brandLogoWrap").outerHTML = `<img src="${logo}" alt="Logo" class="ve-brand-logo" />`;
       }
 
       document.querySelectorAll("[data-route]").forEach((btn) => {
         btn.addEventListener("click", () => abrirModulo(btn.dataset.route));
       });
 
-      document.getElementById("pillBcvHoy").addEventListener("click", () => {
-        state.modoTasaBCV = "hoy";
-        pintarTasas();
-        window.dispatchEvent(new CustomEvent("nexus-ve-tasa-modo", { detail: "hoy" }));
-      });
-
-      document.getElementById("pillBcvNext").addEventListener("click", () => {
-        state.modoTasaBCV = "manana";
-        pintarTasas();
-        window.dispatchEvent(new CustomEvent("nexus-ve-tasa-modo", { detail: "manana" }));
-      });
-
+      document.getElementById("btnAlertaVencidos").addEventListener("click", () => abrirModulo("deudores"));
+      document.getElementById("pillBcvHoy").addEventListener("click", () => { state.modoTasaBCV = "hoy"; pintarTasas(); });
+      document.getElementById("pillBcvNext").addEventListener("click", () => { state.modoTasaBCV = "manana"; pintarTasas(); });
       document.getElementById("btnRefrescarTasas").addEventListener("click", cargarTasas);
       document.getElementById("btnLogoutPC").addEventListener("click", cerrarSesionVE);
       document.getElementById("btnLogoutMob").addEventListener("click", cerrarSesionVE);
 
-      document.getElementById("btnMobMore").addEventListener("click", () => {
-        document.getElementById("mobDrawer").classList.add("open");
-      });
-      document.getElementById("btnCloseDrawer").addEventListener("click", () => {
-        document.getElementById("mobDrawer").classList.remove("open");
-      });
-      document.getElementById("mobDrawer").addEventListener("click", (e) => {
-        if (e.target.id === "mobDrawer") e.currentTarget.classList.remove("open");
-      });
+      document.getElementById("btnMobMore").addEventListener("click", () => document.getElementById("mobDrawer").classList.add("open"));
+      document.getElementById("btnCloseDrawer").addEventListener("click", () => document.getElementById("mobDrawer").classList.remove("open"));
+      document.getElementById("mobDrawer").addEventListener("click", (e) => { if (e.target.id === "mobDrawer") e.currentTarget.classList.remove("open"); });
 
       actualizarRelojCaracas();
       setInterval(actualizarRelojCaracas, 30000);
-      await cargarTasas();
-      setInterval(cargarTasas, 10 * 60 * 1000); // Revisa cada 10 min
-
+      await Promise.all([cargarTasas(), revisarAlertasDeudores()]);
+      setInterval(cargarTasas, 10 * 60 * 1000);
       await abrirModulo("caja-pos");
     }
 
