@@ -75,6 +75,7 @@ export async function mount(root, state) {
 
   let catalogo = [];
   let ventas30d = new Map();
+  let pedidosPlanta30d = new Map();
   let tabActiva = "aumentar";
   let listaAumentar = [];
   let listaMantener = [];
@@ -96,16 +97,32 @@ export async function mount(root, state) {
 
     for (const p of catalogo) {
       const vendidos = ventas30d.get(p.id) || 0;
+      const pedidosDePlanta = pedidosPlanta30d.get(p.id) || 0;
       const actual = Number(p.stockAlmacen || 0);
       const dispPlanta = Number(p.stockPlanta || 0);
       const costo = Number(p.costoUsd || 0);
       const sinMovimiento30d = !p.ultimaVentaTs || p.ultimaVentaTs < corte30d;
 
+      // Producto que se pide constantemente de Planta pero mantiene 0 stock en Almacén
+      if (pedidosDePlanta > 0 && actual <= 0) {
+        const basePedir = Math.max(1, Math.ceil(pedidosDePlanta * factor));
+        if (!soloPlanta || dispPlanta > 0) {
+          const cantFinal = soloPlanta ? Math.min(basePedir, dispPlanta) : basePedir;
+          listaAumentar.push({
+            ...p,
+            vendidos30d: vendidos,
+            pedidosPlanta: pedidosDePlanta,
+            sugerido: cantFinal,
+            motivo: "Pedido constante de Planta sin stock en Almacén • Comprar por margen",
+            inversion: cantFinal * costo
+          });
+        }
+        continue;
+      }
+
       if (vendidos > 0) {
-        // Producto con rotación activa
         const meta = Math.ceil(vendidos * factor);
         const pedirBase = Math.max(0, meta - actual);
-        // Si se está quedando en 0 rápido (stock menor al 25% de la venta mensual), sugerimos margen extra (+30%)
         const seAgotaRapido = actual <= Math.max(1, Math.ceil(vendidos * 0.25));
         const pedirConMargen = seAgotaRapido ? Math.ceil((meta * 1.3) - actual) : pedirBase;
 
@@ -114,6 +131,7 @@ export async function mount(root, state) {
           listaAumentar.push({
             ...p,
             vendidos30d: vendidos,
+            pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
             motivo: seAgotaRapido ? "Alto flujo • se agota rápido (+30%)" : "Reposición según cobertura",
             inversion: cantFinal * costo
@@ -122,16 +140,17 @@ export async function mount(root, state) {
           listaMantener.push({
             ...p,
             vendidos30d: vendidos,
+            pedidosPlanta: pedidosDePlanta,
             sugerido: 0,
             motivo: "Stock suficiente para su rotación actual",
             inversion: 0
           });
         }
       } else if (actual > 0 && sinMovimiento30d) {
-        // Sin ventas en +30 días y con stock en almacén -> No pedir / Ofertar
         listaNoPedir.push({
           ...p,
           vendidos30d: 0,
+          pedidosPlanta: 0,
           sugerido: 0,
           motivo: "Más de 30 días sin venderse • ideal para ofrecer/promocionar",
           inversion: 0
@@ -139,7 +158,7 @@ export async function mount(root, state) {
       }
     }
 
-    listaAumentar.sort((a, b) => b.vendidos30d - a.vendidos30d);
+    listaAumentar.sort((a, b) => (b.pedidosPlanta || 0) - (a.pedidosPlanta || 0) || b.vendidos30d - a.vendidos30d);
     listaMantener.sort((a, b) => b.vendidos30d - a.vendidos30d);
     listaNoPedir.sort((a, b) => ((b.stockAlmacen || 0) * (b.costoUsd || 0)) - ((a.stockAlmacen || 0) * (a.costoUsd || 0)));
 
@@ -181,7 +200,7 @@ export async function mount(root, state) {
             </div>
             <div class="text-xs font-semibold text-slate-700 mt-0.5">${p.descripcion || ""}</div>
             <div class="text-[11px] text-slate-400">
-              Almacén: <strong class="text-slate-700">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-slate-700">${p.stockPlanta ?? 0}</strong> • Vendidos 30d: <strong class="text-slate-700">${p.vendidos30d}</strong>
+              Almacén: <strong class="text-slate-700">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-slate-700">${p.stockPlanta ?? 0}</strong> • Vendidos 30d: <strong class="text-slate-700">${p.vendidos30d}</strong>${p.pedidosPlanta ? ` • Pedidos Planta: <strong class="text-sky-700">${p.pedidosPlanta}</strong>` : ""}
             </div>
           </div>
           <div class="text-right shrink-0">
@@ -222,6 +241,7 @@ export async function mount(root, state) {
       Descripcion: p.descripcion || "",
       Motivo: p.motivo,
       Vendidos_30d: p.vendidos30d,
+      Pedidos_Planta_30d: p.pedidosPlanta || 0,
       Almacen: p.stockAlmacen ?? 0,
       Planta: p.stockPlanta ?? 0,
       Pedir_Und: p.sugerido,
@@ -242,7 +262,11 @@ export async function mount(root, state) {
     const n = d.data();
     if ((n.creadoTs || 0) < hace30d) return;
     for (const it of n.items || []) {
-      ventas30d.set(it.id, (ventas30d.get(it.id) || 0) + Number(it.cantidad || 0));
+      const cant = Number(it.cantidad || 0);
+      ventas30d.set(it.id, (ventas30d.get(it.id) || 0) + cant);
+      if (it.origen === "planta") {
+        pedidosPlanta30d.set(it.id, (pedidosPlanta30d.get(it.id) || 0) + cant);
+      }
     }
   });
 
