@@ -42,7 +42,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
@@ -67,6 +67,29 @@
       const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
       return `${cuerpo}-${c.slice(-1)}`;
     };
+
+    const normalizarIdVE = (raw = "") => {
+      const limpio = String(raw).trim().toUpperCase().replace(/\s+/g, "");
+      if (/^[VEJGP]-\d+/.test(limpio)) return limpio;
+      if (/^[VEJGP]\d+/.test(limpio)) return `${limpio[0]}-${limpio.slice(1)}`;
+      if (/^\d{6,9}$/.test(limpio)) return `V-${limpio}`;
+      return limpio;
+    };
+
+    const formatearDocVE = (raw = "") => {
+      const s = String(raw || "").toUpperCase().replace(/[^VEJGP0-9-]/g, "");
+      if (!s) return "";
+      const letra = s[0];
+      if (!/[VEJGP]/.test(letra)) return s;
+      const resto = s.slice(1).replace(/[^0-9]/g, "");
+      if (!resto) return letra;
+      if ((letra === "J" || letra === "G") && resto.length > 8) {
+        return `${letra}-${resto.slice(0, 8)}-${resto.slice(8, 9)}`;
+      }
+      return `${letra}-${resto.slice(0, 9)}`;
+    };
+
+    const validarDocVE = (val = "") => /^[VEJGP]-\d{6,9}(-\d)?$/.test(String(val || "").trim().toUpperCase());
 
     // CIFRADO SHA-256 PARA PIN MAESTRO (SIN EXPONER CLAVE EN TEXTO PLANO)
     const sha256Hex = async (texto) => {
@@ -102,7 +125,6 @@
       }
       const hashBootstrap = await obtenerHashBootstrapInicial();
       if (hashIngresado === hashBootstrap) {
-        // Guarda automáticamente el hash en Firestore tras el primer ingreso
         cfgRef.set({ pinMaestroHash: hashBootstrap, actualizadoTs: Date.now() }, { merge: true }).catch(() => {});
         return { ok: true, desdeFirestore: false };
       }
@@ -201,7 +223,7 @@
       });
     };
 
-    // PERFIL LIMPIO PARA EMPRESAS NUEVAS E-COMMERCE (MÓDULOS EXCLUSIVOS PGB APAGADOS POR DEFECTO)
+    // PERFIL LIMPIO PARA EMPRESAS NUEVAS E-COMMERCE CHILE
     const MODULOS_DEFAULT = {
       m1_aislamiento: true,
       m2_roles: true,
@@ -222,6 +244,21 @@
       m17_compras_prov: true,
       m18_finanzas_bi: true
     };
+
+    // PERFIL LIMPIO PARA EMPRESAS NUEVAS VENEZUELA
+    const MODULOS_VE_DEFAULT = {
+      dobleInventario: true,
+      cotizaciones72h: true,
+      pedidoSugerido: true,
+      analiticaBinance: true
+    };
+
+    const SWITCHES_VE = [
+      { key: "dobleInventario", code: "VE-1", label: "Doble Inventario (Almacén Físico + Planta Proveedor)" },
+      { key: "cotizaciones72h", code: "VE-2", label: "Cotizaciones Multimoneda con Auto-Borrado a 72 Horas" },
+      { key: "pedidoSugerido", code: "VE-3", label: "Asesor Económico y Pedido Sugerido" },
+      { key: "analiticaBinance", code: "VE-4", label: "Analítica Financiera Estilo Binance y Estancados (+30d)" }
+    ];
 
     const GRUPOS_SWITCHES = [
       {
@@ -298,8 +335,9 @@
       const [pinError, setPinError] = useState("");
       const [validandoLogin, setValidandoLogin] = useState(false);
 
-      const [empresas, setEmpresas] = useState([]);
-      const [seleccionadaId, setSeleccionadaId] = useState("");
+      const [empresasCL, setEmpresasCL] = useState([]);
+      const [empresasVE, setEmpresasVE] = useState([]);
+      const [seleccionadaKey, setSeleccionadaKey] = useState("");
       const [procesando, setProcesando] = useState(false);
       const [logoInfoTxt, setLogoInfoTxt] = useState("");
       const [hayCambiosSinGuardar, setHayCambiosSinGuardar] = useState(false);
@@ -310,19 +348,35 @@
       const [pinNuevoMaster, setPinNuevoMaster] = useState("");
       const [pinConfirmMaster, setPinConfirmMaster] = useState("");
 
-      // Formulario nueva empresa
+      // Formulario nueva empresa (Switch Chile / Venezuela)
       const [crearAbierto, setCrearAbierto] = useState(false);
+      const [nuevoPais, setNuevoPais] = useState("CL");
       const [nuevoNombre, setNuevoNombre] = useState("");
       const [nuevoRut, setNuevoRut] = useState("");
       const [nuevoRubro, setNuevoRubro] = useState("Comercio y Retail");
       const [nuevaClave, setNuevaClave] = useState("");
+      const [veDireccion, setVeDireccion] = useState("");
+      const [veTelefonos, setVeTelefonos] = useState("");
+      const [veCorreo, setVeCorreo] = useState("");
+      const [veFactorMayor, setVeFactorMayor] = useState("2.0");
+      const [veFactorDetal, setVeFactorDetal] = useState("2.5");
+      const [veFolioInicial, setVeFolioInicial] = useState("1");
+      const [veDobleInv, setVeDobleInv] = useState(true);
 
       // Edición empresa seleccionada
       const [editForm, setEditForm] = useState(null);
-      const ultimoIdCargadoRef = useRef("");
+      const ultimoKeyCargadoRef = useRef("");
       const txLockRef = useRef(false);
 
-      // Autenticación anónima inmediata para leer saas_config con Firestore Rules activas
+      const empresas = useMemo(() => {
+        const todas = [...empresasCL, ...empresasVE];
+        todas.sort((a, b) => {
+          if (a._pais !== b._pais) return a._pais === "CL" ? -1 : 1;
+          return (a.nombre || "").localeCompare(b.nombre || "", "es");
+        });
+        return todas;
+      }, [empresasCL, empresasVE]);
+
       useEffect(() => {
         auth.signInAnonymously().catch(() => {});
       }, []);
@@ -330,563 +384,56 @@
       useEffect(() => {
         if (!autorizado) return;
         auth.signInAnonymously().catch(() => {});
-        const unsub = db.collection("saas_empresas").onSnapshot((snap) => {
-          const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          lista.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
-          setEmpresas(lista);
-          setSeleccionadaId((prev) => {
-            if (prev && lista.some((e) => e.id === prev)) return prev;
-            if (lista.length > 0) {
-              const tecno = lista.find((e) => e.id === "775280425") || lista[0];
-              return tecno.id;
-            }
-            return "";
-          });
+
+        const unsubCL = db.collection("saas_empresas").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({
+            id: d.id,
+            _pais: "CL",
+            _key: `CL::${d.id}`,
+            ...d.data()
+          }));
+          setEmpresasCL(lista);
         });
-        return () => unsub();
+
+        const unsubVE = db.collection("empresas").where("pais", "==", "VE").onSnapshot((snap) => {
+          const lista = snap.docs.map((d) => ({
+            id: d.id,
+            _pais: "VE",
+            _key: `VE::${d.id}`,
+            ...d.data()
+          }));
+          setEmpresasVE(lista);
+        });
+
+        return () => {
+          unsubCL();
+          unsubVE();
+        };
       }, [autorizado]);
 
-      // Carga editForm SOLO al cambiar de empresa seleccionada (evita pisar cambios en curso por snapshots externos)
       useEffect(() => {
-        if (!seleccionadaId || seleccionadaId === ultimoIdCargadoRef.current) return;
-        const emp = empresas.find((e) => e.id === seleccionadaId);
-        if (emp) {
-          ultimoIdCargadoRef.current = seleccionadaId;
+        if (!empresas.length) return;
+        setSeleccionadaKey((prev) => {
+          if (prev && empresas.some((e) => e._key === prev)) return prev;
+          const tecno = empresas.find((e) => e._key === "CL::775280425") || empresas[0];
+          return tecno._key;
+        });
+      }, [empresas]);
+
+      // Carga editForm SOLO al cambiar de empresa seleccionada
+      useEffect(() => {
+        if (!seleccionadaKey || seleccionadaKey === ultimoKeyCargadoRef.current) return;
+        const emp = empresas.find((e) => e._key === seleccionadaKey);
+        if (!emp) return;
+
+        ultimoKeyCargadoRef.current = seleccionadaKey;
+
+        if (emp._pais === "VE") {
+          const logoActual = emp.logoBase64 || emp.logoUrl || "";
           setEditForm({
             id: emp.id,
+            _pais: "VE",
+            _key: emp._key,
             nombre: emp.nombre || "",
-            rut: emp.rut || formatearRut(emp.id),
-            rubro: emp.rubro || "",
-            claveAcceso: emp.claveAcceso || emp.pin || "",
-            activa: emp.activa !== false,
-            temaVisual: emp.temaVisual || "claro_retail",
-            logoBase64: emp.logoBase64 || "",
-            tienePinSupervisor: Boolean(emp.pinSupervisorHash || emp.pinSupervisor),
-            modulosActivos: { ...MODULOS_DEFAULT, ...(emp.modulosActivos || {}) }
-          });
-          setLogoInfoTxt(emp.logoBase64 ? `${Math.max(1, Math.round((emp.logoBase64.length * 0.75) / 1024))} KB` : "");
-          setHayCambiosSinGuardar(false);
-        }
-      }, [seleccionadaId, empresas]);
-
-      const ejecutarConBloqueo = async (fn) => {
-        if (txLockRef.current) return;
-        txLockRef.current = true;
-        setProcesando(true);
-        try {
-          await fn();
-        } catch (err) {
-          alert("Error en la operación: " + (err?.message || err));
-        } finally {
-          txLockRef.current = false;
-          setProcesando(false);
-        }
-      };
-
-      const validarPin = async (e) => {
-        e.preventDefault();
-        if (validandoLogin) return;
-        setValidandoLogin(true);
-        setPinError("");
-        try {
-          const res = await verificarPinMaestro(pinInput);
-          if (res.ok) {
-            sessionStorage.setItem("nexus_admin_ok", "1");
-            setAutorizado(true);
-            setPinInput("");
-          } else {
-            setPinError("PIN maestro incorrecto.");
-          }
-        } catch (err) {
-          setPinError("No se pudo verificar el PIN: " + err.message);
-        } finally {
-          setValidandoLogin(false);
-        }
-      };
-
-      const cambiarPinMaestro = async (e) => {
-        e.preventDefault();
-        const nuevoLimpio = pinNuevoMaster.trim();
-        const confirmLimpio = pinConfirmMaster.trim();
-
-        if (nuevoLimpio.length < 4) {
-          return alert("El nuevo PIN Maestro debe tener al menos 4 caracteres.");
-        }
-        if (nuevoLimpio !== confirmLimpio) {
-          return alert("El nuevo PIN Maestro y su confirmación no coinciden.");
-        }
-
-        await ejecutarConBloqueo(async () => {
-          const resActual = await verificarPinMaestro(pinActualMaster);
-          if (!resActual.ok) {
-            return alert("El PIN Maestro actual es incorrecto.");
-          }
-          const nuevoHash = await sha256Hex(nuevoLimpio);
-          await db.collection("saas_config").doc("master_admin").set(
-            { pinMaestroHash: nuevoHash, actualizadoTs: Date.now() },
-            { merge: true }
-          );
-          setPinActualMaster("");
-          setPinNuevoMaster("");
-          setPinConfirmMaster("");
-          setSeguridadAbierta(false);
-          alert("PIN Maestro actualizado y cifrado (SHA-256) correctamente.");
-        });
-      };
-
-      const cerrarAdmin = () => {
-        sessionStorage.clear();
-        localStorage.removeItem("nexus_empresa_rut");
-        window.location.replace("index.html");
-      };
-
-      const entrarComoEmpresa = (rutId) => {
-        if (hayCambiosSinGuardar) {
-          const seguir = confirm("Tienes cambios sin guardar en esta empresa. ¿Deseas salir sin guardarlos?");
-          if (!seguir) return;
-        }
-        const rutLimpio = limpiarRut(rutId);
-        sessionStorage.removeItem("nexus_admin_ok");
-        localStorage.setItem("nexus_empresa_rut", rutLimpio);
-        localStorage.setItem("nexus_session_ts", String(Date.now()));
-        if (rutLimpio === RUT_PGB) {
-          window.location.replace("pgb-operacion.html");
-        } else {
-          window.location.replace("empresa-panel.html");
-        }
-      };
-
-      // BLOQUEA SOBRESCRITURA ACCIDENTAL SI EL RUT YA EXISTE EN FIRESTORE + ANTI-DOBLE CLIC
-      const crearNuevaEmpresa = async (e) => {
-        e.preventDefault();
-        const rutLimpio = limpiarRut(nuevoRut);
-        if (rutLimpio.length < 7 || !nuevoNombre.trim()) {
-          return alert("Completa Razón Social y un RUT válido.");
-        }
-
-        if (!validarRutChileno(rutLimpio)) {
-          const continuarInvalido = confirm(
-            `El RUT ${formatearRut(rutLimpio)} no pasa la validación Módulo 11 del SII.\n\n¿Deseas crearlo de todas formas (solo recomendado para pruebas)?`
-          );
-          if (!continuarInvalido) return;
-        }
-
-        await ejecutarConBloqueo(async () => {
-          const docRef = db.collection("saas_empresas").doc(rutLimpio);
-          const snapExistente = await docRef.get();
-
-          if (snapExistente.exists) {
-            const datosExist = snapExistente.data() || {};
-            alert(
-              `RUT DUPLICADO BLOQUEADO: El RUT ${formatearRut(rutLimpio)} ya está registrado bajo "${datosExist.nombre || rutLimpio}".\n\n` +
-              `No se modificaron sus datos ni sus 18 switches. Se abrirá su ficha existente para editar.`
-            );
-            ultimoIdCargadoRef.current = "";
-            setSeleccionadaId(rutLimpio);
-            setCrearAbierto(false);
-            return;
-          }
-
-          const ahora = Date.now();
-          await docRef.set({
-            nombre: nuevoNombre.trim().toUpperCase(),
-            rut: formatearRut(rutLimpio),
-            rubro: nuevoRubro.trim(),
-            claveAcceso: nuevaClave.trim(),
-            activa: true,
-            temaVisual: "claro_retail",
-            modulosActivos: { ...MODULOS_DEFAULT },
-            fechaCreacion: fechaIsoChile(ahora),
-            creadoTs: ahora
-          });
-
-          ultimoIdCargadoRef.current = "";
-          setSeleccionadaId(rutLimpio);
-          setCrearAbierto(false);
-          setNuevoNombre("");
-          setNuevoRut("");
-          setNuevaClave("");
-        });
-      };
-
-      const subirLogoEmpresa = async (e) => {
-        const file = e.target.files[0];
-        if (!file || !editForm) return;
-        e.target.value = "";
-        try {
-          const res = await comprimirLogoImagen(file);
-          setEditForm({ ...editForm, logoBase64: res.dataUrl });
-          setLogoInfoTxt(`${res.w}×${res.h}px • ${res.kb} KB (Optimizado)`);
-          setHayCambiosSinGuardar(true);
-        } catch (err) {
-          alert("Error al optimizar logo: " + err.message);
-        }
-      };
-
-      const quitarLogoEmpresa = () => {
-        if (!editForm) return;
-        setEditForm({ ...editForm, logoBase64: "" });
-        setLogoInfoTxt("");
-        setHayCambiosSinGuardar(true);
-      };
-
-      const actualizarCampoEdit = (campo, valor) => {
-        if (!editForm) return;
-        setEditForm({ ...editForm, [campo]: valor });
-        setHayCambiosSinGuardar(true);
-      };
-
-      const toggleSwitch = (key) => {
-        if (!editForm) return;
-        setEditForm({
-          ...editForm,
-          modulosActivos: {
-            ...editForm.modulosActivos,
-            [key]: !editForm.modulosActivos[key]
-          }
-        });
-        setHayCambiosSinGuardar(true);
-      };
-
-      const restablecerPinSupervisorCliente = async () => {
-        if (!editForm || txLockRef.current) return;
-        if (!confirm(`¿Restablecer la Clave de Supervisor de ${editForm.nombre} a la clave por defecto (1234)?`)) return;
-        await ejecutarConBloqueo(async () => {
-          await db.collection("saas_empresas").doc(editForm.id).update({
-            pinSupervisorHash: FieldValue.delete(),
-            pinSupervisor: FieldValue.delete()
-          });
-          setEditForm((prev) => (prev ? { ...prev, tienePinSupervisor: false } : null));
-          alert(`Clave de Supervisor de ${editForm.nombre} restablecida a 1234.`);
-        });
-      };
-
-      const guardarCambiosEmpresa = async () => {
-        if (!editForm || txLockRef.current) return;
-        const nombreLimpio = String(editForm.nombre || "").trim();
-        if (!nombreLimpio) {
-          return alert("La Razón Social / Nombre de la empresa no puede quedar vacía.");
-        }
-
-        await ejecutarConBloqueo(async () => {
-          await db.collection("saas_empresas").doc(editForm.id).set({
-            nombre: nombreLimpio,
-            rut: editForm.rut.trim(),
-            rubro: editForm.rubro.trim(),
-            claveAcceso: editForm.claveAcceso.trim(),
-            activa: editForm.activa,
-            temaVisual: editForm.temaVisual,
-            logoBase64: editForm.logoBase64,
-            modulosActivos: editForm.modulosActivos
-          }, { merge: true });
-          setHayCambiosSinGuardar(false);
-          alert(`Configuración y switches de ${nombreLimpio} guardados en tiempo real.`);
-        });
-      };
-
-      if (!autorizado) {
-        return (
-          <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
-            <form onSubmit={validarPin} className="bg-slate-900 border border-slate-800 rounded-3xl p-7 max-w-sm w-full space-y-4 shadow-2xl">
-              <div className="text-center space-y-1">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-400">Acceso Restringido • SHA-256</span>
-                <h1 className="text-xl font-extrabold">Consola Maestra NEXUS</h1>
-                <p className="text-xs text-slate-400">Ingresa el PIN de administración</p>
-              </div>
-              {pinError && <p className="text-xs text-rose-400 font-bold text-center">{pinError}</p>}
-              <input
-                type="password"
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                placeholder="PIN Maestro"
-                className="w-full bg-slate-950 border border-slate-700 rounded-2xl px-4 py-3 text-center text-sm font-extrabold tracking-widest outline-none"
-                autoFocus
-                required
-              />
-              <button type="submit" disabled={validandoLogin} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 font-extrabold py-3.5 rounded-2xl text-xs uppercase cursor-pointer">
-                {validandoLogin ? "Verificando..." : "Desbloquear Consola"}
-              </button>
-              <a href="index.html" className="block text-center text-xs text-slate-500 hover:text-slate-300 pt-1">
-                Volver al Portal de Empresas
-              </a>
-            </form>
-          </div>
-        );
-      }
-
-      const rutNuevoLimpio = limpiarRut(nuevoRut);
-      const rutNuevoYaExiste = rutNuevoLimpio.length >= 7 && empresas.some((emp) => emp.id === rutNuevoLimpio);
-
-      return (
-        <div className="max-w-4xl mx-auto px-4 pt-5 pb-24 space-y-4">
-          {/* CABECERA */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-slate-900 text-white px-2.5 py-0.5 rounded-full">
-                NEXUS ERP • SUPER ADMIN
-              </span>
-              <h1 className="text-xl font-extrabold text-slate-900 mt-1">Control Multi-Empresa y Switches</h1>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => entrarComoEmpresa(RUT_PGB)} className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
-                Operación PGB
-              </button>
-              <button onClick={() => { setCrearAbierto(!crearAbierto); setSeguridadAbierta(false); }} className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
-                + Nueva Empresa
-              </button>
-              <button onClick={() => { setSeguridadAbierta(!seguridadAbierta); setCrearAbierto(false); }} className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-3.5 py-2.5 rounded-xl cursor-pointer">
-                PIN Maestro
-              </button>
-              <button onClick={cerrarAdmin} className="bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold px-3.5 py-2.5 rounded-xl cursor-pointer">
-                Salir
-              </button>
-            </div>
-          </div>
-
-          {/* CAMBIAR PIN MAESTRO (SHA-256 EN FIRESTORE) */}
-          {seguridadAbierta && (
-            <form onSubmit={cambiarPinMaestro} className="bg-white border-2 border-amber-500 rounded-2xl p-5 space-y-3 shadow-md">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-extrabold text-slate-900">Cambiar PIN Maestro de Consola (SHA-256)</h2>
-                  <p className="text-xs text-slate-500">Se guarda cifrado en Firestore sin exponerse en el código fuente.</p>
-                </div>
-                <button type="button" onClick={() => setSeguridadAbierta(false)} className="text-xs font-bold text-slate-500 px-2 py-1 cursor-pointer">✕</button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input
-                  type="password"
-                  value={pinActualMaster}
-                  onChange={(e) => setPinActualMaster(e.target.value)}
-                  placeholder="PIN Maestro actual *"
-                  className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold"
-                  required
-                />
-                <input
-                  type="password"
-                  value={pinNuevoMaster}
-                  onChange={(e) => setPinNuevoMaster(e.target.value)}
-                  placeholder="Nuevo PIN (mín 4 caracteres) *"
-                  className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold"
-                  required
-                />
-                <input
-                  type="password"
-                  value={pinConfirmMaster}
-                  onChange={(e) => setPinConfirmMaster(e.target.value)}
-                  placeholder="Confirmar nuevo PIN *"
-                  className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold"
-                  required
-                />
-              </div>
-              {pinNuevoMaster.trim().length > 0 && pinConfirmMaster.trim().length > 0 && pinNuevoMaster.trim() !== pinConfirmMaster.trim() && (
-                <p className="text-xs font-bold text-rose-600">El nuevo PIN Maestro y su confirmación no coinciden.</p>
-              )}
-              <button type="submit" disabled={procesando} className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold py-3 rounded-xl text-xs cursor-pointer">
-                {procesando ? "Actualizando..." : "Guardar Nuevo PIN Maestro Cifrado"}
-              </button>
-            </form>
-          )}
-
-          {/* CREAR NUEVA EMPRESA (CON ESCUDO ANTI-DUPLICADOS Y VALIDADOR MÓDULO 11) */}
-          {crearAbierto && (
-            <form onSubmit={crearNuevaEmpresa} className="bg-white border-2 border-blue-600 rounded-2xl p-5 space-y-3 shadow-md">
-              <h2 className="text-sm font-extrabold text-slate-900">Registrar Nueva Empresa Cliente</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Razón Social *" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                <div>
-                  <input type="text" value={nuevoRut} onChange={(e) => setNuevoRut(formatearRut(e.target.value))} placeholder="RUT Empresa (Ej: 77.528.042-5) *" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" required />
-                  {rutNuevoLimpio.length >= 7 && (
-                    <p className={`text-[10px] font-bold mt-1 ${rutNuevoYaExiste ? "text-rose-600" : validarRutChileno(rutNuevoLimpio) ? "text-emerald-600" : "text-amber-600"}`}>
-                      {rutNuevoYaExiste
-                        ? "✕ Este RUT ya existe en el sistema (no se sobrescribirá)"
-                        : validarRutChileno(rutNuevoLimpio)
-                          ? "✓ RUT chileno válido (Módulo 11)"
-                          : "⚠️ Dígito verificador no coincide con Módulo 11"}
-                    </p>
-                  )}
-                </div>
-                <input type="text" value={nuevoRubro} onChange={(e) => setNuevoRubro(e.target.value)} placeholder="Rubro" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-                <input type="text" value={nuevaClave} onChange={(e) => setNuevaClave(e.target.value)} placeholder="Clave de Acceso (Opcional)" className="bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-bold" />
-              </div>
-              <button
-                type="submit"
-                disabled={procesando || rutNuevoYaExiste}
-                className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-40 text-white font-extrabold py-3 rounded-xl text-xs cursor-pointer"
-              >
-                {procesando ? "Verificando y Creando..." : rutNuevoYaExiste ? "RUT ya registrado — Selecciónalo abajo" : "Crear Empresa en Firestore"}
-              </button>
-            </form>
-          )}
-
-          {/* SELECTOR DE EMPRESA */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex-1">
-              <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Empresa Configurando</label>
-              <select
-                value={seleccionadaId}
-                onChange={(e) => {
-                  if (hayCambiosSinGuardar && !confirm("Tienes cambios sin guardar. ¿Cambiar de empresa de todos modos?")) return;
-                  ultimoIdCargadoRef.current = "";
-                  setSeleccionadaId(e.target.value);
-                }}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-extrabold text-slate-900"
-              >
-                {empresas.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.nombre} — RUT {emp.rut || formatearRut(emp.id)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {editForm && (
-              <button
-                type="button"
-                onClick={() => entrarComoEmpresa(editForm.id)}
-                className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-3 rounded-xl cursor-pointer shrink-0 sm:mt-4"
-              >
-                Abrir Panel Cliente →
-              </button>
-            )}
-          </div>
-
-          {/* FICHA DE EDICIÓN Y 18 SWITCHES */}
-          {editForm && (
-            <div className="space-y-4">
-              {hayCambiosSinGuardar && (
-                <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 text-xs">
-                  <span className="font-bold">Tienes cambios pendientes por guardar en {editForm.nombre || editForm.rut}.</span>
-                  <button
-                    type="button"
-                    onClick={guardarCambiosEmpresa}
-                    disabled={procesando}
-                    className="bg-slate-900 disabled:opacity-40 text-white font-extrabold px-3.5 py-1.5 rounded-xl cursor-pointer shrink-0"
-                  >
-                    {procesando ? "Guardando..." : "Guardar Ahora"}
-                  </button>
-                </div>
-              )}
-
-              <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <h2 className="text-sm font-extrabold text-slate-900">Identidad, Clave y Tema Predeterminado</h2>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-600">{editForm.activa ? "Activa" : "Pausada"}</span>
-                    <SwitchItem checked={editForm.activa} onChange={() => actualizarCampoEdit("activa", !editForm.activa)} />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Nombre / Razón Social *</label>
-                    <input
-                      type="text"
-                      value={editForm.nombre}
-                      onChange={(e) => actualizarCampoEdit("nombre", e.target.value)}
-                      className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs font-bold ${!editForm.nombre.trim() ? "border-rose-500" : "border-slate-300"}`}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Clave de Acceso Portal</label>
-                    <input type="text" value={editForm.claveAcceso} onChange={(e) => actualizarCampoEdit("claveAcceso", e.target.value)} placeholder="Sin clave = acceso por RUT" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Tema Visual Inicial</label>
-                    <select value={editForm.temaVisual} onChange={(e) => actualizarCampoEdit("temaVisual", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold">
-                      <option value="claro_retail">Claro Retail & E-Commerce (Predeterminado)</option>
-                      <option value="claro_ejecutivo">Claro Ejecutivo (Softland Pro)</option>
-                      <option value="oscuro_obsidian">Modo Oscuro Obsidian</option>
-                      <option value="claro_esmeralda">Claro Operaciones & Bodega</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">
-                      Logotipo Empresa (Compresión automática anti-límite)
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <label className="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-center cursor-pointer">
-                        Subir Logo
-                        <input type="file" accept="image/*" onChange={subirLogoEmpresa} className="hidden" />
-                      </label>
-                      {editForm.logoBase64 && (
-                        <>
-                          <img src={editForm.logoBase64} alt="Logo" className="h-9 w-14 object-contain border border-slate-200 rounded-lg bg-white p-0.5 shrink-0" />
-                          <button
-                            type="button"
-                            onClick={quitarLogoEmpresa}
-                            className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl px-2.5 py-2 text-xs font-bold cursor-pointer shrink-0"
-                            title="Quitar logo"
-                          >
-                            Quitar
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    {logoInfoTxt && <p className="text-[10px] font-semibold text-emerald-700 mt-1">Peso optimizado: {logoInfoTxt}</p>}
-                  </div>
-                </div>
-
-                {/* RESCATE DE CLAVE DE SUPERVISOR DEL CLIENTE */}
-                <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                  <div>
-                    <span className="font-extrabold text-slate-800 block">Soporte Clave de Supervisor del Cliente</span>
-                    <span className="text-[11px] text-slate-500">
-                      Estado actual: {editForm.tienePinSupervisor ? "Clave personalizada (SHA-256)" : "Clave inicial predeterminada (1234)"}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={procesando}
-                    onClick={restablecerPinSupervisorCliente}
-                    className="bg-amber-100 hover:bg-amber-200 disabled:opacity-40 text-amber-900 border border-amber-300 font-extrabold px-3.5 py-2 rounded-xl text-xs cursor-pointer shrink-0"
-                  >
-                    Restablecer Clave Supervisor (1234)
-                  </button>
-                </div>
-              </div>
-
-              {/* LOS 5 BLOQUES DE SWITCHES */}
-              {GRUPOS_SWITCHES.map((grupo) => (
-                <div key={grupo.titulo} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-2.5">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500">{grupo.titulo}</h3>
-                  <div className="space-y-2">
-                    {grupo.items.map((sw) => {
-                      const activo = Boolean(editForm.modulosActivos[sw.key]);
-                      return (
-                        <div
-                          key={sw.key}
-                          onClick={() => toggleSwitch(sw.key)}
-                          className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition ${
-                            activo ? "border-slate-900 bg-slate-50/70" : "border-slate-200 opacity-75"
-                          }`}
-                        >
-                          <div>
-                            <span className="text-[10px] font-extrabold text-slate-400 block">{sw.code}</span>
-                            <span className="text-xs font-extrabold text-slate-900">{sw.label}</span>
-                          </div>
-                          <SwitchItem checked={activo} onChange={() => toggleSwitch(sw.key)} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-
-              <button
-                type="button"
-                onClick={guardarCambiosEmpresa}
-                disabled={procesando}
-                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-extrabold py-4 rounded-2xl text-xs uppercase tracking-wider shadow-lg cursor-pointer"
-              >
-                {procesando ? "Guardando en Firestore..." : `Guardar Switches y Configuración de ${editForm.nombre || "Empresa"}`}
-              </button>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    ReactDOM.createRoot(document.getElementById("root")).render(<SuperAdminApp />);
-  </script>
-</body>
-</html>
+            rut: emp.rif || emp.id,
+            rubro: emp.rubro || "Repuestos y Comercio
