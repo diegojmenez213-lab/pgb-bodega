@@ -131,6 +131,7 @@ export async function mount(root, state) {
 
       <!-- Lista de Cotizaciones Activas -->
       <section id="viewListaCot" class="hidden space-y-2">
+        <p class="text-xs text-slate-500 font-semibold">Toca cualquier cotización para abrir su PDF listo para enviar por WhatsApp.</p>
         <div id="listaCotizaciones" class="space-y-2">
           <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando cotizaciones...</div>
         </div>
@@ -371,6 +372,23 @@ export async function mount(root, state) {
     renderCarrito();
   });
 
+  function abrirPdfCotizacion(cot) {
+    const tasasActuales = getTasaActiva(state);
+    const tasaDoc = cot.tasaBcvSnapshot ? { ...tasasActuales, bcvActiva: Number(cot.tasaBcvSnapshot) } : tasasActuales;
+    imprimirDocumentoCarta({
+      tipo: "COTIZACIÓN",
+      folio: cot.folio || cot.id,
+      empresa: state.empresa,
+      cliente: cot.cliente || {},
+      items: cot.items || [],
+      totalUsd: Number(cot.totalUsd || 0),
+      monedas: cot.monedas || ["USD", "BS"],
+      tasas: tasaDoc,
+      fecha: cot.fechaTexto || "",
+      observaciones: "Presupuesto válido por 72 horas. Precios sujetos a disponibilidad."
+    });
+  }
+
   async function persistirCotizacion() {
     const docCli = normalizarIdVE(docEl.value);
     const nomCli = nomEl.value.trim();
@@ -385,13 +403,16 @@ export async function mount(root, state) {
 
     const folio = `COT-${String(Date.now()).slice(-6)}`;
     const now = Date.now();
+    const tasasAct = getTasaActiva(state);
     const payload = {
       folio,
       cliente: { documento: docCli, nombre: nomCli },
-      items: carrito,
+      items: carrito.map((it) => ({ ...it })),
       multiplicador: factorActual,
-      totalUsd: calcularTotal(),
+      totalUsd: Number(calcularTotal().toFixed(2)),
+      tasaBcvSnapshot: tasasAct.bcvActiva || 0,
       monedas: obtenerMonedas(),
+      fechaTexto: new Date().toLocaleDateString("es-VE"),
       creadoTs: now,
       expiraTs: now + HORAS_72_MS,
       creadoEn: serverTimestamp()
@@ -406,28 +427,13 @@ export async function mount(root, state) {
     const saved = await persistirCotizacion();
     if (!saved) return;
     alert(`Cotización ${saved.folio} guardada (válida por 72 horas).`);
-    carrito = [];
-    renderCarrito();
   });
 
+  // Genera el PDF manteniendo tu carrito intacto por si quieres seguir ajustando o guardarlo luego
   root.querySelector("#btnGenerarPdfCot").addEventListener("click", async () => {
     const saved = await persistirCotizacion();
     if (!saved) return;
-
-    imprimirDocumentoCarta({
-      tipo: "COTIZACIÓN",
-      folio: saved.folio,
-      empresa: state.empresa,
-      cliente: saved.cliente,
-      items: saved.items,
-      totalUsd: saved.totalUsd,
-      monedas: saved.monedas,
-      tasas: getTasaActiva(state),
-      observaciones: "Presupuesto válido por 72 horas. Guarda este PDF para enviarlo por WhatsApp o correo."
-    });
-
-    carrito = [];
-    renderCarrito();
+    abrirPdfCotizacion(saved);
   });
 
   function renderListaCot() {
@@ -441,18 +447,21 @@ export async function mount(root, state) {
 
     cont.innerHTML = cotizaciones.map((c) => {
       const horasRest = Math.max(0, Math.round(((c.expiraTs || 0) - Date.now()) / 3600000));
+      const totalTxt = `$${Number(c.totalUsd || 0).toFixed(2)}`;
       return `
-        <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-id="${c.id}">
-          <div class="min-w-0 flex-1">
+        <div class="cot-card-item ve-card p-3.5 flex flex-wrap items-center justify-between gap-2 hover:border-slate-400 cursor-pointer" data-id="${c.id}">
+          <div class="min-w-0 flex-1 pointer-events-none">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-mono-ve text-xs font-extrabold text-slate-900">${c.folio || c.id}</span>
-              <span class="text-xs font-bold text-slate-800">${c.cliente?.nombre || ""}</span>
+              <span class="text-xs font-extrabold text-slate-900">${c.cliente?.nombre || ""}</span>
+              <span class="font-mono-ve text-xs font-extrabold text-emerald-700">${totalTxt}</span>
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Expira en ${horasRest}h</span>
             </div>
-            <div class="text-[11px] text-slate-500 mt-0.5">${c.items?.length || 0} ítems • Total: <strong class="text-slate-900">$${Number(c.totalUsd || 0).toFixed(2)}</strong></div>
+            <div class="text-[11px] text-slate-500 mt-0.5">
+              ${c.items?.length || 0} ítems • Mult. ×${c.multiplicador || 1} • Toca la tarjeta para ver PDF
+            </div>
           </div>
-          <div class="flex items-center gap-1.5">
-            <button type="button" class="btn-pdf px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">Generar PDF</button>
+          <div class="flex items-center gap-1.5" data-accion="controles">
             <button type="button" class="btn-a-caja px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-extrabold cursor-pointer">Pasar a Caja →</button>
             <button type="button" class="btn-del-cot px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold cursor-pointer">✕</button>
           </div>
@@ -467,27 +476,19 @@ export async function mount(root, state) {
     const cot = cotizaciones.find((x) => x.id === card.dataset.id);
     if (!cot) return;
 
-    if (e.target.closest(".btn-pdf")) {
-      imprimirDocumentoCarta({
-        tipo: "COTIZACIÓN",
-        folio: cot.folio || cot.id,
-        empresa: state.empresa,
-        cliente: cot.cliente,
-        items: cot.items || [],
-        totalUsd: cot.totalUsd || 0,
-        monedas: cot.monedas || ["USD", "BS"],
-        tasas: getTasaActiva(state),
-        observaciones: "Presupuesto válido por 72 horas. Precios sujetos a disponibilidad."
-      });
-    } else if (e.target.closest(".btn-a-caja")) {
+    if (e.target.closest(".btn-a-caja")) {
+      e.stopPropagation();
       state.cotizacionPendiente = cot;
       if (typeof window.NEXUS_VE_NAV === "function") {
         window.NEXUS_VE_NAV("caja-pos");
       }
     } else if (e.target.closest(".btn-del-cot")) {
+      e.stopPropagation();
       if (!confirm(`¿Eliminar cotización ${cot.folio}?`)) return;
       await deleteDoc(doc(refs.cotizaciones(), cot.id));
       await cargarCotizaciones();
+    } else if (e.target.closest(".cot-card-item")) {
+      abrirPdfCotizacion(cot);
     }
   });
 
