@@ -1,5 +1,6 @@
 // venezuela/core/db.js
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore,
   doc,
@@ -7,21 +8,38 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  limit,
+  writeBatch,
+  onSnapshot,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// Pega aquí tu configuración actual de Firebase (la misma de tu proyecto NEXUS)
 const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_AUTH_DOMAIN",
-  projectId: "TU_PROJECT_ID",
-  storageBucket: "TU_STORAGE_BUCKET",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID"
+  apiKey: "AIzaSyA49y0R5hCMLuPX-v8P2o9A_fUMnek1K1Y",
+  authDomain: "pgb-bodegad.firebaseapp.com",
+  projectId: "pgb-bodegad",
+  storageBucket: "pgb-bodegad.firebasestorage.app",
+  messagingSenderId: "497839332750",
+  appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Asegura sesión anónima para cumplir reglas de Firestore
+export async function asegurarAuthVE() {
+  if (!auth.currentUser) {
+    await signInAnonymously(auth).catch(() => {});
+  }
+}
+
+asegurarAuthVE();
 
 /**
  * Normaliza Cédula o RIF venezolano a ID limpio para Firestore.
@@ -58,6 +76,7 @@ export function getTenantRefs(tenantId) {
 }
 
 export async function obtenerConfigEmpresa(tenantId) {
+  await asegurarAuthVE();
   const { empresaRef } = getTenantRefs(tenantId);
   const snap = await getDoc(empresaRef);
   if (!snap.exists()) return null;
@@ -66,4 +85,19 @@ export async function obtenerConfigEmpresa(tenantId) {
   return { id: snap.id, ...data };
 }
 
-export { doc, collection, getDoc, setDoc, updateDoc, serverTimestamp };
+export {
+  doc,
+  collection,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  limit,
+  writeBatch,
+  onSnapshot,
+  serverTimestamp
+};
