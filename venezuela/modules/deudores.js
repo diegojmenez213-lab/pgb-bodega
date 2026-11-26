@@ -147,6 +147,7 @@ export async function mount(root, state) {
 
   let gruposDeudores = [];
   let clientesMap = new Map();
+  let procesandoAbono = false;
   const expandidos = new Set();
   const abonosAbiertos = new Set();
 
@@ -420,6 +421,7 @@ export async function mount(root, state) {
   }
 
   async function aplicarAbono(docId, folio, montoIngresado, metodo = "Efectivo USD", referencia = "", usandoSaldoFavor = false) {
+    if (procesandoAbono) return;
     const grupo = gruposDeudores.find((g) => g.documento === docId);
     const nota = grupo?.notas.find((n) => (n.folio || n.id) === folio);
     if (!nota) return;
@@ -427,103 +429,23 @@ export async function mount(root, state) {
     const monto = Math.max(0, Number(montoIngresado || 0));
     if (monto <= 0) return alert("Ingresa un monto mayor a $0.00.");
 
-    const saldoActual = Number(nota.saldoPendienteUsd || 0);
-    const abonoAplicadoANota = Math.min(saldoActual, monto);
-    const sobrepago = usandoSaldoFavor ? 0 : Math.max(0, Number((monto - saldoActual).toFixed(2)));
-    const nuevoSaldo = Math.max(0, Number((saldoActual - abonoAplicadoANota).toFixed(2)));
-    const now = Date.now();
-    const tasas = getTasaActiva(state);
-
-    const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
-    historialAbonos.push({
-      montoUsd: abonoAplicadoANota,
-      sobrepagoUsd: sobrepago,
-      montoBs: tasas.bcvActiva ? Number((monto * tasas.bcvActiva).toFixed(2)) : 0,
-      metodo: usandoSaldoFavor ? "Saldo a Favor" : metodo,
-      referencia: String(referencia || "").trim(),
-      usandoSaldoFavor,
-      cierreId: null,
-      fechaIso: new Date(now).toISOString().slice(0, 10),
-      fechaHoraTxt: formatearFechaHora(now),
-      ts: now,
-      usuario: state.sesion?.usuario || "Administrador"
-    });
-
-    const batch = writeBatch(db);
-    batch.set(
-      doc(refs.notasEntrega(), nota.id),
-      {
-        saldoPendienteUsd: nuevoSaldo,
-        esCredito: nuevoSaldo > 0.01,
-        saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
-        saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
-        abonos: historialAbonos,
-        actualizadoEn: serverTimestamp()
-      },
-      { merge: true }
-    );
-
-    const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
-    if (usandoSaldoFavor) {
-      const nuevoFavor = Math.max(0, Number((actualFavor - abonoAplicadoANota).toFixed(2)));
-      batch.set(
-        doc(refs.clientes(), docId),
-        { documento: docId, nombre: grupo.nombre, saldoAFavorUsd: nuevoFavor, actualizadoEn: serverTimestamp() },
-        { merge: true }
-      );
-    } else if (sobrepago > 0.01 && docId !== "V-00000000") {
-      const nuevoFavor = Number((actualFavor + sobrepago).toFixed(2));
-      batch.set(
-        doc(refs.clientes(), docId),
-        { documento: docId, nombre: grupo.nombre, saldoAFavorUsd: nuevoFavor, actualizadoEn: serverTimestamp() },
-        { merge: true }
-      );
-    }
-
-    await batch.commit();
-    if (sobrepago > 0.01 && docId !== "V-00000000") {
-      alert(`Abono registrado. Se acreditaron +$${sobrepago.toFixed(2)} al saldo a favor de ${grupo.nombre}.`);
-    }
-
-    if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
-      await window.NEXUS_VE_REFRESH_ALERTAS();
-    }
-    await cargarDeudores();
-  }
-
-  async function aplicarAbonoGlobalFIFO(docId, montoTotal, metodo = "Efectivo USD", referencia = "") {
-    const grupo = gruposDeudores.find((g) => g.documento === docId);
-    if (!grupo || !grupo.notas.length) return;
-
-    let restante = Math.max(0, Number(montoTotal || 0));
-    if (restante <= 0) return alert("Ingresa un monto mayor a $0.00.");
-
-    const now = Date.now();
-    const tasas = getTasaActiva(state);
-    const batch = writeBatch(db);
-    let notasAfectadas = 0;
-
-    for (let i = 0; i < grupo.notas.length && restante > 0.009; i++) {
-      const nota = grupo.notas[i];
+    procesandoAbono = true;
+    try {
       const saldoActual = Number(nota.saldoPendienteUsd || 0);
-      if (saldoActual <= 0.009) continue;
+      const abonoAplicadoANota = Math.min(saldoActual, monto);
+      const sobrepago = usandoSaldoFavor ? 0 : Math.max(0, Number((monto - saldoActual).toFixed(2)));
+      const nuevoSaldo = Math.max(0, Number((saldoActual - abonoAplicadoANota).toFixed(2)));
+      const now = Date.now();
+      const tasas = getTasaActiva(state);
 
-      const esUltima = i === grupo.notas.length - 1;
-      const aplicado = Math.min(saldoActual, restante);
-      restante = Number((restante - aplicado).toFixed(2));
-      const sobrepagoEnEsta = esUltima && restante > 0.01 ? restante : 0;
-      if (sobrepagoEnEsta > 0) restante = 0;
-
-      const nuevoSaldo = Math.max(0, Number((saldoActual - aplicado).toFixed(2)));
       const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
       historialAbonos.push({
-        montoUsd: Number(aplicado.toFixed(2)),
-        sobrepagoUsd: sobrepagoEnEsta,
-        montoBs: tasas.bcvActiva ? Number(((aplicado + sobrepagoEnEsta) * tasas.bcvActiva).toFixed(2)) : 0,
-        metodo,
+        montoUsd: abonoAplicadoANota,
+        sobrepagoUsd: sobrepago,
+        montoBs: tasas.bcvActiva ? Number((monto * tasas.bcvActiva).toFixed(2)) : 0,
+        metodo: usandoSaldoFavor ? "Saldo a Favor" : metodo,
         referencia: String(referencia || "").trim(),
-        usandoSaldoFavor: false,
-        esFifo: true,
+        usandoSaldoFavor,
         cierreId: null,
         fechaIso: new Date(now).toISOString().slice(0, 10),
         fechaHoraTxt: formatearFechaHora(now),
@@ -531,11 +453,13 @@ export async function mount(root, state) {
         usuario: state.sesion?.usuario || "Administrador"
       });
 
+      const batch = writeBatch(db);
       batch.set(
         doc(refs.notasEntrega(), nota.id),
         {
           saldoPendienteUsd: nuevoSaldo,
           esCredito: nuevoSaldo > 0.01,
+          tieneAbonosSinCerrar: true,
           saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
           saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
           abonos: historialAbonos,
@@ -543,29 +467,124 @@ export async function mount(root, state) {
         },
         { merge: true }
       );
-      notasAfectadas++;
 
-      if (sobrepagoEnEsta > 0.01 && docId !== "V-00000000") {
-        const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
+      const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
+      if (usandoSaldoFavor) {
+        const nuevoFavor = Math.max(0, Number((actualFavor - abonoAplicadoANota).toFixed(2)));
         batch.set(
           doc(refs.clientes(), docId),
+          { documento: docId, nombre: grupo.nombre, saldoAFavorUsd: nuevoFavor, actualizadoEn: serverTimestamp() },
+          { merge: true }
+        );
+      } else if (sobrepago > 0.01 && docId !== "V-00000000") {
+        const nuevoFavor = Number((actualFavor + sobrepago).toFixed(2));
+        batch.set(
+          doc(refs.clientes(), docId),
+          { documento: docId, nombre: grupo.nombre, saldoAFavorUsd: nuevoFavor, actualizadoEn: serverTimestamp() },
+          { merge: true }
+        );
+      }
+
+      await batch.commit();
+      if (sobrepago > 0.01 && docId !== "V-00000000") {
+        alert(`Abono registrado. Se acreditaron +$${sobrepago.toFixed(2)} al saldo a favor de ${grupo.nombre}.`);
+      }
+
+      if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
+        await window.NEXUS_VE_REFRESH_ALERTAS();
+      }
+      await cargarDeudores();
+    } catch (err) {
+      alert("Error al registrar abono: " + err.message);
+    } finally {
+      procesandoAbono = false;
+    }
+  }
+
+  async function aplicarAbonoGlobalFIFO(docId, montoTotal, metodo = "Efectivo USD", referencia = "") {
+    if (procesandoAbono) return;
+    const grupo = gruposDeudores.find((g) => g.documento === docId);
+    if (!grupo || !grupo.notas.length) return;
+
+    let restante = Math.max(0, Number(montoTotal || 0));
+    if (restante <= 0) return alert("Ingresa un monto mayor a $0.00.");
+
+    procesandoAbono = true;
+    try {
+      const now = Date.now();
+      const tasas = getTasaActiva(state);
+      const batch = writeBatch(db);
+      let notasAfectadas = 0;
+
+      for (let i = 0; i < grupo.notas.length && restante > 0.009; i++) {
+        const nota = grupo.notas[i];
+        const saldoActual = Number(nota.saldoPendienteUsd || 0);
+        if (saldoActual <= 0.009) continue;
+
+        const esUltima = i === grupo.notas.length - 1;
+        const aplicado = Math.min(saldoActual, restante);
+        restante = Number((restante - aplicado).toFixed(2));
+        const sobrepagoEnEsta = esUltima && restante > 0.01 ? restante : 0;
+        if (sobrepagoEnEsta > 0) restante = 0;
+
+        const nuevoSaldo = Math.max(0, Number((saldoActual - aplicado).toFixed(2)));
+        const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
+        historialAbonos.push({
+          montoUsd: Number(aplicado.toFixed(2)),
+          sobrepagoUsd: sobrepagoEnEsta,
+          montoBs: tasas.bcvActiva ? Number(((aplicado + sobrepagoEnEsta) * tasas.bcvActiva).toFixed(2)) : 0,
+          metodo,
+          referencia: String(referencia || "").trim(),
+          usandoSaldoFavor: false,
+          esFifo: true,
+          cierreId: null,
+          fechaIso: new Date(now).toISOString().slice(0, 10),
+          fechaHoraTxt: formatearFechaHora(now),
+          ts: now,
+          usuario: state.sesion?.usuario || "Administrador"
+        });
+
+        batch.set(
+          doc(refs.notasEntrega(), nota.id),
           {
-            documento: docId,
-            nombre: grupo.nombre,
-            saldoAFavorUsd: Number((actualFavor + sobrepagoEnEsta).toFixed(2)),
+            saldoPendienteUsd: nuevoSaldo,
+            esCredito: nuevoSaldo > 0.01,
+            tieneAbonosSinCerrar: true,
+            saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
+            saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
+            abonos: historialAbonos,
             actualizadoEn: serverTimestamp()
           },
           { merge: true }
         );
-      }
-    }
+        notasAfectadas++;
 
-    await batch.commit();
-    alert(`Abono Global FIFO aplicado en ${notasAfectadas} nota(s) de ${grupo.nombre}.`);
-    if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
-      await window.NEXUS_VE_REFRESH_ALERTAS();
+        if (sobrepagoEnEsta > 0.01 && docId !== "V-00000000") {
+          const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
+          batch.set(
+            doc(refs.clientes(), docId),
+            {
+              documento: docId,
+              nombre: grupo.nombre,
+              saldoAFavorUsd: Number((actualFavor + sobrepagoEnEsta).toFixed(2)),
+              actualizadoEn: serverTimestamp()
+            },
+            { merge: true }
+          );
+        }
+      }
+
+      await batch.commit();
+      alert(`Abono Global FIFO aplicado en ${notasAfectadas} nota(s) de ${grupo.nombre}.`);
+      if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
+        await window.NEXUS_VE_REFRESH_ALERTAS();
+      }
+      await cargarDeudores();
+    } catch (err) {
+      alert("Error al aplicar Abono Global: " + err.message);
+    } finally {
+      procesandoAbono = false;
     }
-    await cargarDeudores();
   }
 
   contEl.addEventListener("focusin", (e) => {
