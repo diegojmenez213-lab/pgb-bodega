@@ -17,6 +17,29 @@ function getTasaActiva(state) {
   return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
+function formatearEntradaMoneda(inputEl) {
+  const digitos = String(inputEl.value || "").replace(/\D/g, "");
+  const centavos = parseInt(digitos || "0", 10);
+  const valor = Number((centavos / 100).toFixed(2));
+  const texto = valor.toFixed(2);
+  inputEl.value = texto;
+  requestAnimationFrame(() => {
+    try {
+      inputEl.setSelectionRange(texto.length, texto.length);
+    } catch {}
+  });
+  return valor;
+}
+
+function fijarCursorAlFinal(inputEl) {
+  requestAnimationFrame(() => {
+    try {
+      const len = inputEl.value.length;
+      inputEl.setSelectionRange(len, len);
+    } catch {}
+  });
+}
+
 function convertirUsdAMoneda(montoUsd, moneda, tasas) {
   const usd = Number(montoUsd || 0);
   const bcv = Number(tasas.bcvActiva || tasas.bcvHoy || 0);
@@ -34,7 +57,7 @@ function convertirUsdAMoneda(montoUsd, moneda, tasas) {
   }
   if (moneda === "EUR") {
     if (!bcv || !eur) return { ok: false, texto: "€ --" };
-    return { ok: true, texto: `€ ${(usd * bcv) / eur}` };
+    return { ok: true, texto: `€ ${((usd * bcv) / eur).toFixed(2)}` };
   }
   return { ok: true, texto: `$${usd.toFixed(2)}` };
 }
@@ -542,7 +565,7 @@ export async function mount(root, state) {
         <select class="sel-met flex-1 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold">
           ${METODOS_PAGO.map((m) => `<option value="${m}" ${p.metodo === m ? "selected" : ""}>${m}</option>`).join("")}
         </select>
-        <input type="number" step="0.01" min="0" value="${Number(p.montoUsd || 0).toFixed(2)}" class="inp-pmonto w-24 bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono-ve font-bold text-right" />
+        <input type="text" inputmode="numeric" value="${Number(p.montoUsd || 0).toFixed(2)}" class="inp-pmonto w-24 bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono-ve font-bold text-right" />
         ${pagos.length > 1 ? `<button type="button" class="btn-rm-pago text-xs font-bold text-rose-600 px-1 cursor-pointer">✕</button>` : ""}
       </div>
     `).join("");
@@ -606,9 +629,9 @@ export async function mount(root, state) {
             </div>
             <div class="flex items-center gap-1">
               <span class="text-[10px] font-bold text-slate-500">$</span>
-              <input type="number" step="0.01" min="0" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
+              <input type="text" inputmode="numeric" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
             </div>
-            <div class="font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
+            <div class="item-subtotal font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
           </div>
         </div>
       `).join("");
@@ -668,19 +691,37 @@ export async function mount(root, state) {
     agregarProductoCaja(prodId, 1);
   });
 
+  cartEl.addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("inp-prec")) fijarCursorAlFinal(e.target);
+  });
+
   cartEl.addEventListener("input", (e) => {
     const row = e.target.closest("[data-idx]");
     if (!row) return;
     const idx = Number(row.dataset.idx);
     if (e.target.classList.contains("inp-cant")) {
       carrito[idx].cantidad = Math.max(1, parseInt(e.target.value, 10) || 1);
+      root.querySelector("#posCantItemsBadge").textContent = String(
+        carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0)
+      );
     } else if (e.target.classList.contains("inp-prec")) {
-      carrito[idx].precioUsd = Math.max(0, parseFloat(e.target.value) || 0);
+      carrito[idx].precioUsd = formatearEntradaMoneda(e.target);
     }
-    renderCarrito();
+    const subEl = row.querySelector(".item-subtotal");
+    if (subEl) subEl.textContent = `$${(carrito[idx].cantidad * carrito[idx].precioUsd).toFixed(2)}`;
+    if (!esCredito && pagos.length === 1 && pagos[0].auto !== false) {
+      pagos[0].montoUsd = Number(montoObjetivoHoy().toFixed(2));
+      const inpP = pagosEl.querySelector(".inp-pmonto");
+      if (inpP) inpP.value = pagos[0].montoUsd.toFixed(2);
+    }
+    renderTotalesYRestante();
   });
 
   cartEl.addEventListener("click", (e) => {
+    if (e.target.classList.contains("inp-prec")) {
+      fijarCursorAlFinal(e.target);
+      return;
+    }
     const row = e.target.closest("[data-idx]");
     if (!row) return;
     const idx = Number(row.dataset.idx);
@@ -703,6 +744,10 @@ export async function mount(root, state) {
     }
   });
 
+  pagosEl.addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("inp-pmonto")) fijarCursorAlFinal(e.target);
+  });
+
   pagosEl.addEventListener("change", (e) => {
     const row = e.target.closest("[data-pidx]");
     if (!row) return;
@@ -716,12 +761,16 @@ export async function mount(root, state) {
     const idx = Number(row.dataset.pidx);
     if (e.target.classList.contains("inp-pmonto")) {
       pagos[idx].auto = false;
-      pagos[idx].montoUsd = Math.max(0, parseFloat(e.target.value) || 0);
+      pagos[idx].montoUsd = formatearEntradaMoneda(e.target);
       renderTotalesYRestante();
     }
   });
 
   pagosEl.addEventListener("click", (e) => {
+    if (e.target.classList.contains("inp-pmonto")) {
+      fijarCursorAlFinal(e.target);
+      return;
+    }
     if (!e.target.closest(".btn-rm-pago")) return;
     const idx = Number(e.target.closest("[data-pidx]").dataset.pidx);
     pagos.splice(idx, 1);
