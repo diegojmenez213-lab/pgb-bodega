@@ -40,6 +40,7 @@
         <div class="ve-nav-group">Gerencia</div>
         <button class="ve-nav-btn" data-route="analitica"><span>📈</span> Analítica & Cierre</button>
         <button class="ve-nav-btn" data-route="pedido-sugerido"><span>🧠</span> Pedido Sugerido</button>
+        <button class="ve-nav-btn" data-route="configuracion-logos"><span>🎨</span> Personalización</button>
       </nav>
 
       <div class="p-3 border-t border-slate-200 flex items-center justify-between gap-2">
@@ -125,6 +126,7 @@
       <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Historial de Novedades</button>
       <button class="ve-nav-btn" data-route="analitica"><span>📈</span> Analítica & Cierre</button>
       <button class="ve-nav-btn" data-route="pedido-sugerido"><span>🧠</span> Pedido Sugerido</button>
+      <button class="ve-nav-btn" data-route="configuracion-logos"><span>🎨</span> Personalización</button>
       <div class="pt-2 border-t border-slate-200">
         <button id="btnLogoutMob" class="w-full py-2.5 rounded-xl bg-rose-50 text-rose-700 font-bold text-xs">
           Cerrar Sesión
@@ -136,6 +138,13 @@
   <script type="module">
     import { verificarAccesoVE, cerrarSesionVE } from "./core/auth-tenant.js";
     import { getTenantRefs, getDocs } from "./core/db.js";
+
+    const TEMAS_GUARDADOS = {
+      "ejecutivo-oscuro": { p: "#0f172a", a: "#059669", f: "#f8fafc", b: "#cbd5e1" },
+      "azul-industrial": { p: "#0c4a6e", a: "#0284c7", f: "#f0f9ff", b: "#bae6fd" },
+      "bosque-gerencial": { p: "#14532d", a: "#16a34a", f: "#f7fee7", b: "#bbf7d0" },
+      "carbon-ambar": { p: "#18181b", a: "#d97706", f: "#fafafa", b: "#e4e4e7" }
+    };
 
     const state = {
       sesion: null,
@@ -157,8 +166,23 @@
       "conteo-bodega": "Conteo Digital de Almacén",
       "inventario-planta": "Historial de Novedades",
       "analitica": "Analítica Financiera & Cierre",
-      "pedido-sugerido": "Pedido Sugerido"
+      "pedido-sugerido": "Pedido Sugerido",
+      "configuracion-logos": "Configuración y Personalización"
     };
+
+    function aplicarTemaEmpresa(temaId) {
+      const t = TEMAS_GUARDADOS[temaId] || TEMAS_GUARDADOS["ejecutivo-oscuro"];
+      const rootEl = document.documentElement;
+      rootEl.style.setProperty("--ve-primario", t.p);
+      rootEl.style.setProperty("--ve-acento", t.a);
+      rootEl.style.setProperty("--ve-fondo", t.f);
+      rootEl.style.setProperty("--ve-borde", t.b);
+
+      document.querySelectorAll(".ve-nav-btn.active").forEach((btn) => {
+        btn.style.backgroundColor = t.p;
+        btn.style.color = "#ffffff";
+      });
+    }
 
     async function revisarAlertasDeudores() {
       if (!state.sesion?.tenantId) return;
@@ -253,8 +277,14 @@
     }
 
     function marcarBotonActivo(route) {
+      const tema = TEMAS_GUARDADOS[state.empresa?.temaColor] || TEMAS_GUARDADOS["ejecutivo-oscuro"];
       document.querySelectorAll("[data-route]").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.route === route);
+        const activa = btn.dataset.route === route;
+        btn.classList.toggle("active", activa);
+        if (btn.classList.contains("ve-nav-btn")) {
+          btn.style.backgroundColor = activa ? tema.p : "";
+          btn.style.color = activa ? "#ffffff" : "";
+        }
       });
     }
 
@@ -317,6 +347,8 @@
 
       state.sesion = acceso.sesion;
       state.empresa = acceso.empresa;
+
+      aplicarTemaEmpresa(acceso.empresa.temaColor);
 
       const nombre = acceso.empresa.nombre || acceso.sesion.nombreEmpresa;
       const rif = acceso.empresa.rif || acceso.sesion.tenantId;
