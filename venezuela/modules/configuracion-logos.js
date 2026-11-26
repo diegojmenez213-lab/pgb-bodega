@@ -9,8 +9,10 @@ const TEMAS_PRO = [
     nombre: "Ejecutivo Oscuro",
     descripcion: "Contraste sobrio en pizarra profundo con acento esmeralda.",
     primario: "#0f172a",
+    primarioSuave: "#1e293b",
     acento: "#059669",
     fondo: "#f8fafc",
+    superficie: "#ffffff",
     borde: "#cbd5e1"
   },
   {
@@ -18,8 +20,10 @@ const TEMAS_PRO = [
     nombre: "Azul Industrial",
     descripcion: "Tono marino corporativo limpio para operación y despacho.",
     primario: "#0c4a6e",
+    primarioSuave: "#0369a1",
     acento: "#0284c7",
     fondo: "#f0f9ff",
+    superficie: "#ffffff",
     borde: "#bae6fd"
   },
   {
@@ -27,8 +31,10 @@ const TEMAS_PRO = [
     nombre: "Bosque Gerencial",
     descripcion: "Verde oscuro profesional con acabados neutros suaves.",
     primario: "#14532d",
+    primarioSuave: "#166534",
     acento: "#16a34a",
     fondo: "#f7fee7",
+    superficie: "#ffffff",
     borde: "#bbf7d0"
   },
   {
@@ -36,24 +42,67 @@ const TEMAS_PRO = [
     nombre: "Carbón & Ámbar",
     descripcion: "Estilo técnico de alto contraste con detalle cálido.",
     primario: "#18181b",
+    primarioSuave: "#27272a",
     acento: "#d97706",
     fondo: "#fafafa",
+    superficie: "#ffffff",
     borde: "#e4e4e7"
   }
 ];
 
-function aplicarTemaVisual(temaId) {
+function aplicarTemaVisual(temaId, state = null) {
   const tema = TEMAS_PRO.find((t) => t.id === temaId) || TEMAS_PRO[0];
+  if (state?.empresa) {
+    state.empresa.temaColor = tema.id;
+  }
+
   const rootEl = document.documentElement;
   rootEl.style.setProperty("--ve-primario", tema.primario);
   rootEl.style.setProperty("--ve-acento", tema.acento);
   rootEl.style.setProperty("--ve-fondo", tema.fondo);
   rootEl.style.setProperty("--ve-borde", tema.borde);
 
-  document.querySelectorAll(".ve-nav-btn.active").forEach((btn) => {
-    btn.style.backgroundColor = tema.primario;
-    btn.style.color = "#ffffff";
-  });
+  let styleTag = document.getElementById("veTemaDinamico");
+  if (!styleTag) {
+    styleTag = document.createElement("style");
+    styleTag.id = "veTemaDinamico";
+    document.head.appendChild(styleTag);
+  }
+
+  styleTag.textContent = `
+    body, .ve-shell, .ve-main-wrap, .ve-content {
+      background-color: ${tema.fondo} !important;
+    }
+    .ve-topbar, .ve-sidebar, .ve-bottom-nav, .ve-card {
+      background-color: ${tema.superficie} !important;
+      border-color: ${tema.borde} !important;
+    }
+    .ve-rate-pill.active-bcv {
+      background-color: ${tema.primario} !important;
+      border-color: ${tema.primario} !important;
+      color: #ffffff !important;
+    }
+    .ve-nav-btn.active {
+      background-color: ${tema.primario} !important;
+      color: #ffffff !important;
+    }
+    .ve-mob-btn.active {
+      color: ${tema.primario} !important;
+      font-weight: 800 !important;
+    }
+    .bg-slate-950 {
+      background-color: ${tema.primario} !important;
+    }
+    .hover\\:bg-slate-800:hover {
+      background-color: ${tema.primarioSuave} !important;
+    }
+    .bg-emerald-600 {
+      background-color: ${tema.acento} !important;
+    }
+    .text-emerald-700, .text-emerald-800 {
+      color: ${tema.acento} !important;
+    }
+  `;
 }
 
 function sincronizarLogoBarraLateral(logoPlataforma, nombreEmpresa = "VE") {
@@ -96,7 +145,7 @@ export async function mount(root, state) {
     state.empresa?.logoPlataformaBase64 || state.empresa?.logoBase64 || state.empresa?.logoUrl || "";
   let logoDocumento = state.empresa?.logoDocumentoBase64 || "";
 
-  aplicarTemaVisual(temaSeleccionado);
+  aplicarTemaVisual(temaSeleccionado, state);
 
   root.innerHTML = `
     <div class="space-y-5 max-w-5xl mx-auto">
@@ -227,14 +276,14 @@ export async function mount(root, state) {
     card.addEventListener("click", () => {
       temaSeleccionado = card.dataset.tema;
       marcarTemaUI();
-      aplicarTemaVisual(temaSeleccionado);
+      aplicarTemaVisual(temaSeleccionado, state);
     });
   });
 
   root.querySelector("#btnRestablecerTema").addEventListener("click", () => {
     temaSeleccionado = TEMA_PREDETERMINADO;
     marcarTemaUI();
-    aplicarTemaVisual(temaSeleccionado);
+    aplicarTemaVisual(temaSeleccionado, state);
   });
 
   root.querySelector("#btnQuitarLogoPlat").addEventListener("click", () => {
@@ -302,7 +351,7 @@ export async function mount(root, state) {
         state.empresa.logoBase64 = logoPlataforma;
       }
 
-      aplicarTemaVisual(temaSeleccionado);
+      aplicarTemaVisual(temaSeleccionado, state);
       sincronizarLogoBarraLateral(logoPlataforma, state.empresa?.nombre || state.sesion?.nombreEmpresa);
       renderVistasLogos();
 
