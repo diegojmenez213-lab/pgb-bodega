@@ -105,7 +105,7 @@ export async function mount(root, state) {
         <div class="lg:col-span-5 space-y-3">
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
-              <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota</h2>
+              <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota (<span id="posCantItemsBadge">0</span>)</h2>
               <button id="btnLimpiarPos" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
             </div>
 
@@ -372,9 +372,32 @@ export async function mount(root, state) {
       : (restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
   }
 
+  function agregarProductoCaja(prodId) {
+    const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
+    if (!p) return;
+
+    const ex = carrito.find((x) => x.id === p.id);
+    if (ex) {
+      ex.cantidad += 1;
+    } else {
+      carrito.push({
+        id: p.id,
+        codigo: p.codigo || p.id,
+        descripcion: p.descripcion || p.codigo || p.id,
+        costoUsd: Number(p.costoUsd || 0),
+        precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
+        cantidad: 1,
+        origen: (p.stockAlmacen || 0) > 0 ? "almacen" : "planta"
+      });
+    }
+    renderCarrito();
+  }
+
   function renderCarrito() {
     const total = totalVenta();
     const tasas = getTasaActiva(state);
+    const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
+    root.querySelector("#posCantItemsBadge").textContent = String(totalUnds);
     root.querySelector("#posTotalUsd").textContent = `$${total.toFixed(2)}`;
     root.querySelector("#posTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
 
@@ -393,7 +416,7 @@ export async function mount(root, state) {
               </div>
               <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
             </div>
-            <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer">✕</button>
+            <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1">✕</button>
           </div>
           <div class="flex items-center justify-between gap-2">
             <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs font-bold text-center" />
@@ -411,13 +434,9 @@ export async function mount(root, state) {
 
   function renderBusqueda() {
     const q = busqEl.value.trim().toLowerCase();
-    if (!q) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe para agregar repuestos a la Nota de Entrega...</div>`;
-      return;
-    }
-
-    const matches = catalogo.filter((p) =>
-      `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""}`.toLowerCase().includes(q)
+    const matches = (q
+      ? catalogo.filter((p) => `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""}`.toLowerCase().includes(q))
+      : catalogo
     ).slice(0, 25);
 
     if (!matches.length) {
@@ -428,13 +447,13 @@ export async function mount(root, state) {
     resEl.innerHTML = matches.map((p) => {
       const precio = Number(((p.costoUsd || 0) * factorActual).toFixed(2));
       return `
-        <div class="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center justify-between gap-2">
-          <div class="min-w-0 flex-1">
+        <div class="fila-prod-pos p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 flex items-center justify-between gap-2 cursor-pointer select-none" data-id="${encodeURIComponent(p.id)}">
+          <div class="min-w-0 flex-1 pointer-events-none">
             <div class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo} <span class="font-sans text-[10px] text-slate-400">${p.marca || ""}</span></div>
             <div class="text-[11px] font-semibold text-slate-600 truncate">${p.descripcion}</div>
             <div class="text-[10px] font-bold text-slate-500">Alm: <strong class="text-emerald-700">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-sky-700">${p.stockPlanta ?? 0}</strong></div>
           </div>
-          <button type="button" class="btn-add-pos px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer shrink-0" data-id="${p.id}">
+          <button type="button" class="btn-add-pos px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer shrink-0" data-id="${encodeURIComponent(p.id)}">
             + $${precio.toFixed(2)}
           </button>
         </div>
@@ -443,26 +462,12 @@ export async function mount(root, state) {
   }
 
   resEl.addEventListener("click", (e) => {
-    const btn = e.target.closest(".btn-add-pos");
-    if (!btn) return;
-    const p = catalogo.find((x) => x.id === btn.dataset.id);
-    if (!p) return;
-
-    const ex = carrito.find((x) => x.id === p.id);
-    if (ex) {
-      ex.cantidad += 1;
-    } else {
-      carrito.push({
-        id: p.id,
-        codigo: p.codigo,
-        descripcion: p.descripcion,
-        costoUsd: Number(p.costoUsd || 0),
-        precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
-        cantidad: 1,
-        origen: (p.stockAlmacen || 0) > 0 ? "almacen" : "planta"
-      });
-    }
-    renderCarrito();
+    const target = e.target.closest("[data-id]");
+    if (!target) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const prodId = decodeURIComponent(target.dataset.id || "");
+    agregarProductoCaja(prodId);
   });
 
   cartEl.addEventListener("input", (e) => {
@@ -549,7 +554,6 @@ export async function mount(root, state) {
     else multEl.focus();
   });
 
-  // No sobreescribimos multEl.value en "input" para evitar que "2." se convierta en "0.2" en teclados móviles
   multEl.addEventListener("input", () => {
     tarifaEl.value = "custom";
     aplicarFactorPos(multEl.value, false);
@@ -726,5 +730,6 @@ export async function mount(root, state) {
     chequearDeudaClienteActual();
   }
 
+  renderBusqueda();
   renderCarrito();
 }
