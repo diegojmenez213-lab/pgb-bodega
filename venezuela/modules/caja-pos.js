@@ -187,13 +187,13 @@ export async function mount(root, state) {
 
           <div class="ve-card p-3 space-y-2">
             <div class="flex items-center gap-2">
-              <input id="posBusq" type="text" placeholder="Buscar producto por código, descripción o marca (F1)..." class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-950" />
+              <input id="posBusq" type="text" placeholder="Buscar producto disponible (Almacén o Planta) (F1)..." class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-950" />
               <button id="btnToggleBusqPos" type="button" class="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer shrink-0">
-                Catálogo
+                Disponibles
               </button>
             </div>
             <div id="posResultados" class="space-y-1.5 max-h-80 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Catálogo" para agregar repuestos...</div>
+              <div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos con stock...</div>
             </div>
           </div>
         </div>
@@ -203,6 +203,12 @@ export async function mount(root, state) {
             <div class="flex items-center justify-between">
               <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota (<span id="posCantItemsBadge">0</span> und)</h2>
               <button id="btnLimpiarPos" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
+            </div>
+
+            <!-- Aviso cuando una cantidad supera el stock físico de Almacén y pasa a Planta -->
+            <div id="avisoExcesoAlmacen" class="hidden p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-[11px] text-amber-950 space-y-1">
+              <div class="font-extrabold">⚠️ Cantidad superior al stock de Almacén</div>
+              <div id="txtAvisoExcesoAlmacen" class="font-semibold leading-snug"></div>
             </div>
 
             <div id="posCarrito" class="space-y-2 max-h-80 overflow-y-auto">
@@ -332,6 +338,43 @@ export async function mount(root, state) {
   const favorBox = root.querySelector("#panelSaldoFavor");
   const selMonFavor = root.querySelector("#selMonedaFavor");
   const inpLimitePos = root.querySelector("#inpLimitePos");
+
+  function buscarProdCatalogo(itemCarrito) {
+    return catalogo.find((x) => x.id === itemCarrito.prodId || x.id === itemCarrito.id || x.codigo === itemCarrito.codigo);
+  }
+
+  function refrescarAvisoExcesoAlmacen() {
+    const box = root.querySelector("#avisoExcesoAlmacen");
+    const txt = root.querySelector("#txtAvisoExcesoAlmacen");
+    const mensajes = [];
+
+    for (const it of carrito) {
+      const prod = buscarProdCatalogo(it);
+      const dispAlm = Math.max(0, Number(prod?.stockAlmacen || 0));
+      const dispPla = Math.max(0, Number(prod?.stockPlanta || 0));
+
+      if (it.origen === "almacen" && it.cantidad > dispAlm) {
+        const excedente = it.cantidad - dispAlm;
+        if (dispAlm > 0) {
+          mensajes.push(
+            `<strong>${it.codigo}</strong>: solo hay <strong>${dispAlm} und</strong> en Almacén; se tomarán <strong>${dispAlm} und de Almacén</strong> y <strong>${excedente} und de Planta</strong>${dispPla > 0 ? ` (disponibles en Planta: ${dispPla})` : ""}.`
+          );
+        } else {
+          mensajes.push(
+            `<strong>${it.codigo}</strong>: no hay stock en Almacén (0 und); las <strong>${it.cantidad} und</strong> se tomarán de <strong>Planta</strong>${dispPla > 0 ? ` (disponibles: ${dispPla})` : ""}.`
+          );
+        }
+      }
+    }
+
+    if (!mensajes.length) {
+      box.classList.add("hidden");
+      return;
+    }
+
+    txt.innerHTML = mensajes.join("<br>");
+    box.classList.remove("hidden");
+  }
 
   function aplicarFactorPos(nuevoFactor, sincronizarInput = false) {
     const val = parseMultiplicadorTexto(nuevoFactor);
@@ -678,97 +721,124 @@ export async function mount(root, state) {
     renderTotalesYRestante();
   }
 
+  // Prioriza Almacén si hay stock; si no hay en Almacén y sí hay en Planta, toma Planta
   function agregarProductoCaja(prodId, cantAgregar = 1) {
     const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
     if (!p) return;
     const sum = Math.max(1, parseInt(cantAgregar, 10) || 1);
+    const dispAlm = Math.max(0, Number(p.stockAlmacen || 0));
+    const origenInicial = dispAlm > 0 ? "almacen" : "planta";
 
-    const ex = carrito.find((x) => x.id === p.id);
+    const ex = carrito.find((x) => x.prodId === p.id && x.origen === origenInicial);
     if (ex) {
       ex.cantidad += sum;
     } else {
       carrito.push({
         id: p.id,
+        prodId: p.id,
         codigo: p.codigo || p.id,
         descripcion: p.descripcion || p.codigo || p.id,
+        proveedor: p.proveedor || "",
         costoUsd: Number(p.costoUsd || 0),
         precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
         cantidad: sum,
-        origen: (p.stockAlmacen || 0) > 0 ? "almacen" : "planta"
+        origen: origenInicial
       });
     }
 
     renderCarrito();
     busqAbierta = false;
     busqEl.value = "";
-    resEl.innerHTML = `<div class="text-xs text-emerald-700 font-bold text-center py-2">✓ Agregado a la nota. Toca "Catálogo" o escribe para sumar más.</div>`;
+    resEl.innerHTML = `<div class="text-xs text-emerald-700 font-bold text-center py-2">✓ Agregado (${origenInicial === "almacen" ? "Almacén" : "Planta"}). Toca "Disponibles" o escribe para sumar más.</div>`;
     root.querySelector("#posCarritoCard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function renderCarrito() {
     const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
     root.querySelector("#posCantItemsBadge").textContent = String(totalUnds);
+    refrescarAvisoExcesoAlmacen();
 
     if (!carrito.length) {
       cartEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Carrito vacío.</div>`;
     } else {
-      cartEl.innerHTML = carrito.map((it, idx) => `
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2" data-idx="${idx}">
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="flex items-center gap-1.5">
-                <span class="font-mono-ve text-[11px] font-extrabold text-slate-900">${it.codigo}</span>
-                <button type="button" class="btn-origen text-[9px] font-extrabold px-1.5 py-0.5 rounded-full cursor-pointer ${
-                  it.origen === "almacen" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"
-                }">${it.origen === "almacen" ? "ALMACÉN" : "PLANTA"}</button>
+      cartEl.innerHTML = carrito.map((it, idx) => {
+        const prod = buscarProdCatalogo(it);
+        const dispAlm = Math.max(0, Number(prod?.stockAlmacen || 0));
+        const dispPla = Math.max(0, Number(prod?.stockPlanta || 0));
+        const excedeAlm = it.origen === "almacen" && it.cantidad > dispAlm;
+
+        return `
+          <div class="p-2.5 rounded-xl ${excedeAlm ? "bg-amber-50/70 border border-amber-300" : "bg-slate-50 border border-slate-200"} space-y-2" data-idx="${idx}">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-mono-ve text-[11px] font-extrabold text-slate-900">${it.codigo}</span>
+                  <span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full ${
+                    it.origen === "almacen" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"
+                  }">${it.origen === "almacen" ? `ALMACÉN (disp: ${dispAlm})` : `PLANTA (disp: ${dispPla})`}</span>
+                </div>
+                <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
+                ${excedeAlm ? `<div class="text-[10px] font-extrabold text-amber-900 mt-0.5">Se tomarán ${dispAlm} de Almacén y ${it.cantidad - dispAlm} de Planta</div>` : ""}
               </div>
-              <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
+              <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1.5 py-0.5">✕</button>
             </div>
-            <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1.5 py-0.5">✕</button>
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn-menos w-7 h-7 rounded-lg bg-white border border-slate-300 text-xs font-extrabold text-slate-800 cursor-pointer">−</button>
+                <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 h-7 bg-white border border-slate-300 rounded-lg px-1 text-xs font-extrabold text-center font-mono-ve" />
+                <button type="button" class="btn-mas w-7 h-7 rounded-lg bg-slate-950 text-white text-xs font-extrabold cursor-pointer">+</button>
+              </div>
+              <div class="flex items-center gap-1">
+                <span class="text-[10px] font-bold text-slate-500">$</span>
+                <input type="text" inputmode="numeric" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
+              </div>
+              <div class="item-subtotal font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
+            </div>
           </div>
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-1">
-              <button type="button" class="btn-menos w-7 h-7 rounded-lg bg-white border border-slate-300 text-xs font-extrabold text-slate-800 cursor-pointer">−</button>
-              <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 h-7 bg-white border border-slate-300 rounded-lg px-1 text-xs font-extrabold text-center font-mono-ve" />
-              <button type="button" class="btn-mas w-7 h-7 rounded-lg bg-slate-950 text-white text-xs font-extrabold cursor-pointer">+</button>
-            </div>
-            <div class="flex items-center gap-1">
-              <span class="text-[10px] font-bold text-slate-500">$</span>
-              <input type="text" inputmode="numeric" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
-            </div>
-            <div class="item-subtotal font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
-          </div>
-        </div>
-      `).join("");
+        `;
+      }).join("");
     }
     renderPagos();
   }
 
+  // Solo muestra productos con stock > 0 (prioriza Almacén; si no hay en Almacén, muestra Planta)
   function renderBusqueda() {
     const q = busqEl.value.trim().toLowerCase();
     if (!q && !busqAbierta) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Catálogo" para agregar repuestos...</div>`;
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos con stock...</div>`;
       return;
     }
 
-    const matches = (q
-      ? catalogo.filter((p) => `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""}`.toLowerCase().includes(q))
-      : catalogo
-    ).slice(0, 25);
+    const disponibles = catalogo.filter((p) => {
+      const dispAlm = Math.max(0, Number(p.stockAlmacen || 0));
+      const dispPla = Math.max(0, Number(p.stockPlanta || 0));
+      if (dispAlm <= 0 && dispPla <= 0) return false;
+      if (!q) return true;
+      return `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""} ${p.proveedor || ""}`.toLowerCase().includes(q);
+    }).slice(0, 25);
 
-    if (!matches.length) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Sin resultados.</div>`;
+    if (!disponibles.length) {
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Sin productos con existencia disponibles.</div>`;
       return;
     }
 
-    resEl.innerHTML = matches.map((p) => {
+    resEl.innerHTML = disponibles.map((p) => {
+      const dispAlm = Math.max(0, Number(p.stockAlmacen || 0));
+      const dispPla = Math.max(0, Number(p.stockPlanta || 0));
+      const esAlmacen = dispAlm > 0;
       const precio = Number(((p.costoUsd || 0) * factorActual).toFixed(2));
+
       return `
         <div class="fila-prod-pos p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 flex items-center justify-between gap-2 cursor-pointer select-none" data-id="${encodeURIComponent(p.id)}">
           <div class="min-w-0 flex-1 pointer-events-none">
-            <div class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo} <span class="font-sans text-[10px] text-slate-400">${p.marca || ""}</span></div>
-            <div class="text-[11px] font-semibold text-slate-600 truncate">${p.descripcion}</div>
-            <div class="text-[10px] font-bold text-slate-500">Alm: <strong class="text-emerald-700">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-sky-700">${p.stockPlanta ?? 0}</strong></div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo}</span>
+              ${esAlmacen
+                ? `<span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Almacén: ${dispAlm}</span>`
+                : `<span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-900">Planta: ${dispPla}</span>`}
+              ${p.proveedor ? `<span class="text-[9px] font-bold text-slate-400">${p.proveedor}</span>` : ""}
+            </div>
+            <div class="text-[11px] font-semibold text-slate-600 truncate mt-0.5">${p.descripcion}</div>
           </div>
           <button type="button" class="btn-add-pos px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer shrink-0" data-id="${encodeURIComponent(p.id)}">
             + $${precio.toFixed(2)}
@@ -781,7 +851,7 @@ export async function mount(root, state) {
   root.querySelector("#btnToggleBusqPos").addEventListener("click", () => {
     busqAbierta = !busqAbierta;
     if (!busqAbierta && !busqEl.value.trim()) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Catálogo retraído.</div>`;
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Listado retraído.</div>`;
     } else {
       renderBusqueda();
     }
@@ -808,6 +878,7 @@ export async function mount(root, state) {
       root.querySelector("#posCantItemsBadge").textContent = String(
         carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0)
       );
+      refrescarAvisoExcesoAlmacen();
     } else if (e.target.classList.contains("inp-prec")) {
       carrito[idx].precioUsd = formatearEntradaMoneda(e.target);
     }
@@ -831,9 +902,6 @@ export async function mount(root, state) {
     const idx = Number(row.dataset.idx);
     if (e.target.closest(".btn-rm")) {
       carrito.splice(idx, 1);
-      renderCarrito();
-    } else if (e.target.closest(".btn-origen")) {
-      carrito[idx].origen = carrito[idx].origen === "almacen" ? "planta" : "almacen";
       renderCarrito();
     } else if (e.target.closest(".btn-mas")) {
       carrito[idx].cantidad += 1;
@@ -938,13 +1006,72 @@ export async function mount(root, state) {
 
   root.querySelector("#btnLimpiarPos").addEventListener("click", limpiarCaja);
 
+  // Divide automáticamente ítems que superan stockAlmacen en parte Almacén + parte Planta
+  function construirItemsClasificados() {
+    const itemsFinales = [];
+    const avisosDivision = [];
+
+    for (const it of carrito) {
+      const prod = buscarProdCatalogo(it);
+      const dispAlm = Math.max(0, Number(prod?.stockAlmacen || 0));
+      const cantTotal = Math.max(1, Number(it.cantidad || 1));
+
+      if (it.origen === "almacen" && cantTotal > dispAlm) {
+        if (dispAlm > 0) {
+          const cantPlanta = cantTotal - dispAlm;
+          itemsFinales.push({
+            ...it,
+            id: prod?.id || it.prodId || it.id,
+            cantidad: dispAlm,
+            origen: "almacen"
+          });
+          itemsFinales.push({
+            ...it,
+            id: prod?.id || it.prodId || it.id,
+            cantidad: cantPlanta,
+            origen: "planta"
+          });
+          avisosDivision.push(`${it.codigo}: ${dispAlm} und de Almacén + ${cantPlanta} und de Planta`);
+        } else {
+          itemsFinales.push({
+            ...it,
+            id: prod?.id || it.prodId || it.id,
+            cantidad: cantTotal,
+            origen: "planta"
+          });
+          avisosDivision.push(`${it.codigo}: ${cantTotal} und de Planta (sin stock en Almacén)`);
+        }
+      } else {
+        itemsFinales.push({
+          ...it,
+          id: prod?.id || it.prodId || it.id,
+          cantidad: cantTotal,
+          origen: it.origen || (dispAlm > 0 ? "almacen" : "planta")
+        });
+      }
+    }
+
+    return { itemsFinales, avisosDivision };
+  }
+
   async function emitirNota() {
     if (emitiendo) return;
     if (!carrito.length) return alert("Agrega al menos un producto.");
 
-    const totalUsd = Number(totalVenta().toFixed(2));
-    const usadoFavor = montoDescuentoFavorActual();
-    const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
+    const { itemsFinales, avisosDivision } = construirItemsClasificados();
+    if (avisosDivision.length) {
+      const ok = confirm(
+        `Aviso de clasificación Almacén / Planta:\n\n• ${avisosDivision.join("\n• ")}\n\n¿Confirmar la nota con esta clasificación?`
+      );
+      if (!ok) return;
+    }
+
+    const totalUsd = Number(
+      itemsFinales.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0).toFixed(2)
+    );
+    const usadoFavor = Math.min(saldoFavorDisponible, totalUsd);
+    const objetivoHoy = Math.max(0, Number((totalUsd - (usarSaldoFavorEnNota ? usadoFavor : 0)).toFixed(2)));
+    const descuentoAplicado = usarSaldoFavorEnNota ? usadoFavor : 0;
     const tasas = getTasaActiva(state);
 
     let pagosValidos = pagos
@@ -983,7 +1110,6 @@ export async function mount(root, state) {
       }
     }
 
-    // Prioriza descontar el vuelto de los métodos en Efectivo antes de tocar métodos digitales
     if (vueltoEntregadoUsd > 0.01 && pagosValidos.length) {
       let porRestar = vueltoEntregadoUsd;
       const ordenIndices = pagosValidos
@@ -1007,11 +1133,12 @@ export async function mount(root, state) {
     btn.textContent = "Guardando venta...";
 
     try {
-      const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
+      const costoTotalUsd = Number(
+        itemsFinales.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2)
+      );
       const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
       const saldoPendienteUsd = esCredito ? restanteHoy : 0;
 
-      // Monedas automáticas para el PDF: siempre USD y Bs., más USDT si pagó con Binance
       const monedas = ["USD", "BS"];
       if (pagosValidos.some((p) => p.metodo.toLowerCase().includes("usdt"))) {
         monedas.push("USDT");
@@ -1042,10 +1169,10 @@ export async function mount(root, state) {
           anulada: false,
           creadoTs: now,
           cliente: { documento: docCli, nombre: nomCli },
-          items: carrito,
+          items: itemsFinales,
           pagos: pagosValidos,
           vueltoEntregadoUsd,
-          saldoFavorAplicadoUsd: usadoFavor,
+          saldoFavorAplicadoUsd: descuentoAplicado,
           saldoFavorDejadoAparte: !usarSaldoFavorEnNota && saldoFavorDisponible > 0.01,
           sobrepagoUsd: sobrepagoGenerado,
           esCredito: esCredito && saldoPendienteUsd > 0.01,
@@ -1067,7 +1194,7 @@ export async function mount(root, state) {
         if (docCli !== "V-00000000") {
           const nuevoSaldoFavorCli = Math.max(
             0,
-            Number((cliFavorActual - usadoFavor + sobrepagoGenerado).toFixed(2))
+            Number((cliFavorActual - descuentoAplicado + sobrepagoGenerado).toFixed(2))
           );
           tx.set(
             doc(refs.clientes(), docCli),
@@ -1081,7 +1208,7 @@ export async function mount(root, state) {
           );
         }
 
-        for (const it of carrito) {
+        for (const it of itemsFinales) {
           if (it.origen === "almacen") {
             tx.set(doc(refs.catalogo(), it.id), {
               stockAlmacen: increment(-Number(it.cantidad || 1)),
@@ -1112,7 +1239,6 @@ export async function mount(root, state) {
 
       limpiarCaja();
 
-      // Redirige directo a Ventas Realizadas (la primera nota es la recién emitida)
       if (typeof window.NEXUS_VE_NAV === "function") {
         window.NEXUS_VE_NAV("inventario-planta");
       }
@@ -1166,7 +1292,7 @@ export async function mount(root, state) {
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
     if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
-    carrito = (cot.items || []).map((it) => ({ ...it }));
+    carrito = (cot.items || []).map((it) => ({ ...it, prodId: it.prodId || it.id }));
     refrescarEstadoClienteActual();
   }
 
