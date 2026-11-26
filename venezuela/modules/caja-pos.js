@@ -72,6 +72,41 @@ function parseMultiplicadorTexto(raw) {
   return num;
 }
 
+function normalizarBusquedaTexto(txt) {
+  return String(txt || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9/.\-]+/g, " ")
+    .trim();
+}
+
+function cumpleFiltroEstricto(prod, queryRaw) {
+  const dispAlm = Math.max(0, Number(prod.stockAlmacen || 0));
+  const dispPla = Math.max(0, Number(prod.stockPlanta || 0));
+  if (dispAlm <= 0 && dispPla <= 0) return false;
+
+  const qNorm = normalizarBusquedaTexto(queryRaw);
+  if (!qNorm) return true;
+
+  const codigo = normalizarBusquedaTexto(prod.codigo || prod.id || "");
+  const campoCompleto = normalizarBusquedaTexto(
+    `${prod.codigo || ""} ${prod.descripcion || ""} ${prod.marca || ""} ${prod.proveedor || ""}`
+  );
+  const tokensCampo = campoCompleto.split(/\s+/).filter(Boolean);
+  const terminos = qNorm.split(/\s+/).filter(Boolean);
+
+  if (terminos.length === 1 && terminos[0].length < 5) {
+    const t = terminos[0];
+    return codigo.startsWith(t) || tokensCampo.some((w) => w.startsWith(t));
+  }
+
+  return terminos.every((t) => {
+    if (codigo.includes(t)) return true;
+    return tokensCampo.some((w) => w === t || (t.length >= 4 && w.startsWith(t)));
+  });
+}
+
 const METODOS_PAGO = [
   "Efectivo USD",
   "Pago Móvil Bs.",
@@ -205,7 +240,6 @@ export async function mount(root, state) {
               <button id="btnLimpiarPos" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
             </div>
 
-            <!-- Aviso cuando una cantidad supera el stock físico de Almacén y pasa a Planta -->
             <div id="avisoExcesoAlmacen" class="hidden p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-[11px] text-amber-950 space-y-1">
               <div class="font-extrabold">⚠️ Cantidad superior al stock de Almacén</div>
               <div id="txtAvisoExcesoAlmacen" class="font-semibold leading-snug"></div>
@@ -721,7 +755,6 @@ export async function mount(root, state) {
     renderTotalesYRestante();
   }
 
-  // Prioriza Almacén si hay stock; si no hay en Almacén y sí hay en Planta, toma Planta
   function agregarProductoCaja(prodId, cantAgregar = 1) {
     const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
     if (!p) return;
@@ -801,24 +834,19 @@ export async function mount(root, state) {
     renderPagos();
   }
 
-  // Solo muestra productos con stock > 0 (prioriza Almacén; si no hay en Almacén, muestra Planta)
   function renderBusqueda() {
-    const q = busqEl.value.trim().toLowerCase();
+    const q = busqEl.value.trim();
     if (!q && !busqAbierta) {
       resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos con stock...</div>`;
       return;
     }
 
-    const disponibles = catalogo.filter((p) => {
-      const dispAlm = Math.max(0, Number(p.stockAlmacen || 0));
-      const dispPla = Math.max(0, Number(p.stockPlanta || 0));
-      if (dispAlm <= 0 && dispPla <= 0) return false;
-      if (!q) return true;
-      return `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""} ${p.proveedor || ""}`.toLowerCase().includes(q);
-    }).slice(0, 25);
+    const disponibles = catalogo
+      .filter((p) => cumpleFiltroEstricto(p, q))
+      .slice(0, 25);
 
     if (!disponibles.length) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Sin productos con existencia disponibles.</div>`;
+      resEl.innerHTML = `<div class="text-xs text-slate-500 font-bold text-center py-6">No disponible / Sin stock en Almacén ni en Planta.</div>`;
       return;
     }
 
@@ -1006,7 +1034,6 @@ export async function mount(root, state) {
 
   root.querySelector("#btnLimpiarPos").addEventListener("click", limpiarCaja);
 
-  // Divide automáticamente ítems que superan stockAlmacen en parte Almacén + parte Planta
   function construirItemsClasificados() {
     const itemsFinales = [];
     const avisosDivision = [];
