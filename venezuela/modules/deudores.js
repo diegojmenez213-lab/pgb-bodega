@@ -1,9 +1,13 @@
 // venezuela/modules/deudores.js
 import {
+  db,
   getTenantRefs,
   doc,
   getDocs,
   setDoc,
+  query,
+  where,
+  writeBatch,
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
@@ -99,7 +103,7 @@ export async function mount(root, state) {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Deudores Activos</h1>
-          <p class="text-xs text-slate-500">Cada cliente se agrupa en una sola tarjeta. Cada abono registra método, fecha y hora para cuadrar la caja.</p>
+          <p class="text-xs text-slate-500">Abono global en cascada (FIFO) o por nota individual, con referencia bancaria y límite de crédito editable.</p>
         </div>
         <div class="flex flex-wrap gap-2 text-xs font-extrabold">
           <div class="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-mono-ve">
@@ -136,7 +140,7 @@ export async function mount(root, state) {
       </div>
 
       <div id="listaDeudores" class="space-y-2.5">
-        <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando deudores...</div>
+        <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando deudores activos...</div>
       </div>
     </div>
   `;
@@ -170,10 +174,12 @@ export async function mount(root, state) {
       const porVencer = !vencida && diasRest <= 3;
 
       if (!mapa.has(docId)) {
+        const cliData = clientesMap.get(docId) || {};
         mapa.set(docId, {
           documento: docId,
           nombre: nombreCli,
-          saldoFavorUsd: Number(clientesMap.get(docId)?.saldoAFavorUsd || 0),
+          saldoFavorUsd: Number(cliData.saldoAFavorUsd || 0),
+          limiteCreditoUsd: Number(cliData.limiteCreditoUsd || 0),
           totalSaldoUsd: 0,
           maxDias: 0,
           tienePorVencer: false,
@@ -276,6 +282,7 @@ export async function mount(root, state) {
                 ${g.tieneMas30 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">+30 días</span>` : ""}
                 ${!g.tieneMas30 && g.tieneVencida ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">Vencida</span>` : ""}
                 ${!g.tieneVencida && g.tienePorVencer ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">Por vencer ≤3d</span>` : ""}
+                ${g.limiteCreditoUsd > 0 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900">Tope: $${g.limiteCreditoUsd.toFixed(2)}</span>` : ""}
                 ${g.saldoFavorUsd > 0.01 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">A favor: $${g.saldoFavorUsd.toFixed(2)}</span>` : ""}
               </div>
               <div class="text-[11px] text-slate-500 mt-0.5">
@@ -291,10 +298,42 @@ export async function mount(root, state) {
           </div>
 
           <div class="${abierta ? "" : "hidden"} pt-3 border-t border-slate-200 space-y-2.5">
+            <!-- Barra de Límite de Crédito configurable -->
+            <div class="p-2.5 rounded-xl bg-amber-50/60 border border-amber-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span class="font-bold text-amber-950">
+                Límite de crédito: <strong class="font-mono-ve">${g.limiteCreditoUsd > 0 ? `$${g.limiteCreditoUsd.toFixed(2)}` : "Sin límite"}</strong>
+              </span>
+              <div class="flex items-center gap-1.5">
+                <input type="text" inputmode="numeric" value="${g.limiteCreditoUsd.toFixed(2)}" class="inp-lim-cli w-24 bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-bold text-right" title="0.00 = Sin límite" />
+                <button type="button" class="btn-save-lim px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-extrabold cursor-pointer">
+                  Guardar tope
+                </button>
+              </div>
+            </div>
+
             ${g.saldoFavorUsd > 0.01 ? `
               <div class="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900">
                 <strong>Saldo a favor disponible: $${g.saldoFavorUsd.toFixed(2)}</strong>
                 <span class="font-mono-ve ml-1">(${equivalenciasTexto(g.saldoFavorUsd, tasas)})</span>
+              </div>
+            ` : ""}
+
+            <!-- Abono Global en Cascada (FIFO) cuando tiene más de 1 nota -->
+            ${g.notas.length > 1 ? `
+              <div class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 space-y-2">
+                <div class="text-[11px] font-extrabold text-indigo-950">
+                  ⚡ Abono Global en Cascada (FIFO) — paga automáticamente desde la nota más vieja a la más nueva
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <select class="sel-met-fifo bg-white border border-indigo-300 rounded-lg px-2 py-1 text-xs font-bold">
+                    ${METODOS_PAGO.map((m) => `<option value="${m}">${m}</option>`).join("")}
+                  </select>
+                  <input type="text" placeholder="Ref." class="inp-ref-fifo w-16 bg-white border border-indigo-300 rounded-lg px-1.5 py-1 text-[11px] font-mono-ve font-bold" />
+                  <input type="text" inputmode="numeric" value="${g.totalSaldoUsd.toFixed(2)}" class="inp-monto-fifo w-24 bg-white border border-indigo-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-bold text-right" />
+                  <button type="button" class="btn-abono-fifo px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-extrabold cursor-pointer">
+                    Aplicar Abono Global
+                  </button>
+                </div>
               </div>
             ` : ""}
 
@@ -329,6 +368,7 @@ export async function mount(root, state) {
                       <select class="sel-met-abono bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold">
                         ${METODOS_PAGO.map((m) => `<option value="${m}">${m}</option>`).join("")}
                       </select>
+                      <input type="text" placeholder="Ref." class="inp-ref-abono w-16 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-[11px] font-mono-ve font-bold" />
                       <input
                         type="text"
                         inputmode="numeric"
@@ -363,7 +403,7 @@ export async function mount(root, state) {
                       ? abonos.map((ab) => `
                         <div class="flex items-center justify-between gap-2 text-[11px] bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80">
                           <span class="font-mono-ve text-slate-600">
-                            ${ab.fechaHoraTxt || formatearFechaHora(ab.ts, ab.fechaIso)} • <strong class="text-slate-800">${ab.metodo || "Efectivo USD"}</strong> • ${ab.usuario || "Admin"}
+                            ${ab.fechaHoraTxt || formatearFechaHora(ab.ts, ab.fechaIso)} • <strong class="text-slate-800">${ab.metodo || "Efectivo USD"}</strong>${ab.referencia ? ` (Ref: ${ab.referencia})` : ""} • ${ab.usuario || "Admin"}
                           </span>
                           <span class="font-mono-ve font-extrabold text-emerald-700">+$${Number(ab.montoUsd || 0).toFixed(2)}</span>
                         </div>
@@ -379,7 +419,7 @@ export async function mount(root, state) {
     }).join("");
   }
 
-  async function aplicarAbono(docId, folio, montoIngresado, metodo = "Efectivo USD", usandoSaldoFavor = false) {
+  async function aplicarAbono(docId, folio, montoIngresado, metodo = "Efectivo USD", referencia = "", usandoSaldoFavor = false) {
     const grupo = gruposDeudores.find((g) => g.documento === docId);
     const nota = grupo?.notas.find((n) => (n.folio || n.id) === folio);
     if (!nota) return;
@@ -392,20 +432,25 @@ export async function mount(root, state) {
     const sobrepago = usandoSaldoFavor ? 0 : Math.max(0, Number((monto - saldoActual).toFixed(2)));
     const nuevoSaldo = Math.max(0, Number((saldoActual - abonoAplicadoANota).toFixed(2)));
     const now = Date.now();
+    const tasas = getTasaActiva(state);
 
     const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
     historialAbonos.push({
       montoUsd: abonoAplicadoANota,
       sobrepagoUsd: sobrepago,
+      montoBs: tasas.bcvActiva ? Number((monto * tasas.bcvActiva).toFixed(2)) : 0,
       metodo: usandoSaldoFavor ? "Saldo a Favor" : metodo,
+      referencia: String(referencia || "").trim(),
       usandoSaldoFavor,
+      cierreId: null,
       fechaIso: new Date(now).toISOString().slice(0, 10),
       fechaHoraTxt: formatearFechaHora(now),
       ts: now,
       usuario: state.sesion?.usuario || "Administrador"
     });
 
-    await setDoc(
+    const batch = writeBatch(db);
+    batch.set(
       doc(refs.notasEntrega(), nota.id),
       {
         saldoPendienteUsd: nuevoSaldo,
@@ -421,28 +466,22 @@ export async function mount(root, state) {
     const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
     if (usandoSaldoFavor) {
       const nuevoFavor = Math.max(0, Number((actualFavor - abonoAplicadoANota).toFixed(2)));
-      await setDoc(
+      batch.set(
         doc(refs.clientes(), docId),
-        {
-          documento: docId,
-          nombre: grupo.nombre,
-          saldoAFavorUsd: nuevoFavor,
-          actualizadoEn: serverTimestamp()
-        },
+        { documento: docId, nombre: grupo.nombre, saldoAFavorUsd: nuevoFavor, actualizadoEn: serverTimestamp() },
         { merge: true }
       );
-    } else if (sobrepago > 0.01) {
+    } else if (sobrepago > 0.01 && docId !== "V-00000000") {
       const nuevoFavor = Number((actualFavor + sobrepago).toFixed(2));
-      await setDoc(
+      batch.set(
         doc(refs.clientes(), docId),
-        {
-          documento: docId,
-          nombre: grupo.nombre,
-          saldoAFavorUsd: nuevoFavor,
-          actualizadoEn: serverTimestamp()
-        },
+        { documento: docId, nombre: grupo.nombre, saldoAFavorUsd: nuevoFavor, actualizadoEn: serverTimestamp() },
         { merge: true }
       );
+    }
+
+    await batch.commit();
+    if (sobrepago > 0.01 && docId !== "V-00000000") {
       alert(`Abono registrado. Se acreditaron +$${sobrepago.toFixed(2)} al saldo a favor de ${grupo.nombre}.`);
     }
 
@@ -452,18 +491,109 @@ export async function mount(root, state) {
     await cargarDeudores();
   }
 
+  async function aplicarAbonoGlobalFIFO(docId, montoTotal, metodo = "Efectivo USD", referencia = "") {
+    const grupo = gruposDeudores.find((g) => g.documento === docId);
+    if (!grupo || !grupo.notas.length) return;
+
+    let restante = Math.max(0, Number(montoTotal || 0));
+    if (restante <= 0) return alert("Ingresa un monto mayor a $0.00.");
+
+    const now = Date.now();
+    const tasas = getTasaActiva(state);
+    const batch = writeBatch(db);
+    let notasAfectadas = 0;
+
+    for (let i = 0; i < grupo.notas.length && restante > 0.009; i++) {
+      const nota = grupo.notas[i];
+      const saldoActual = Number(nota.saldoPendienteUsd || 0);
+      if (saldoActual <= 0.009) continue;
+
+      const esUltima = i === grupo.notas.length - 1;
+      const aplicado = Math.min(saldoActual, restante);
+      restante = Number((restante - aplicado).toFixed(2));
+      const sobrepagoEnEsta = esUltima && restante > 0.01 ? restante : 0;
+      if (sobrepagoEnEsta > 0) restante = 0;
+
+      const nuevoSaldo = Math.max(0, Number((saldoActual - aplicado).toFixed(2)));
+      const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
+      historialAbonos.push({
+        montoUsd: Number(aplicado.toFixed(2)),
+        sobrepagoUsd: sobrepagoEnEsta,
+        montoBs: tasas.bcvActiva ? Number(((aplicado + sobrepagoEnEsta) * tasas.bcvActiva).toFixed(2)) : 0,
+        metodo,
+        referencia: String(referencia || "").trim(),
+        usandoSaldoFavor: false,
+        esFifo: true,
+        cierreId: null,
+        fechaIso: new Date(now).toISOString().slice(0, 10),
+        fechaHoraTxt: formatearFechaHora(now),
+        ts: now,
+        usuario: state.sesion?.usuario || "Administrador"
+      });
+
+      batch.set(
+        doc(refs.notasEntrega(), nota.id),
+        {
+          saldoPendienteUsd: nuevoSaldo,
+          esCredito: nuevoSaldo > 0.01,
+          saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
+          saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
+          abonos: historialAbonos,
+          actualizadoEn: serverTimestamp()
+        },
+        { merge: true }
+      );
+      notasAfectadas++;
+
+      if (sobrepagoEnEsta > 0.01 && docId !== "V-00000000") {
+        const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
+        batch.set(
+          doc(refs.clientes(), docId),
+          {
+            documento: docId,
+            nombre: grupo.nombre,
+            saldoAFavorUsd: Number((actualFavor + sobrepagoEnEsta).toFixed(2)),
+            actualizadoEn: serverTimestamp()
+          },
+          { merge: true }
+        );
+      }
+    }
+
+    await batch.commit();
+    alert(`Abono Global FIFO aplicado en ${notasAfectadas} nota(s) de ${grupo.nombre}.`);
+    if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
+      await window.NEXUS_VE_REFRESH_ALERTAS();
+    }
+    await cargarDeudores();
+  }
+
   contEl.addEventListener("focusin", (e) => {
-    if (e.target.classList.contains("inp-abono")) fijarCursorAlFinal(e.target);
+    if (
+      e.target.classList.contains("inp-abono") ||
+      e.target.classList.contains("inp-monto-fifo") ||
+      e.target.classList.contains("inp-lim-cli")
+    ) {
+      fijarCursorAlFinal(e.target);
+    }
   });
 
   contEl.addEventListener("input", (e) => {
-    if (e.target.classList.contains("inp-abono")) {
+    if (
+      e.target.classList.contains("inp-abono") ||
+      e.target.classList.contains("inp-monto-fifo") ||
+      e.target.classList.contains("inp-lim-cli")
+    ) {
       formatearEntradaMoneda(e.target);
     }
   });
 
   contEl.addEventListener("click", async (e) => {
-    if (e.target.classList.contains("inp-abono")) {
+    if (
+      e.target.classList.contains("inp-abono") ||
+      e.target.classList.contains("inp-monto-fifo") ||
+      e.target.classList.contains("inp-lim-cli")
+    ) {
       fijarCursorAlFinal(e.target);
       return;
     }
@@ -479,6 +609,28 @@ export async function mount(root, state) {
       return;
     }
 
+    if (e.target.closest(".btn-save-lim")) {
+      const val = Math.max(0, parseFloat(card.querySelector(".inp-lim-cli")?.value || "0"));
+      const grupo = gruposDeudores.find((g) => g.documento === docId);
+      await setDoc(doc(refs.clientes(), docId), {
+        documento: docId,
+        nombre: grupo?.nombre || docId,
+        limiteCreditoUsd: val,
+        actualizadoEn: serverTimestamp()
+      }, { merge: true });
+      alert(val > 0 ? `Límite de crédito actualizado a $${val.toFixed(2)}.` : "Límite de crédito eliminado (sin tope).");
+      await cargarDeudores();
+      return;
+    }
+
+    if (e.target.closest(".btn-abono-fifo")) {
+      const monto = parseFloat(card.querySelector(".inp-monto-fifo")?.value || "0");
+      const met = card.querySelector(".sel-met-fifo")?.value || "Efectivo USD";
+      const ref = card.querySelector(".inp-ref-fifo")?.value || "";
+      await aplicarAbonoGlobalFIFO(docId, monto, met, ref);
+      return;
+    }
+
     const rowNota = e.target.closest("[data-folio]");
     if (!rowNota) return;
     const folio = rowNota.dataset.folio;
@@ -487,20 +639,21 @@ export async function mount(root, state) {
     if (!nota) return;
 
     const metodoSel = rowNota.querySelector(".sel-met-abono")?.value || "Efectivo USD";
+    const refTxt = rowNota.querySelector(".inp-ref-abono")?.value || "";
 
     if (e.target.closest(".btn-abonar")) {
       const val = parseFloat(rowNota.querySelector(".inp-abono")?.value || "0");
-      await aplicarAbono(docId, folio, val, metodoSel, false);
+      await aplicarAbono(docId, folio, val, metodoSel, refTxt, false);
     } else if (e.target.closest(".btn-saldar")) {
       const inpVal = parseFloat(rowNota.querySelector(".inp-abono")?.value || "0");
       const montoSaldar = inpVal >= Number(nota.saldoPendienteUsd || 0) ? inpVal : Number(nota.saldoPendienteUsd || 0);
-      await aplicarAbono(docId, folio, montoSaldar, metodoSel, false);
+      await aplicarAbono(docId, folio, montoSaldar, metodoSel, refTxt, false);
     } else if (e.target.closest(".btn-usar-favor")) {
       const disp = Number(grupo.saldoFavorUsd || 0);
       const aplicar = Math.min(disp, Number(nota.saldoPendienteUsd || 0));
       if (aplicar <= 0) return;
       if (!confirm(`¿Aplicar $${aplicar.toFixed(2)} del saldo a favor de ${grupo.nombre} a la Nota #${folio}?`)) return;
-      await aplicarAbono(docId, folio, aplicar, "Saldo a Favor", true);
+      await aplicarAbono(docId, folio, aplicar, "Saldo a Favor", "", true);
     } else if (e.target.closest(".btn-hist-abonos")) {
       const claveNota = `${docId}::${folio}`;
       if (abonosAbiertos.has(claveNota)) abonosAbiertos.delete(claveNota);
@@ -523,7 +676,10 @@ export async function mount(root, state) {
   });
 
   async function cargarDeudores() {
-    const [snapNotas, snapCli] = await Promise.all([getDocs(refs.notasEntrega()), getDocs(refs.clientes())]);
+    const [snapNotas, snapCli] = await Promise.all([
+      getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
+      getDocs(refs.clientes())
+    ]);
     clientesMap = new Map();
     snapCli.forEach((d) => {
       const c = d.data();
