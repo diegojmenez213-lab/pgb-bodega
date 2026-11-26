@@ -65,7 +65,6 @@ export async function mount(root, state) {
           </div>
         </div>
 
-        <!-- Guía de cuándo vuelve a generarse el próximo pedido -->
         <div id="cajaProximoPedido" class="p-3 rounded-xl bg-slate-950 text-white flex flex-wrap items-center justify-between gap-2 text-xs">
           <div>
             <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">Planificación del Próximo Pedido</div>
@@ -111,6 +110,7 @@ export async function mount(root, state) {
   let catalogo = [];
   let ventas30d = new Map();
   let pedidosPlanta30d = new Map();
+  let plantaRealOverride = new Map(); // prodId -> cantidad real confirmada en Planta
   let tabActiva = "aumentar";
   let listaAumentar = [];
   let listaMantener = [];
@@ -130,6 +130,13 @@ export async function mount(root, state) {
   const provEl = root.querySelector("#filtroProvSug");
   const soloPlantaEl = root.querySelector("#chkSoloPlanta");
   const listaEl = root.querySelector("#listaSugerido");
+
+  function getPlantaEfectiva(p) {
+    if (plantaRealOverride.has(p.id)) {
+      return Math.max(0, Number(plantaRealOverride.get(p.id) || 0));
+    }
+    return Math.max(0, Number(p.stockPlanta || 0));
+  }
 
   function poblarProveedores() {
     const provs = Array.from(
@@ -157,9 +164,10 @@ export async function mount(root, state) {
       for (const it of n.items || []) {
         const cant = Number(it.cantidad || 0);
         if (cant <= 0) continue;
-        ventas30d.set(it.id, (ventas30d.get(it.id) || 0) + cant);
+        const pid = it.prodId || it.id;
+        ventas30d.set(pid, (ventas30d.get(pid) || 0) + cant);
         if (it.origen === "planta") {
-          pedidosPlanta30d.set(it.id, (pedidosPlanta30d.get(it.id) || 0) + cant);
+          pedidosPlanta30d.set(pid, (pedidosPlanta30d.get(pid) || 0) + cant);
         }
       }
     });
@@ -192,25 +200,25 @@ export async function mount(root, state) {
       `Se está moviendo un volumen de ${totalVendidos30d} und en los últimos 30 días ${ambito}, con ${listaAumentar.length} referencia(s) que requieren reposición (${totalUndPedir} und en total por $${totalInv.toFixed(2)} a precio costo) para cubrir ${diasCobertura} días.`
     ];
 
-    if (itemsAltaRotacion > 0 || itemsQuiebrePlanta > 0) {
-      const motivos = [];
-      if (itemsAltaRotacion > 0) motifsPush(motivos, `${itemsAltaRotacion} referencia(s) con salida rápida y poco stock en almacén (se les añade margen de seguridad para no quedarse cortos)`);
-      if (itemsQuiebrePlanta > 0) motifsPush(motivos, `${itemsQuiebrePlanta} referencia(s) pedidas desde Planta sin existencia física en almacén`);
+    const motivos = [];
+    if (itemsAltaRotacion > 0) {
+      motivos.push(`${itemsAltaRotacion} referencia(s) con salida rápida y poco stock en almacén (se les añade margen de seguridad para no quedarse cortos)`);
+    }
+    if (itemsQuiebrePlanta > 0) {
+      motivos.push(`${itemsQuiebrePlanta} referencia(s) pedidas desde Planta sin existencia física en almacén`);
+    }
+    if (motivos.length) {
       partes.push(`La compra se concentra principalmente en ${motivos.join(" y ")}.`);
     } else {
       partes.push(`El pedido responde a la reposición normal según el ritmo de salida de los últimos 30 días y tu stock actual en almacén.`);
     }
 
     if (soloPlanta) {
-      partes.push(`Solo se consideran cantidades disponibles hoy en Planta para que el pedido sea despachable de inmediato.`);
+      partes.push(`Solo se consideran cantidades disponibles en Planta (incluyendo ajustes reales de Planta que hayas ingresado aquí).`);
     }
 
     txt.textContent = partes.join(" ");
     box.classList.remove("hidden");
-  }
-
-  function motifsPush(arr, item) {
-    arr.push(item);
   }
 
   function generarAnalisis() {
@@ -236,7 +244,9 @@ export async function mount(root, state) {
       const vendidos = ventas30d.get(p.id) || 0;
       const pedidosDePlanta = pedidosPlanta30d.get(p.id) || 0;
       const actual = Number(p.stockAlmacen || 0);
-      const dispPlanta = Number(p.stockPlanta || 0);
+      const dispPlantaLista = Math.max(0, Number(p.stockPlanta || 0));
+      const dispPlanta = getPlantaEfectiva(p);
+      const tieneAjustePlanta = plantaRealOverride.has(p.id);
       const costo = Number(p.costoUsd || 0);
       const sinMovimiento30d = !p.ultimaVentaTs || p.ultimaVentaTs < corte30d;
       const ritmoDiario = vendidos / 30;
@@ -246,10 +256,16 @@ export async function mount(root, state) {
         const basePedir = Math.max(1, Math.ceil(pedidosDePlanta * factor));
         if (!soloPlanta || dispPlanta > 0) {
           const cantFinal = soloPlanta ? Math.min(basePedir, dispPlanta) : basePedir;
-          const contexto = `En los últimos 30 días se solicitaron ${pedidosDePlanta} und desde Planta sin stock en Almacén (stock físico actual: 0). Conviene abastecer ${cantFinal} und para cubrir ${diasCobertura} días.`;
+          const notaPlanta = dispPlanta < basePedir && soloPlanta
+            ? ` (topado a ${dispPlanta} und disponibles reales en Planta vs. ${basePedir} requeridas)`
+            : "";
+          const contexto = `En los últimos 30 días se solicitaron ${pedidosDePlanta} und desde Planta sin stock en Almacén (stock físico actual: 0). Conviene abastecer ${cantFinal} und para cubrir ${diasCobertura} días${notaPlanta}.`;
           listaAumentar.push({
             ...p,
             proveedor: provNombre,
+            stockPlantaLista: dispPlantaLista,
+            stockPlantaEfectivo: dispPlanta,
+            tieneAjustePlanta,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
@@ -275,13 +291,19 @@ export async function mount(root, state) {
 
         if (pedirFinalCalculado > 0 && (!soloPlanta || dispPlanta > 0)) {
           const cantFinal = soloPlanta ? Math.min(pedirFinalCalculado, dispPlanta) : pedirFinalCalculado;
+          const notaPlanta = cantFinal < pedirFinalCalculado && soloPlanta
+            ? ` (ajustado a ${cantFinal} und por disponibilidad real en Planta de ${dispPlanta})`
+            : "";
           const contexto = seAgotaRapido
-            ? `En los últimos 30 días salieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén quedan ${actual} und (~${diasAutonomiaActual} días de autonomía). Se sugieren ${cantFinal} und con margen extra para cubrir ${diasCobertura} días.`
-            : `En los últimos 30 días se movieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén hay ${actual} und. Para cubrir ${diasCobertura} días (meta ${metaCobertura} und) conviene pedir ${cantFinal} und.`;
+            ? `En los últimos 30 días salieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén quedan ${actual} und (~${diasAutonomiaActual} días de autonomía). Se sugieren ${cantFinal} und con margen extra para cubrir ${diasCobertura} días${notaPlanta}.`
+            : `En los últimos 30 días se movieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén hay ${actual} und. Para cubrir ${diasCobertura} días (meta ${metaCobertura} und) conviene pedir ${cantFinal} und${notaPlanta}.`;
 
           listaAumentar.push({
             ...p,
             proveedor: provNombre,
+            stockPlantaLista: dispPlantaLista,
+            stockPlantaEfectivo: dispPlanta,
+            tieneAjustePlanta,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
@@ -298,6 +320,9 @@ export async function mount(root, state) {
           listaMantener.push({
             ...p,
             proveedor: provNombre,
+            stockPlantaLista: dispPlantaLista,
+            stockPlantaEfectivo: dispPlanta,
+            tieneAjustePlanta,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: 0,
@@ -312,6 +337,9 @@ export async function mount(root, state) {
         listaNoPedir.push({
           ...p,
           proveedor: provNombre,
+          stockPlantaLista: dispPlantaLista,
+          stockPlantaEfectivo: dispPlanta,
+          tieneAjustePlanta,
           vendidos30d: 0,
           pedidosPlanta: 0,
           sugerido: 0,
@@ -380,13 +408,14 @@ export async function mount(root, state) {
           : "bg-amber-100 text-amber-950";
 
       return `
-        <div class="ve-card p-3.5 space-y-2">
+        <div class="ve-card p-3.5 space-y-2" data-spid="${p.id}">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-mono-ve text-xs font-extrabold text-slate-950">${p.codigo || p.id}</span>
                 <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-900">${p.proveedor}</span>
                 <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${badgeColor}">${p.etiqueta}</span>
+                ${p.tieneAjustePlanta ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">Planta ajustada: ${p.stockPlantaEfectivo}</span>` : ""}
               </div>
               <div class="text-xs font-extrabold text-slate-800 mt-1">${p.descripcion || ""}</div>
             </div>
@@ -407,13 +436,31 @@ export async function mount(root, state) {
           </p>
 
           <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] font-bold text-slate-500 pt-0.5">
-            <span>Almacén: <strong class="text-slate-800">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-slate-800">${p.stockPlanta ?? 0}</strong> • Vendidos 30d: <strong class="text-slate-800">${p.vendidos30d}</strong>${p.pedidosPlanta ? ` • Pedidos Planta 30d: <strong class="text-sky-800">${p.pedidosPlanta}</strong>` : ""}</span>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span>Almacén: <strong class="text-slate-800">${p.stockAlmacen ?? 0}</strong></span>
+              <span>• Planta lista: <strong class="text-slate-800">${p.stockPlantaLista}</strong></span>
+              <span class="inline-flex items-center gap-1">
+                • Planta real:
+                <input type="number" min="0" value="${p.stockPlantaEfectivo}" class="inp-planta-real w-14 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-[11px] font-mono-ve font-extrabold text-slate-900" title="Ajusta aquí si en Planta hay menos de lo que dice la lista" />
+              </span>
+              <span>• Vendidos 30d: <strong class="text-slate-800">${p.vendidos30d}</strong></span>
+            </div>
             <span class="text-slate-700">Revisar en ~${p.proximoRevisionDias} días (${sumarDiasIso(p.proximoRevisionDias)})</span>
           </div>
         </div>
       `;
     }).join("");
   }
+
+  listaEl.addEventListener("change", (e) => {
+    if (!e.target.classList.contains("inp-planta-real")) return;
+    const card = e.target.closest("[data-spid]");
+    if (!card) return;
+    const pid = card.dataset.spid;
+    const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+    plantaRealOverride.set(pid, val);
+    generarAnalisis();
+  });
 
   root.querySelectorAll(".tab-sug").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -456,7 +503,8 @@ export async function mount(root, state) {
       Vendidos_30d: p.vendidos30d,
       Pedidos_Planta_30d: p.pedidosPlanta || 0,
       Almacen: p.stockAlmacen ?? 0,
-      Planta: p.stockPlanta ?? 0,
+      Planta_Lista: p.stockPlantaLista ?? 0,
+      Planta_Real_Usada: p.stockPlantaEfectivo ?? 0,
       Pedir_Und: p.sugerido,
       Proxima_Revision_Dias: p.proximoRevisionDias,
       Fecha_Proxima_Revision: sumarDiasIso(p.proximoRevisionDias),
