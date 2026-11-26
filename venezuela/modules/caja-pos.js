@@ -99,7 +99,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Alerta automática de deuda acumulada del cliente -->
       <div id="alertaDeudaCliente" class="hidden ve-card border-rose-300 bg-rose-50/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2.5 text-xs">
           <span class="text-lg">⚠️</span>
@@ -113,7 +112,6 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- Saldo a favor disponible del cliente: decisión de usar o guardar -->
       <div id="panelSaldoFavor" class="hidden ve-card border-emerald-300 bg-emerald-50/80 p-3.5 space-y-2.5">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="text-xs space-y-1">
@@ -143,7 +141,6 @@ export async function mount(root, state) {
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <!-- Izquierda: Cliente y Buscador -->
         <div class="lg:col-span-7 space-y-3">
           <div class="ve-card p-3 space-y-2">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -180,7 +177,6 @@ export async function mount(root, state) {
           </div>
         </div>
 
-        <!-- Derecha: Carrito, Condición Contado/Crédito, Pagos y Emisión -->
         <div id="posCarritoCard" class="lg:col-span-5 space-y-3">
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
@@ -192,7 +188,6 @@ export async function mount(root, state) {
               <div class="text-xs text-slate-400 text-center py-6">Carrito vacío.</div>
             </div>
 
-            <!-- Totales -->
             <div class="pt-3 border-t border-slate-200 space-y-1">
               <div class="flex justify-between text-base font-extrabold text-slate-950">
                 <span>TOTAL USD</span>
@@ -212,7 +207,6 @@ export async function mount(root, state) {
               </div>
             </div>
 
-            <!-- Condición de Venta: Contado vs Crédito -->
             <div class="pt-2 border-t border-slate-200 space-y-2">
               <div class="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
                 <button type="button" id="btnModoContado" class="py-2 rounded-lg text-xs font-extrabold bg-slate-950 text-white cursor-pointer">
@@ -223,7 +217,6 @@ export async function mount(root, state) {
                 </button>
               </div>
 
-              <!-- Plazo de Crédito: 7, 15, 30 o Manual -->
               <div id="panelCredito" class="hidden p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2">
                 <div class="flex items-center justify-between">
                   <span class="text-[11px] font-extrabold text-amber-900">Plazo del Crédito</span>
@@ -242,7 +235,6 @@ export async function mount(root, state) {
               </div>
             </div>
 
-            <!-- Hasta 4 Formas de Pago / Abono inicial -->
             <div class="pt-2 border-t border-slate-200 space-y-2">
               <div class="flex items-center justify-between">
                 <span id="tituloPagosLbl" class="text-[11px] font-extrabold uppercase text-slate-500">Formas de Pago (máx 4)</span>
@@ -259,7 +251,6 @@ export async function mount(root, state) {
               </div>
             </div>
 
-            <!-- Monedas del documento y Formato -->
             <div class="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-600">
               <div class="flex gap-2">
                 <label class="flex items-center gap-1"><input type="checkbox" class="pos-mon" value="USD" checked /> USD</label>
@@ -296,6 +287,7 @@ export async function mount(root, state) {
   let saldoFavorDisponible = 0;
   let usarSaldoFavorEnNota = true;
   let monedaVistaFavor = "USD";
+  let emitiendo = false;
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
@@ -313,9 +305,7 @@ export async function mount(root, state) {
     const val = parseMultiplicadorTexto(nuevoFactor);
     if (val === null) return;
     factorActual = val;
-    if (sincronizarInput) {
-      multEl.value = String(val);
-    }
+    if (sincronizarInput) multEl.value = String(val);
     if (carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
@@ -357,7 +347,7 @@ export async function mount(root, state) {
 
   function refrescarEstadoClienteActual() {
     const docId = normalizarIdVE(docEl.value);
-    if (!docId || docId.length < 5) {
+    if (!docId || docId.length < 5 || docId === "V-00000000") {
       alertaBox.classList.add("hidden");
       favorBox.classList.add("hidden");
       saldoFavorDisponible = 0;
@@ -437,9 +427,7 @@ export async function mount(root, state) {
   });
 
   root.querySelector("#btnVerDeudaCliente").addEventListener("click", () => {
-    if (typeof window.NEXUS_VE_NAV === "function") {
-      window.NEXUS_VE_NAV("deudores");
-    }
+    if (typeof window.NEXUS_VE_NAV === "function") window.NEXUS_VE_NAV("deudores");
   });
 
   function renderTotalesYRestante() {
@@ -464,8 +452,8 @@ export async function mount(root, state) {
     }
 
     const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
-    const restante = Math.max(0, objetivo - cubierto);
-    const sobrepago = !esCredito ? Math.max(0, Number((cubierto - objetivo).toFixed(2))) : 0;
+    const restante = Math.max(0, Number((objetivo - cubierto).toFixed(2)));
+    const sobrepago = Math.max(0, Number((cubierto - objetivo).toFixed(2)));
 
     const restEl = root.querySelector("#posRestante");
     restEl.textContent = `$${restante.toFixed(2)}`;
@@ -687,8 +675,7 @@ export async function mount(root, state) {
     if (!target) return;
     e.preventDefault();
     e.stopPropagation();
-    const prodId = decodeURIComponent(target.dataset.id || "");
-    agregarProductoCaja(prodId, 1);
+    agregarProductoCaja(decodeURIComponent(target.dataset.id || ""), 1);
   });
 
   cartEl.addEventListener("focusin", (e) => {
@@ -735,11 +722,8 @@ export async function mount(root, state) {
       carrito[idx].cantidad += 1;
       renderCarrito();
     } else if (e.target.closest(".btn-menos")) {
-      if (carrito[idx].cantidad > 1) {
-        carrito[idx].cantidad -= 1;
-      } else {
-        carrito.splice(idx, 1);
-      }
+      if (carrito[idx].cantidad > 1) carrito[idx].cantidad -= 1;
+      else carrito.splice(idx, 1);
       renderCarrito();
     }
   });
@@ -834,7 +818,35 @@ export async function mount(root, state) {
   root.querySelector("#btnLimpiarPos").addEventListener("click", limpiarCaja);
 
   async function emitirNota() {
+    if (emitiendo) return;
     if (!carrito.length) return alert("Agrega al menos un producto.");
+
+    const totalUsd = Number(totalVenta().toFixed(2));
+    const usadoFavor = montoDescuentoFavorActual();
+    const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
+    const pagosValidos = pagos.filter((p) => Number(p.montoUsd) > 0);
+    const totalPagadoHoy = Number(pagosValidos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0).toFixed(2));
+    const restanteHoy = Math.max(0, Number((objetivoHoy - totalPagadoHoy).toFixed(2)));
+    const sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
+    const docCli = normalizarIdVE(docEl.value) || "V-00000000";
+    const nomCli = nomEl.value.trim() || "Consumidor Final";
+
+    // Validación 1: En Contado no permitir emitir si falta cubrir el monto
+    if (!esCredito && restanteHoy > 0.01) {
+      return alert(`Faltan $${restanteHoy.toFixed(2)} por cubrir en Formas de Pago. Completa el pago o cambia la condición a Crédito.`);
+    }
+
+    // Validación 2: No acumular saldo a favor en Consumidor Final genérico
+    if (sobrepagoGenerado > 0.01 && docCli === "V-00000000") {
+      return alert(`Hay un sobrepago de +$${sobrepagoGenerado.toFixed(2)}. Ingresa la Cédula/RIF real del cliente para guardarle el saldo a favor, o ajusta el monto pagado.`);
+    }
+
+    // Validación 3: Si es crédito con saldo pendiente, pedir cédula real
+    if (esCredito && restanteHoy > 0.01 && docCli === "V-00000000") {
+      return alert("Para emitir una nota a Crédito debes ingresar la Cédula o RIF del cliente.");
+    }
+
+    emitiendo = true;
     const btn = root.querySelector("#btnEmitirNota");
     btn.disabled = true;
     btn.textContent = "Emitiendo...";
@@ -845,28 +857,12 @@ export async function mount(root, state) {
       const nuevoNum = actual + 1;
       const folio = String(nuevoNum).padStart(5, "0");
 
-      const totalUsd = Number(totalVenta().toFixed(2));
-      const usadoFavor = montoDescuentoFavorActual();
-      const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
       const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
       const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
-      const pagosValidos = pagos.filter((p) => Number(p.montoUsd) > 0);
-      const totalPagadoHoy = Number(pagosValidos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0).toFixed(2));
-
-      let saldoPendienteUsd = 0;
-      let sobrepagoGenerado = 0;
-
-      if (esCredito) {
-        saldoPendienteUsd = Math.max(0, Number((objetivoHoy - totalPagadoHoy).toFixed(2)));
-        sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
-      } else {
-        sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
-      }
+      const saldoPendienteUsd = esCredito ? restanteHoy : 0;
 
       const tasas = getTasaActiva(state);
       const monedas = Array.from(root.querySelectorAll(".pos-mon:checked")).map((el) => el.value);
-      const docCli = normalizarIdVE(docEl.value) || "V-00000000";
-      const nomCli = nomEl.value.trim() || "Consumidor Final";
       const now = Date.now();
       const jornadaId = state.empresa?.jornadaActivaId || new Date().toISOString().slice(0, 10);
 
@@ -908,7 +904,7 @@ export async function mount(root, state) {
         Number(((cliExistente?.saldoAFavorUsd || 0) - usadoFavor + sobrepagoGenerado).toFixed(2))
       );
 
-      if (docCli !== "V-00000000" || nuevoSaldoFavorCli > 0.01 || cliExistente) {
+      if (docCli !== "V-00000000") {
         batch.set(
           doc(refs.clientes(), docCli),
           {
@@ -982,6 +978,7 @@ export async function mount(root, state) {
     } catch (err) {
       alert("Error emitiendo Nota de Entrega: " + err.message);
     } finally {
+      emitiendo = false;
       btn.disabled = false;
       btn.textContent = "Emitir Nota de Entrega (F9)";
     }
@@ -989,7 +986,11 @@ export async function mount(root, state) {
 
   root.querySelector("#btnEmitirNota").addEventListener("click", emitirNota);
 
-  const onKeyDown = (e) => {
+  // Limpia cualquier listener anterior para que F9 nunca se dispare doble
+  if (window.__vePosKeyHandler) {
+    window.removeEventListener("keydown", window.__vePosKeyHandler);
+  }
+  window.__vePosKeyHandler = (e) => {
     if (state.rutaActual !== "caja-pos") return;
     if (e.key === "F1") { e.preventDefault(); busqEl.focus(); }
     else if (e.key === "F2") { e.preventDefault(); docEl.focus(); }
@@ -1001,7 +1002,7 @@ export async function mount(root, state) {
     else if (e.key === "F8") { e.preventDefault(); limpiarCaja(); }
     else if (e.key === "F9") { e.preventDefault(); emitirNota(); }
   };
-  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keydown", window.__vePosKeyHandler);
 
   busqEl.addEventListener("input", () => {
     busqAbierta = Boolean(busqEl.value.trim());
