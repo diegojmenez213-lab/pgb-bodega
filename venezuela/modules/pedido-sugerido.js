@@ -15,6 +15,11 @@ async function cargarSheetJS() {
   return window.XLSX;
 }
 
+function sumarDiasIso(dias) {
+  const f = new Date(Date.now() + Number(dias || 0) * 86400000);
+  return f.toISOString().slice(0, 10);
+}
+
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
@@ -23,7 +28,7 @@ export async function mount(root, state) {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Pedido Sugerido Inteligente</h1>
-          <p class="text-xs text-slate-500">Clasifica qué pedir más, qué mantener en almacén y qué no pedir (+30 días sin moverse).</p>
+          <p class="text-xs text-slate-500">Diagnóstico de rotación (últimos 30 días), contexto de compra y ventana del próximo pedido.</p>
         </div>
         <div class="flex items-center gap-2">
           <button id="btnGenerarPedido" type="button" class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
@@ -35,27 +40,43 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <div class="ve-card p-3 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-3">
-          <div>
-            <label class="text-[10px] font-bold text-slate-500 block">Días de cobertura</label>
-            <input id="diasCobertura" type="number" min="7" max="90" value="30" class="w-24 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold" />
+      <!-- Parámetros y Resumen Ejecutivo -->
+      <div class="ve-card p-3.5 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <div>
+              <label class="text-[10px] font-bold text-slate-500 block">Cobertura de este pedido (días)</label>
+              <input id="diasCobertura" type="number" min="5" max="90" value="15" class="w-24 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold" />
+            </div>
+            <label class="flex items-center gap-2 text-xs font-bold text-slate-700 pt-3 cursor-pointer">
+              <input id="chkSoloPlanta" type="checkbox" checked />
+              Solo disponibles en Planta
+            </label>
           </div>
-          <label class="flex items-center gap-2 text-xs font-bold text-slate-700 pt-3 cursor-pointer">
-            <input id="chkSoloPlanta" type="checkbox" checked />
-            Solo disponibles en Planta
-          </label>
+          <div class="text-right">
+            <div class="text-[10px] font-extrabold text-slate-400">INVERSIÓN ESTIMADA</div>
+            <div id="totalInversion" class="text-lg font-extrabold font-mono-ve text-slate-950">$0.00</div>
+          </div>
         </div>
-        <div class="text-right">
-          <div class="text-[10px] font-extrabold text-slate-400">INVERSIÓN ESTIMADA DEL PEDIDO</div>
-          <div id="totalInversion" class="text-lg font-extrabold font-mono-ve text-slate-950">$0.00</div>
+
+        <!-- Guía de cuándo vuelve a generarse el próximo pedido -->
+        <div id="cajaProximoPedido" class="p-3 rounded-xl bg-slate-950 text-white flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div>
+            <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">Planificación del Próximo Pedido</div>
+            <div id="txtProximoPedido" class="font-semibold text-slate-100 mt-0.5">
+              Genera el análisis para calcular la ventana de reposición.
+            </div>
+          </div>
+          <div id="badgeFechaProximo" class="px-3 py-1.5 rounded-xl bg-white/10 font-mono-ve text-xs font-extrabold text-emerald-300">
+            ---
+          </div>
         </div>
       </div>
 
       <!-- Tabs de clasificación -->
       <div class="flex flex-wrap gap-1.5">
         <button type="button" data-tab="aumentar" class="tab-sug px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">
-          Aumentar Cantidad (<span id="cntAumentar">0</span>)
+          Aumentar / Pedir (<span id="cntAumentar">0</span>)
         </button>
         <button type="button" data-tab="mantener" class="tab-sug px-3 py-1.5 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 cursor-pointer">
           Mantener Stock (<span id="cntMantener">0</span>)
@@ -65,9 +86,9 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <div id="listaSugerido" class="space-y-2">
+      <div id="listaSugerido" class="space-y-2.5">
         <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">
-          Toca "⚡ Generar Pedido Sugerido" para analizar tu inventario y ventas.
+          Toca "⚡ Generar Pedido Sugerido" para obtener el diagnóstico completo.
         </div>
       </div>
     </div>
@@ -86,9 +107,9 @@ export async function mount(root, state) {
   const listaEl = root.querySelector("#listaSugerido");
 
   function generarAnalisis() {
-    const dias = Math.max(7, Number(diasEl.value) || 30);
+    const diasCobertura = Math.max(5, Number(diasEl.value) || 15);
     const soloPlanta = soloPlantaEl.checked;
-    const factor = dias / 30;
+    const factor = diasCobertura / 30;
     const corte30d = Date.now() - DIAS_30_MS;
 
     listaAumentar = [];
@@ -102,63 +123,84 @@ export async function mount(root, state) {
       const dispPlanta = Number(p.stockPlanta || 0);
       const costo = Number(p.costoUsd || 0);
       const sinMovimiento30d = !p.ultimaVentaTs || p.ultimaVentaTs < corte30d;
+      const ritmoDiario = vendidos / 30;
+      const diasAutonomiaActual = ritmoDiario > 0 ? Math.floor(actual / ritmoDiario) : 99;
 
-      // Producto que se pide constantemente de Planta pero mantiene 0 stock en Almacén
+      // 1. Se vende/pide desde Planta pero no tiene existencia en Almacén
       if (pedidosDePlanta > 0 && actual <= 0) {
         const basePedir = Math.max(1, Math.ceil(pedidosDePlanta * factor));
         if (!soloPlanta || dispPlanta > 0) {
           const cantFinal = soloPlanta ? Math.min(basePedir, dispPlanta) : basePedir;
+          const contexto = `En los últimos 30 días se solicitaron ${pedidosDePlanta} und desde Planta sin tener stock en Almacén (stock físico actual: 0). Conviene abastecer ${cantFinal} und para cubrir ${diasCobertura} días y capturar ese margen en almacén.`;
           listaAumentar.push({
             ...p,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
-            motivo: "Pedido constante de Planta sin stock en Almacén • Comprar por margen",
+            etiqueta: "Sin stock en Almacén • Alta demanda en Planta",
+            contexto,
+            proximoRevisionDias: Math.max(3, Math.ceil(diasCobertura * 0.7)),
             inversion: cantFinal * costo
           });
         }
         continue;
       }
 
+      // 2. Productos con movimiento en los últimos 30 días
       if (vendidos > 0) {
-        const meta = Math.ceil(vendidos * factor);
-        const pedirBase = Math.max(0, meta - actual);
+        const metaCobertura = Math.ceil(vendidos * factor);
+        const pedirBase = Math.max(0, metaCobertura - actual);
         const seAgotaRapido = actual <= Math.max(1, Math.ceil(vendidos * 0.25));
-        const pedirConMargen = seAgotaRapido ? Math.ceil((meta * 1.3) - actual) : pedirBase;
+        const pedirFinalCalculado = seAgotaRapido
+          ? Math.max(0, Math.ceil(metaCobertura * 1.25) - actual)
+          : pedirBase;
 
-        if (pedirConMargen > 0 && (!soloPlanta || dispPlanta > 0)) {
-          const cantFinal = soloPlanta ? Math.min(pedirConMargen, dispPlanta) : pedirConMargen;
+        if (pedirFinalCalculado > 0 && (!soloPlanta || dispPlanta > 0)) {
+          const cantFinal = soloPlanta ? Math.min(pedirFinalCalculado, dispPlanta) : pedirFinalCalculado;
+          const contexto = seAgotaRapido
+            ? `En los últimos 30 días salieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y hoy quedan solo ${actual} und en Almacén (~${diasAutonomiaActual} días de autonomía). Se sugieren ${cantFinal} und con margen extra para cubrir los próximos ${diasCobertura} días sin quiebre.`
+            : `En los últimos 30 días se movieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén hay ${actual} und. Para cubrir los próximos ${diasCobertura} días (meta ${metaCobertura} und) conviene pedir ${cantFinal} und.`;
+
           listaAumentar.push({
             ...p,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
-            motivo: seAgotaRapido ? "Alto flujo • se agota rápido (+30%)" : "Reposición según cobertura",
+            etiqueta: seAgotaRapido ? "Rotación alta • Margen de seguridad" : "Reposición planificada",
+            contexto,
+            proximoRevisionDias: Math.max(4, Math.min(diasCobertura, diasAutonomiaActual + Math.round(diasCobertura * 0.6))),
             inversion: cantFinal * costo
           });
         } else {
+          const contexto = `En los últimos 30 días vendió ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y el stock actual en Almacén (${actual} und) cubre cómodamente el ritmo actual sin necesidad de pedir hoy.`;
           listaMantener.push({
             ...p,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: 0,
-            motivo: "Stock suficiente para su rotación actual",
+            etiqueta: "Stock saludable • Mantener",
+            contexto,
+            proximoRevisionDias: diasCobertura,
             inversion: 0
           });
         }
       } else if (actual > 0 && sinMovimiento30d) {
+        // 3. Productos sin movimiento en +30 días con existencia en Almacén
+        const contexto = `Lleva más de 30 días sin registrar ventas y mantiene ${actual} und en Almacén. No conviene pedir más de este código; es mejor impulsarlo en ofertas o combos con clientes.`;
         listaNoPedir.push({
           ...p,
           vendidos30d: 0,
           pedidosPlanta: 0,
           sugerido: 0,
-          motivo: "Más de 30 días sin venderse • ideal para ofrecer/promocionar",
+          etiqueta: "Sin movimiento +30d • No pedir / Ofertar",
+          contexto,
+          proximoRevisionDias: 30,
           inversion: 0
         });
       }
     }
 
-    listaAumentar.sort((a, b) => (b.pedidosPlanta || 0) - (a.pedidosPlanta || 0) || b.vendidos30d - a.vendidos30d);
+    listaAumentar.sort((a, b) => b.inversion - a.inversion || b.vendidos30d - a.vendidos30d);
     listaMantener.sort((a, b) => b.vendidos30d - a.vendidos30d);
     listaNoPedir.sort((a, b) => ((b.stockAlmacen || 0) * (b.costoUsd || 0)) - ((a.stockAlmacen || 0) * (a.costoUsd || 0)));
 
@@ -168,6 +210,17 @@ export async function mount(root, state) {
 
     const totalInv = listaAumentar.reduce((acc, x) => acc + x.inversion, 0);
     root.querySelector("#totalInversion").textContent = `$${totalInv.toFixed(2)}`;
+
+    // Calcular cuándo conviene volver a generar el próximo pedido
+    const menorRevision = listaAumentar.length
+      ? Math.min(...listaAumentar.map((x) => x.proximoRevisionDias || diasCobertura))
+      : diasCobertura;
+    const fechaEstimada = sumarDiasIso(menorRevision);
+
+    root.querySelector("#txtProximoPedido").textContent = listaAumentar.length
+      ? `Este pedido está proyectado para cubrir los próximos ${diasCobertura} días. Vuelve a generar el próximo pedido en aprox. ${menorRevision} días (o antes si algún ítem de alta rotación agota su stock).`
+      : `Con el stock actual no hay compras urgentes hoy. Revisa nuevamente en ${diasCobertura} días o cuando baje el stock de tus ítems principales.`;
+    root.querySelector("#badgeFechaProximo").textContent = `Próxima revisión: ~${menorRevision}d (${fechaEstimada})`;
 
     renderTab();
   }
@@ -180,37 +233,46 @@ export async function mount(root, state) {
         : listaNoPedir;
 
     if (!arr.length) {
-      listaEl.innerHTML = `<div class="ve-card text-center py-8 text-xs text-slate-500 font-bold">No hay productos en esta categoría actualmente.</div>`;
+      listaEl.innerHTML = `<div class="ve-card text-center py-8 text-xs text-slate-500 font-bold">No hay productos en este grupo para el análisis actual.</div>`;
       return;
     }
 
     listaEl.innerHTML = arr.slice(0, 100).map((p) => {
       const badgeColor = tabActiva === "aumentar"
-        ? "bg-emerald-100 text-emerald-800"
+        ? "bg-emerald-100 text-emerald-900"
         : tabActiva === "mantener"
-          ? "bg-sky-100 text-sky-800"
-          : "bg-amber-100 text-amber-900";
+          ? "bg-sky-100 text-sky-900"
+          : "bg-amber-100 text-amber-950";
 
       return `
-        <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo || p.id}</span>
-              <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${badgeColor}">${p.motivo}</span>
+        <div class="ve-card p-3.5 space-y-2">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-mono-ve text-xs font-extrabold text-slate-950">${p.codigo || p.id}</span>
+                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${badgeColor}">${p.etiqueta}</span>
+              </div>
+              <div class="text-xs font-extrabold text-slate-800 mt-1">${p.descripcion || ""}</div>
             </div>
-            <div class="text-xs font-semibold text-slate-700 mt-0.5">${p.descripcion || ""}</div>
-            <div class="text-[11px] text-slate-400">
-              Almacén: <strong class="text-slate-700">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-slate-700">${p.stockPlanta ?? 0}</strong> • Vendidos 30d: <strong class="text-slate-700">${p.vendidos30d}</strong>${p.pedidosPlanta ? ` • Pedidos Planta: <strong class="text-sky-700">${p.pedidosPlanta}</strong>` : ""}
+
+            <div class="text-right shrink-0">
+              ${tabActiva === "aumentar" ? `
+                <div class="text-xs font-extrabold text-slate-950">Pedir: <span class="font-mono-ve text-sm text-emerald-700">${p.sugerido} und</span></div>
+                <div class="text-[11px] font-mono-ve text-slate-600">Costo: $${p.inversion.toFixed(2)}</div>
+              ` : `
+                <div class="text-xs font-extrabold text-slate-700">No pedir (0 und)</div>
+                <div class="text-[11px] font-mono-ve text-slate-400">Almacén: ${p.stockAlmacen ?? 0} und</div>
+              `}
             </div>
           </div>
-          <div class="text-right shrink-0">
-            ${tabActiva === "aumentar" ? `
-              <div class="text-xs font-extrabold text-slate-950">Pedir: <span class="font-mono-ve text-emerald-700">${p.sugerido} und</span></div>
-              <div class="text-[11px] font-mono-ve text-slate-500">Costo: $${p.inversion.toFixed(2)}</div>
-            ` : `
-              <div class="text-xs font-extrabold text-slate-600">No pedir (0 und)</div>
-              <div class="text-[11px] font-mono-ve text-slate-400">Stock actual: ${p.stockAlmacen ?? 0}</div>
-            `}
+
+          <p class="text-[11px] text-slate-600 bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 leading-relaxed">
+            ${p.contexto}
+          </p>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] font-bold text-slate-500 pt-0.5">
+            <span>Almacén: <strong class="text-slate-800">${p.stockAlmacen ?? 0}</strong> • Planta: <strong class="text-slate-800">${p.stockPlanta ?? 0}</strong> • Vendidos 30d: <strong class="text-slate-800">${p.vendidos30d}</strong>${p.pedidosPlanta ? ` • Pedidos Planta 30d: <strong class="text-sky-800">${p.pedidosPlanta}</strong>` : ""}</span>
+            <span class="text-slate-700">Revisar en ~${p.proximoRevisionDias} días (${sumarDiasIso(p.proximoRevisionDias)})</span>
           </div>
         </div>
       `;
@@ -234,17 +296,20 @@ export async function mount(root, state) {
   soloPlantaEl.addEventListener("change", generarAnalisis);
 
   root.querySelector("#btnExportPedido").addEventListener("click", async () => {
-    if (!listaAumentar.length) return alert("Primero genera o ten ítems en 'Aumentar Cantidad'.");
+    if (!listaAumentar.length) return alert("Primero genera o ten ítems en 'Aumentar / Pedir'.");
     const XLSX = await cargarSheetJS();
     const rows = listaAumentar.map((p) => ({
       Codigo: p.codigo || p.id,
       Descripcion: p.descripcion || "",
-      Motivo: p.motivo,
+      Diagnostico: p.etiqueta,
+      Contexto: p.contexto,
       Vendidos_30d: p.vendidos30d,
       Pedidos_Planta_30d: p.pedidosPlanta || 0,
       Almacen: p.stockAlmacen ?? 0,
       Planta: p.stockPlanta ?? 0,
       Pedir_Und: p.sugerido,
+      Proxima_Revision_Dias: p.proximoRevisionDias,
+      Fecha_Proxima_Revision: sumarDiasIso(p.proximoRevisionDias),
       Costo_Unit_USD: Number(p.costoUsd || 0),
       Inversion_USD: Number(p.inversion.toFixed(2))
     }));
