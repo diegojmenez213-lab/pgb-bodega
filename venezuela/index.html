@@ -137,8 +137,6 @@
     import { verificarAccesoVE, cerrarSesionVE } from "./core/auth-tenant.js";
     import { getTenantRefs, getDocs } from "./core/db.js";
 
-    const DIAS_30_MS = 30 * 24 * 60 * 60 * 1000;
-
     const state = {
       sesion: null,
       empresa: null,
@@ -260,10 +258,20 @@
       });
     }
 
-    async function abrirModulo(route) {
+    async function abrirModulo(route, { pushHistory = true } = {}) {
+      const drawer = document.getElementById("mobDrawer");
+      if (drawer.classList.contains("open")) {
+        drawer.classList.remove("open");
+      }
+
       state.rutaActual = route;
       marcarBotonActivo(route);
-      document.getElementById("mobDrawer").classList.remove("open");
+
+      if (pushHistory) {
+        try {
+          history.pushState({ veRoute: route }, "", `#${route}`);
+        } catch {}
+      }
 
       const root = document.getElementById("veModuleRoot");
       root.innerHTML = `<div class="ve-card text-center py-10 text-slate-500 text-xs font-bold">Cargando ${NOMBRES_RUTAS[route] || route}...</div>`;
@@ -283,7 +291,27 @@
       }
     }
 
-    window.NEXUS_VE_NAV = abrirModulo;
+    window.NEXUS_VE_NAV = (route) => abrirModulo(route, { pushHistory: true });
+
+    // Intercepta el botón Atrás del navegador/móvil para navegar dentro de Venezuela
+    window.addEventListener("popstate", (e) => {
+      const drawer = document.getElementById("mobDrawer");
+      if (drawer.classList.contains("open")) {
+        drawer.classList.remove("open");
+        try { history.pushState({ veRoute: state.rutaActual }, "", `#${state.rutaActual}`); } catch {}
+        return;
+      }
+
+      const rutaDestino = e.state?.veRoute;
+      if (rutaDestino && NOMBRES_RUTAS[rutaDestino]) {
+        abrirModulo(rutaDestino, { pushHistory: false });
+      } else if (state.rutaActual !== "caja-pos") {
+        abrirModulo("caja-pos", { pushHistory: false });
+      } else {
+        // Mantiene al usuario dentro del panel en vez de retroceder a index.html
+        try { history.pushState({ veRoute: "caja-pos" }, "", "#caja-pos"); } catch {}
+      }
+    });
 
     async function iniciar() {
       const acceso = await verificarAccesoVE();
@@ -307,25 +335,32 @@
       }
 
       document.querySelectorAll("[data-route]").forEach((btn) => {
-        btn.addEventListener("click", () => abrirModulo(btn.dataset.route));
+        btn.addEventListener("click", () => abrirModulo(btn.dataset.route, { pushHistory: true }));
       });
 
-      document.getElementById("btnAlertaVencidos").addEventListener("click", () => abrirModulo("deudores"));
+      document.getElementById("btnAlertaVencidos").addEventListener("click", () => abrirModulo("deudores", { pushHistory: true }));
       document.getElementById("pillBcvHoy").addEventListener("click", () => { state.modoTasaBCV = "hoy"; pintarTasas(); });
       document.getElementById("pillBcvNext").addEventListener("click", () => { state.modoTasaBCV = "manana"; pintarTasas(); });
       document.getElementById("btnRefrescarTasas").addEventListener("click", cargarTasas);
       document.getElementById("btnLogoutPC").addEventListener("click", cerrarSesionVE);
       document.getElementById("btnLogoutMob").addEventListener("click", cerrarSesionVE);
 
-      document.getElementById("btnMobMore").addEventListener("click", () => document.getElementById("mobDrawer").classList.add("open"));
+      document.getElementById("btnMobMore").addEventListener("click", () => {
+        document.getElementById("mobDrawer").classList.add("open");
+        try { history.pushState({ veRoute: state.rutaActual, drawer: true }, "", `#${state.rutaActual}`); } catch {}
+      });
       document.getElementById("btnCloseDrawer").addEventListener("click", () => document.getElementById("mobDrawer").classList.remove("open"));
       document.getElementById("mobDrawer").addEventListener("click", (e) => { if (e.target.id === "mobDrawer") e.currentTarget.classList.remove("open"); });
+
+      try {
+        history.replaceState({ veRoute: "caja-pos" }, "", "#caja-pos");
+      } catch {}
 
       actualizarRelojCaracas();
       setInterval(actualizarRelojCaracas, 30000);
       await Promise.all([cargarTasas(), revisarAlertasDeudores()]);
       setInterval(cargarTasas, 10 * 60 * 1000);
-      await abrirModulo("caja-pos");
+      await abrirModulo("caja-pos", { pushHistory: false });
     }
 
     iniciar();
