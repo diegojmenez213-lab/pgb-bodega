@@ -9,10 +9,33 @@ import {
 } from "../core/db.js";
 import { imprimirDocumentoCarta } from "./documentos-pdf.js";
 
+const METODOS_PAGO = [
+  "Efectivo USD",
+  "Pago Móvil Bs.",
+  "Transferencia Bs.",
+  "Zelle",
+  "Binance USDT",
+  "Punto de Venta Bs.",
+  "Efectivo Bs."
+];
+
 function getTasaActiva(state) {
   const t = state.tasas || {};
   const bcv = state.modoTasaBCV === "manana" && t.bcvManana ? t.bcvManana : t.bcvHoy;
   return { ...t, bcvActiva: Number(bcv || 0) };
+}
+
+function equivalenciasTexto(montoUsd, tasas) {
+  const usd = Number(montoUsd || 0);
+  const bcv = Number(tasas.bcvActiva || tasas.bcvHoy || 0);
+  const usdt = Number(tasas.usdt || 0);
+  const eur = Number(tasas.eur || 0);
+  const partes = [];
+  if (bcv > 0) partes.push(`Bs. ${(usd * bcv).toFixed(2)}`);
+  const valUsdt = bcv > 0 && usdt > 0 ? (usd * bcv) / usdt : usd;
+  partes.push(`${valUsdt.toFixed(2)} USDT`);
+  if (bcv > 0 && eur > 0) partes.push(`€ ${((usd * bcv) / eur).toFixed(2)}`);
+  return partes.join(" • ");
 }
 
 function diasTranscurridos(nota, ahora = Date.now()) {
@@ -53,7 +76,7 @@ export async function mount(root, state) {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Deudores Activos</h1>
-          <p class="text-xs text-slate-500">Cada cliente se agrupa en una sola tarjeta con el monto total de sus notas pendientes.</p>
+          <p class="text-xs text-slate-500">Cada cliente se agrupa en una sola tarjeta. Cada abono registra método, fecha y hora para cuadrar la caja.</p>
         </div>
         <div class="flex flex-wrap gap-2 text-xs font-extrabold">
           <div class="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-mono-ve">
@@ -219,7 +242,6 @@ export async function mount(root, state) {
 
       return `
         <div class="ve-card p-3.5 space-y-3" data-doc="${encodeURIComponent(g.documento)}">
-          <!-- Cabecera resumen externa: Nombre, Cédula/RIF y Monto Total -->
           <div class="btn-toggle-cli flex items-center justify-between gap-3 cursor-pointer select-none">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
@@ -245,8 +267,14 @@ export async function mount(root, state) {
             </div>
           </div>
 
-          <!-- Detalle desplegable de notas pendientes del cliente -->
           <div class="${abierta ? "" : "hidden"} pt-3 border-t border-slate-200 space-y-2.5">
+            ${g.saldoFavorUsd > 0.01 ? `
+              <div class="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900">
+                <strong>Saldo a favor disponible: $${g.saldoFavorUsd.toFixed(2)}</strong>
+                <span class="font-mono-ve ml-1">(${equivalenciasTexto(g.saldoFavorUsd, tasas)})</span>
+              </div>
+            ` : ""}
+
             ${g.notas.map((n) => {
               const claveNota = `${g.documento}::${n.folio || n.id}`;
               const verAbonos = abonosAbiertos.has(claveNota);
@@ -275,6 +303,9 @@ export async function mount(root, state) {
 
                   <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
                     <div class="flex flex-wrap items-center gap-1.5">
+                      <select class="sel-met-abono bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold">
+                        ${METODOS_PAGO.map((m) => `<option value="${m}">${m}</option>`).join("")}
+                      </select>
                       <input
                         type="number"
                         step="0.01"
@@ -288,6 +319,11 @@ export async function mount(root, state) {
                       <button type="button" class="btn-saldar px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
                         Saldar
                       </button>
+                      ${g.saldoFavorUsd > 0.01 ? `
+                        <button type="button" class="btn-usar-favor px-2.5 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-extrabold cursor-pointer">
+                          Usar saldo a favor
+                        </button>
+                      ` : ""}
                     </div>
                     <div class="flex items-center gap-1.5">
                       <button type="button" class="btn-hist-abonos px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer">
@@ -299,13 +335,14 @@ export async function mount(root, state) {
                     </div>
                   </div>
 
-                  <!-- Trazabilidad de abonos con fecha y hora -->
                   <div class="${verAbonos ? "" : "hidden"} pt-2 border-t border-slate-200 space-y-1">
                     <div class="text-[10px] font-extrabold uppercase text-slate-400">Historial de Abonos</div>
                     ${abonos.length
                       ? abonos.map((ab) => `
-                        <div class="flex items-center justify-between text-[11px] bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80">
-                          <span class="font-mono-ve text-slate-600">${formatearFechaHora(ab.ts, ab.fechaIso)} • <strong class="text-slate-700">${ab.usuario || "Admin"}</strong></span>
+                        <div class="flex items-center justify-between gap-2 text-[11px] bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80">
+                          <span class="font-mono-ve text-slate-600">
+                            ${ab.fechaHoraTxt || formatearFechaHora(ab.ts, ab.fechaIso)} • <strong class="text-slate-800">${ab.metodo || "Efectivo USD"}</strong> • ${ab.usuario || "Admin"}
+                          </span>
                           <span class="font-mono-ve font-extrabold text-emerald-700">+$${Number(ab.montoUsd || 0).toFixed(2)}</span>
                         </div>
                       `).join("")
@@ -320,7 +357,7 @@ export async function mount(root, state) {
     }).join("");
   }
 
-  async function aplicarAbono(docId, folio, montoIngresado) {
+  async function aplicarAbono(docId, folio, montoIngresado, metodo = "Efectivo USD", usandoSaldoFavor = false) {
     const grupo = gruposDeudores.find((g) => g.documento === docId);
     const nota = grupo?.notas.find((n) => (n.folio || n.id) === folio);
     if (!nota) return;
@@ -330,15 +367,19 @@ export async function mount(root, state) {
 
     const saldoActual = Number(nota.saldoPendienteUsd || 0);
     const abonoAplicadoANota = Math.min(saldoActual, monto);
-    const sobrepago = Math.max(0, Number((monto - saldoActual).toFixed(2)));
+    const sobrepago = usandoSaldoFavor ? 0 : Math.max(0, Number((monto - saldoActual).toFixed(2)));
     const nuevoSaldo = Math.max(0, Number((saldoActual - abonoAplicadoANota).toFixed(2)));
+    const now = Date.now();
 
     const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
     historialAbonos.push({
       montoUsd: abonoAplicadoANota,
       sobrepagoUsd: sobrepago,
-      fechaIso: new Date().toISOString().slice(0, 10),
-      ts: Date.now(),
+      metodo: usandoSaldoFavor ? "Saldo a Favor" : metodo,
+      usandoSaldoFavor,
+      fechaIso: new Date(now).toISOString().slice(0, 10),
+      fechaHoraTxt: formatearFechaHora(now),
+      ts: now,
       usuario: state.sesion?.usuario || "Administrador"
     });
 
@@ -347,16 +388,28 @@ export async function mount(root, state) {
       {
         saldoPendienteUsd: nuevoSaldo,
         esCredito: nuevoSaldo > 0.01,
-        saldadaEn: nuevoSaldo <= 0.01 ? new Date().toISOString().slice(0, 10) : (nota.saldadaEn || null),
-        saldadaTs: nuevoSaldo <= 0.01 ? Date.now() : (nota.saldadaTs || null),
+        saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
+        saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
         abonos: historialAbonos,
         actualizadoEn: serverTimestamp()
       },
       { merge: true }
     );
 
-    if (sobrepago > 0.01) {
-      const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
+    const actualFavor = Number(clientesMap.get(docId)?.saldoAFavorUsd || 0);
+    if (usandoSaldoFavor) {
+      const nuevoFavor = Math.max(0, Number((actualFavor - abonoAplicadoANota).toFixed(2)));
+      await setDoc(
+        doc(refs.clientes(), docId),
+        {
+          documento: docId,
+          nombre: grupo.nombre,
+          saldoAFavorUsd: nuevoFavor,
+          actualizadoEn: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } else if (sobrepago > 0.01) {
       const nuevoFavor = Number((actualFavor + sobrepago).toFixed(2));
       await setDoc(
         doc(refs.clientes(), docId),
@@ -396,13 +449,21 @@ export async function mount(root, state) {
     const nota = grupo?.notas.find((n) => (n.folio || n.id) === folio);
     if (!nota) return;
 
+    const metodoSel = rowNota.querySelector(".sel-met-abono")?.value || "Efectivo USD";
+
     if (e.target.closest(".btn-abonar")) {
       const val = parseFloat(rowNota.querySelector(".inp-abono")?.value || "0");
-      await aplicarAbono(docId, folio, val);
+      await aplicarAbono(docId, folio, val, metodoSel, false);
     } else if (e.target.closest(".btn-saldar")) {
       const inpVal = parseFloat(rowNota.querySelector(".inp-abono")?.value || "0");
       const montoSaldar = inpVal >= Number(nota.saldoPendienteUsd || 0) ? inpVal : Number(nota.saldoPendienteUsd || 0);
-      await aplicarAbono(docId, folio, montoSaldar);
+      await aplicarAbono(docId, folio, montoSaldar, metodoSel, false);
+    } else if (e.target.closest(".btn-usar-favor")) {
+      const disp = Number(grupo.saldoFavorUsd || 0);
+      const aplicar = Math.min(disp, Number(nota.saldoPendienteUsd || 0));
+      if (aplicar <= 0) return;
+      if (!confirm(`¿Aplicar $${aplicar.toFixed(2)} del saldo a favor de ${grupo.nombre} a la Nota #${folio}?`)) return;
+      await aplicarAbono(docId, folio, aplicar, "Saldo a Favor", true);
     } else if (e.target.closest(".btn-hist-abonos")) {
       const claveNota = `${docId}::${folio}`;
       if (abonosAbiertos.has(claveNota)) abonosAbiertos.delete(claveNota);
