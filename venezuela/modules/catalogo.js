@@ -21,40 +21,138 @@ async function cargarSheetJS() {
   return window.XLSX;
 }
 
+function normalizarTexto(txt) {
+  return String(txt || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function limpiarDocId(codigo) {
-  return String(codigo || "").trim().toUpperCase().replace(/[\/\\#?\[\]]/g, "_").slice(0, 120);
+  return String(codigo || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\/\\#?\[\]]/g, "_")
+    .slice(0, 120);
 }
 
 function parseNumero(val) {
-  if (typeof val === "number") return isNaN(val) ? 0 : val;
-  const s = String(val || "0").replace(/[^0-9.,-]/g, "").replace(",", ".");
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
+  if (typeof val === "number") return Number.isFinite(val) ? val : 0;
+  const limpia = String(val || "")
+    .replace(/[^0-9.,-]/g, "")
+    .trim();
+  if (!limpia) return 0;
+  if (limpia.includes(",") && limpia.includes(".")) {
+    const n = parseFloat(limpia.replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = parseFloat(limpia.replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
 }
 
 function mapearFilaExcel(row) {
   const keys = Object.keys(row);
   const buscar = (patrones) => {
-    const k = keys.find((key) =>
-      patrones.some((p) => key.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(p))
-    );
+    const k = keys.find((key) => {
+      const nk = normalizarTexto(key);
+      return patrones.some((p) => nk.includes(p));
+    });
     return k ? row[k] : "";
   };
 
-  const codigo = String(buscar(["codigo", "cod", "sku", "ref", "parte"]) || "").trim().toUpperCase();
-  const descripcion = String(buscar(["descripcion", "nombre", "producto", "detalle", "articulo"]) || "").trim();
+  const codigo = String(
+    buscar(["codigo", "cod", "sku", "ref", "parte", "nro parte", "num parte", "item", "id"]) || ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const descripcion = String(
+    buscar(["descripcion", "nombre", "producto", "detalle", "articulo", "repuesto", "concepto"]) || ""
+  ).trim();
+
   if (!codigo && !descripcion) return null;
 
   return {
     id: limpiarDocId(codigo || descripcion),
     codigo: codigo || limpiarDocId(descripcion),
     descripcion: descripcion || codigo,
-    categoria: String(buscar(["categoria", "grupo", "linea", "familia"]) || "SIN CATEGORÍA").trim().toUpperCase(),
-    marca: String(buscar(["marca", "aplicacion", "vehiculo", "fabricante"]) || "GENÉRICO").trim().toUpperCase(),
-    proveedor: String(buscar(["proveedor", "planta", "suplidor"]) || "RTC DIESEL PARTS").trim().toUpperCase(),
-    costoUsd: parseNumero(buscar(["costo", "precio", "valor", "usd", "pvp", "neto"])),
-    stockPlanta: Math.max(0, Math.round(parseNumero(buscar(["stock", "cant", "existencia", "disponible", "planta"]))))
+    categoria: String(
+      buscar(["categoria", "grupo", "linea", "familia", "rubro", "tipo"]) || "SIN CATEGORÍA"
+    )
+      .trim()
+      .toUpperCase(),
+    marca: String(
+      buscar(["marca", "aplicacion", "vehiculo", "fabricante", "modelo"]) || "GENÉRICO"
+    )
+      .trim()
+      .toUpperCase(),
+    proveedor: String(
+      buscar(["proveedor", "planta", "suplidor", "origen"]) || "RTC DIESEL PARTS"
+    )
+      .trim()
+      .toUpperCase(),
+    costoUsd: parseNumero(
+      buscar(["costo", "precio", "valor", "usd", "pvp", "neto", "unitario", "monto"])
+    ),
+    stockPlanta: Math.max(
+      0,
+      Math.round(
+        parseNumero(
+          buscar(["stock", "cant", "cantidad", "existencia", "disponible", "planta", "inv", "und"])
+        )
+      )
+    )
   };
+}
+
+function extraerFilasDesdeHoja(XLSX, sheet) {
+  const matriz = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  if (!matriz.length) return [];
+
+  const patronesEncabezado = [
+    "codigo", "cod", "sku", "ref", "parte", "item", "id",
+    "descripcion", "nombre", "producto", "detalle", "articulo", "repuesto",
+    "stock", "cant", "cantidad", "existencia", "disponible", "planta",
+    "costo", "precio", "valor", "usd", "pvp", "neto"
+  ];
+
+  let filaHeaderIdx = 0;
+  let mejorPuntaje = 0;
+
+  for (let i = 0; i < Math.min(matriz.length, 30); i++) {
+    const celdas = matriz[i].map(normalizarTexto).filter(Boolean);
+    const puntaje = celdas.reduce(
+      (acc, c) => acc + (patronesEncabezado.some((p) => c.includes(p)) ? 1 : 0),
+      0
+    );
+    if (puntaje > mejorPuntaje) {
+      mejorPuntaje = puntaje;
+      filaHeaderIdx = i;
+    }
+  }
+
+  const headers = matriz[filaHeaderIdx].map((h, idx) => {
+    const lim = normalizarTexto(h);
+    return lim || `col_${idx}`;
+  });
+
+  const items = [];
+  for (let r = filaHeaderIdx + 1; r < matriz.length; r++) {
+    const fila = matriz[r];
+    if (!fila || !fila.some((c) => String(c || "").trim() !== "")) continue;
+
+    const obj = {};
+    headers.forEach((h, cIdx) => {
+      obj[h] = fila[cIdx];
+    });
+
+    const item = mapearFilaExcel(obj);
+    if (item && item.id) items.push(item);
+  }
+
+  return items;
 }
 
 export async function mount(root, state) {
@@ -117,7 +215,7 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Registro de cambios vigente de Planta (reemplaza los cambios anteriores al actualizar) -->
+      <!-- Registro de cambios vigente de Planta -->
       <div id="panelCambiosPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -154,7 +252,7 @@ export async function mount(root, state) {
 
   let productos = [];
   let ultimoReportePlanta = null;
-  let origen = "almacen"; // "almacen" | "planta"
+  let origen = "almacen";
 
   const tabAlm = root.querySelector("#tabAlmacen");
   const tabPla = root.querySelector("#tabPlanta");
@@ -280,7 +378,6 @@ export async function mount(root, state) {
       return;
     }
 
-    // Clasificado automáticamente por Categorías en orden alfabético (A -> Z)
     const grupos = new Map();
     for (const p of filtrados) {
       const cat = p.categoria || "SIN CATEGORÍA";
@@ -324,13 +421,15 @@ export async function mount(root, state) {
       const XLSX = await cargarSheetJS();
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
 
       const mapaExcel = new Map();
-      for (const r of rows) {
-        const it = mapearFilaExcel(r);
-        if (it && it.id) mapaExcel.set(it.id, it);
+      for (const nombreHoja of wb.SheetNames) {
+        const extraidos = extraerFilasDesdeHoja(XLSX, wb.Sheets[nombreHoja]);
+        for (const it of extraidos) {
+          if (it && it.id) mapaExcel.set(it.id, it);
+        }
       }
+
       const itemsExcel = Array.from(mapaExcel.values());
       if (!itemsExcel.length) {
         progWrap.classList.add("hidden");
@@ -364,7 +463,6 @@ export async function mount(root, state) {
             agotados.push({ codigo: it.codigo, descripcion: it.descripcion });
           }
         }
-        // Productos que antes tenían existencia en Planta y ya no vienen en el Excel
         for (const [id, prev] of anterioresMap.entries()) {
           if (!mapaExcel.has(id) && Number(prev.stockPlanta || 0) > 0) {
             agotados.push({ codigo: prev.codigo || id, descripcion: prev.descripcion || "" });
@@ -398,7 +496,6 @@ export async function mount(root, state) {
             if (!prev) payload.stockPlanta = 0;
           } else {
             payload.stockPlanta = it.stockPlanta;
-            // Si es un producto nuevo de Planta, se crea automáticamente en Almacén con stock 0
             if (!prev) {
               payload.stockAlmacen = 0;
               payload.contado = false;
@@ -415,7 +512,6 @@ export async function mount(root, state) {
         progTxt.textContent = `Actualizando ${hechas} de ${totalOps}...`;
       }
 
-      // Si actualizamos Planta, los que ya no están en la lista pasan a stockPlanta = 0 (sin tocar Almacén)
       if (!esAlmacen) {
         const faltantesEnExcel = Array.from(anterioresMap.values()).filter(
           (p) => !mapaExcel.has(p.id) && Number(p.stockPlanta || 0) > 0
@@ -430,7 +526,6 @@ export async function mount(root, state) {
           hechas += slice.length;
         }
 
-        // Reemplaza el reporte anterior de Planta por el nuevo (documento fijo "ultimo_planta")
         const reportePayload = {
           archivo: file.name,
           fechaIso: new Date().toISOString().slice(0, 10),
