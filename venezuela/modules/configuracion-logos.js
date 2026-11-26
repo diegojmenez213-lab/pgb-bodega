@@ -1,6 +1,8 @@
 // venezuela/modules/configuracion-logos.js
 import { getTenantRefs, setDoc, serverTimestamp } from "../core/db.js";
 
+const TEMA_PREDETERMINADO = "ejecutivo-oscuro";
+
 const TEMAS_PRO = [
   {
     id: "ejecutivo-oscuro",
@@ -48,11 +50,26 @@ function aplicarTemaVisual(temaId) {
   rootEl.style.setProperty("--ve-fondo", tema.fondo);
   rootEl.style.setProperty("--ve-borde", tema.borde);
 
-  // Refuerza botones primarios y barra lateral activa de forma inmediata
   document.querySelectorAll(".ve-nav-btn.active").forEach((btn) => {
     btn.style.backgroundColor = tema.primario;
     btn.style.color = "#ffffff";
   });
+}
+
+function sincronizarLogoBarraLateral(logoPlataforma, nombreEmpresa = "VE") {
+  const sidebarLogo = document.querySelector(".ve-brand-logo");
+  const sidebarBadge = document.getElementById("brandLogoWrap");
+
+  if (logoPlataforma) {
+    if (sidebarLogo) {
+      sidebarLogo.src = logoPlataforma;
+    } else if (sidebarBadge) {
+      sidebarBadge.outerHTML = `<img src="${logoPlataforma}" alt="Logo Plataforma" class="ve-brand-logo" />`;
+    }
+  } else if (sidebarLogo) {
+    const iniciales = String(nombreEmpresa || "VE").slice(0, 2).toUpperCase();
+    sidebarLogo.outerHTML = `<div id="brandLogoWrap" class="ve-brand-badge">${iniciales}</div>`;
+  }
 }
 
 function leerPngComoBase64(file) {
@@ -74,21 +91,25 @@ function leerPngComoBase64(file) {
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
-  let temaSeleccionado = state.empresa?.temaColor || "ejecutivo-oscuro";
+  let temaSeleccionado = state.empresa?.temaColor || TEMA_PREDETERMINADO;
   let logoPlataforma =
     state.empresa?.logoPlataformaBase64 || state.empresa?.logoBase64 || state.empresa?.logoUrl || "";
-  let logoDocumento =
-    state.empresa?.logoDocumentoBase64 || state.empresa?.logoBase64 || state.empresa?.logoUrl || "";
+  let logoDocumento = state.empresa?.logoDocumentoBase64 || "";
 
   aplicarTemaVisual(temaSeleccionado);
 
   root.innerHTML = `
     <div class="space-y-5 max-w-5xl mx-auto">
-      <div>
-        <h1 class="text-lg font-extrabold text-slate-900">Configuración y Personalización</h1>
-        <p class="text-xs text-slate-500">
-          Elige el tema de color profesional de la plataforma y sube por separado los logos PNG para el sistema y para los documentos PDF.
-        </p>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 class="text-lg font-extrabold text-slate-900">Configuración y Personalización</h1>
+          <p class="text-xs text-slate-500">
+            Ajusta el tema de color, sube o quita tus logos PNG y define el respaldo automático para documentos PDF.
+          </p>
+        </div>
+        <button id="btnRestablecerTema" type="button" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer">
+          ↺ Restablecer Tema Predeterminado
+        </button>
       </div>
 
       <!-- 1. Temas profesionales de la plataforma -->
@@ -125,16 +146,15 @@ export async function mount(root, state) {
       <!-- 2. Logos PNG independientes: Plataforma vs Documento PDF -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="ve-card space-y-3">
-          <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
-            Logo de la Plataforma (Encabezado / Menú)
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+              Logo de la Plataforma
+            </div>
+            <button id="btnQuitarLogoPlat" type="button" class="text-[11px] font-extrabold text-rose-600 hover:underline cursor-pointer">
+              Quitar logo
+            </button>
           </div>
-          <div id="boxPrevPlat" class="h-28 rounded-xl bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center p-3">
-            ${
-              logoPlataforma
-                ? `<img id="prevLogoPlat" src="${logoPlataforma}" alt="Logo Plataforma" class="max-h-20 max-w-full object-contain" />`
-                : `<span id="prevLogoPlat" class="text-xs font-bold text-slate-400">Sin PNG de plataforma</span>`
-            }
-          </div>
+          <div id="boxPrevPlat" class="h-28 rounded-xl bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center p-3"></div>
           <input id="inpPngPlat" type="file" accept="image/png,.png" class="hidden" />
           <button id="btnSubirPngPlat" type="button" class="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
             ↑ Subir PNG Logo Plataforma
@@ -142,16 +162,16 @@ export async function mount(root, state) {
         </div>
 
         <div class="ve-card space-y-3">
-          <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
-            Logo Nota de Entrega / Cotización (PDF)
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+              Logo Nota de Entrega / Cotización
+            </div>
+            <button id="btnQuitarLogoDoc" type="button" class="text-[11px] font-extrabold text-rose-600 hover:underline cursor-pointer">
+              Quitar logo
+            </button>
           </div>
-          <div id="boxPrevDoc" class="h-28 rounded-xl bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center p-3">
-            ${
-              logoDocumento
-                ? `<img id="prevLogoDoc" src="${logoDocumento}" alt="Logo Documento" class="max-h-20 max-w-full object-contain" />`
-                : `<span id="prevLogoDoc" class="text-xs font-bold text-slate-400">Sin PNG para notas/cotizaciones</span>`
-            }
-          </div>
+          <div id="boxPrevDoc" class="h-28 rounded-xl bg-slate-50 border border-dashed border-slate-300 flex items-center justify-center p-3"></div>
+          <p id="notaRespaldoDoc" class="text-[11px] text-slate-500"></p>
           <input id="inpPngDoc" type="file" accept="image/png,.png" class="hidden" />
           <button id="btnSubirPngDoc" type="button" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">
             ↑ Subir PNG Logo Nota de Entrega / Cotización
@@ -178,7 +198,30 @@ export async function mount(root, state) {
     });
   }
 
+  function renderVistasLogos() {
+    const boxPlat = root.querySelector("#boxPrevPlat");
+    boxPlat.innerHTML = logoPlataforma
+      ? `<img id="prevLogoPlat" src="${logoPlataforma}" alt="Logo Plataforma" class="max-h-20 max-w-full object-contain" />`
+      : `<span id="prevLogoPlat" class="text-xs font-bold text-slate-400">Sin PNG de plataforma</span>`;
+
+    const logoEfectivoDoc = logoDocumento || logoPlataforma;
+    const boxDoc = root.querySelector("#boxPrevDoc");
+    boxDoc.innerHTML = logoEfectivoDoc
+      ? `<img id="prevLogoDoc" src="${logoEfectivoDoc}" alt="Logo Documento" class="max-h-20 max-w-full object-contain" />`
+      : `<span id="prevLogoDoc" class="text-xs font-bold text-slate-400">Sin PNG configurado</span>`;
+
+    const notaDoc = root.querySelector("#notaRespaldoDoc");
+    if (logoDocumento) {
+      notaDoc.textContent = "Usando PNG propio para Notas de Entrega y Cotizaciones.";
+    } else if (logoPlataforma) {
+      notaDoc.textContent = "Sin PNG propio de documento: se mostrará automáticamente el logo de la plataforma para no dejarlo vacío.";
+    } else {
+      notaDoc.textContent = "Si cargas el logo de la plataforma y dejas este vacío, se usará el de la plataforma automáticamente.";
+    }
+  }
+
   marcarTemaUI();
+  renderVistasLogos();
 
   root.querySelectorAll(".tema-card").forEach((card) => {
     card.addEventListener("click", () => {
@@ -188,15 +231,24 @@ export async function mount(root, state) {
     });
   });
 
+  root.querySelector("#btnRestablecerTema").addEventListener("click", () => {
+    temaSeleccionado = TEMA_PREDETERMINADO;
+    marcarTemaUI();
+    aplicarTemaVisual(temaSeleccionado);
+  });
+
+  root.querySelector("#btnQuitarLogoPlat").addEventListener("click", () => {
+    logoPlataforma = "";
+    renderVistasLogos();
+  });
+
+  root.querySelector("#btnQuitarLogoDoc").addEventListener("click", () => {
+    logoDocumento = "";
+    renderVistasLogos();
+  });
+
   const inpPlat = root.querySelector("#inpPngPlat");
   const inpDoc = root.querySelector("#inpPngDoc");
-
-  function actualizarCajaLogo(boxSelector, imgId, dataUrl, altTxt, vacioTxt) {
-    const box = root.querySelector(boxSelector);
-    box.innerHTML = dataUrl
-      ? `<img id="${imgId}" src="${dataUrl}" alt="${altTxt}" class="max-h-20 max-w-full object-contain" />`
-      : `<span id="${imgId}" class="text-xs font-bold text-slate-400">${vacioTxt}</span>`;
-  }
 
   root.querySelector("#btnSubirPngPlat").addEventListener("click", () => inpPlat.click());
   root.querySelector("#btnSubirPngDoc").addEventListener("click", () => inpDoc.click());
@@ -207,7 +259,7 @@ export async function mount(root, state) {
     if (!file) return;
     try {
       logoPlataforma = await leerPngComoBase64(file);
-      actualizarCajaLogo("#boxPrevPlat", "prevLogoPlat", logoPlataforma, "Logo Plataforma", "Sin PNG de plataforma");
+      renderVistasLogos();
     } catch (err) {
       alert(err.message);
     }
@@ -219,7 +271,7 @@ export async function mount(root, state) {
     if (!file) return;
     try {
       logoDocumento = await leerPngComoBase64(file);
-      actualizarCajaLogo("#boxPrevDoc", "prevLogoDoc", logoDocumento, "Logo Documento", "Sin PNG para notas/cotizaciones");
+      renderVistasLogos();
     } catch (err) {
       alert(err.message);
     }
@@ -237,6 +289,7 @@ export async function mount(root, state) {
           temaColor: temaSeleccionado,
           logoPlataformaBase64: logoPlataforma,
           logoDocumentoBase64: logoDocumento,
+          logoBase64: logoPlataforma,
           actualizadoEn: serverTimestamp()
         },
         { merge: true }
@@ -246,21 +299,14 @@ export async function mount(root, state) {
         state.empresa.temaColor = temaSeleccionado;
         state.empresa.logoPlataformaBase64 = logoPlataforma;
         state.empresa.logoDocumentoBase64 = logoDocumento;
+        state.empresa.logoBase64 = logoPlataforma;
       }
 
       aplicarTemaVisual(temaSeleccionado);
+      sincronizarLogoBarraLateral(logoPlataforma, state.empresa?.nombre || state.sesion?.nombreEmpresa);
+      renderVistasLogos();
 
-      const sidebarLogo = document.querySelector(".ve-brand-logo");
-      const sidebarBadge = document.getElementById("brandLogoWrap");
-      if (logoPlataforma) {
-        if (sidebarLogo) {
-          sidebarLogo.src = logoPlataforma;
-        } else if (sidebarBadge) {
-          sidebarBadge.outerHTML = `<img src="${logoPlataforma}" alt="Logo Plataforma" class="ve-brand-logo" />`;
-        }
-      }
-
-      alert("Personalización guardada: tema de plataforma y ambos logos PNG actualizados.");
+      alert("Personalización guardada correctamente.");
     } catch (err) {
       alert("Error guardando configuración: " + err.message);
     } finally {
