@@ -102,7 +102,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Alerta automática de deuda acumulada del cliente -->
       <div id="alertaDeudaCliente" class="hidden ve-card border-rose-300 bg-rose-50/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2.5 text-xs">
           <span class="text-lg">⚠️</span>
@@ -116,7 +115,6 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- Panel de Límite de Crédito configurable del cliente -->
       <div id="panelLimiteCredito" class="hidden ve-card border-amber-300 bg-amber-50/60 p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="font-extrabold text-amber-950">Límite de Crédito:</span>
@@ -136,7 +134,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Saldo a favor disponible del cliente -->
       <div id="panelSaldoFavor" class="hidden ve-card border-emerald-300 bg-emerald-50/80 p-3.5 space-y-2.5">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="text-xs space-y-1">
@@ -276,7 +273,6 @@ export async function mount(root, state) {
                 <span id="posRestante" class="font-mono-ve text-rose-600">$0.00</span>
               </div>
 
-              <!-- Calculadora Atómica de Vuelto / Cambio vs Saldo a Favor -->
               <div id="panelVueltoCambio" class="hidden p-2.5 rounded-xl bg-sky-50 border border-sky-200 space-y-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-[11px] font-extrabold text-sky-950">Cambio / Excedente:</span>
@@ -333,7 +329,7 @@ export async function mount(root, state) {
   let deudaActualCliente = 0;
   let limiteCreditoCliente = 0;
   let usarSaldoFavorEnNota = true;
-  let modoExcedente = "vuelto"; // "vuelto" | "favor"
+  let modoExcedente = "vuelto";
   let monedaVistaFavor = "USD";
   let cotizacionOrigenId = null;
   let emitiendo = false;
@@ -979,7 +975,6 @@ export async function mount(root, state) {
     const restanteHoy = Math.max(0, Number((objetivoHoy - totalEntregadoHoy).toFixed(2)));
     const excedente = Math.max(0, Number((totalEntregadoHoy - objetivoHoy).toFixed(2)));
 
-    // Si el excedente se entrega como vuelto, no va a saldo a favor y se descuenta del efectivo guardado en caja
     const vueltoEntregadoUsd = excedente > 0.01 && modoExcedente === "vuelto" ? excedente : 0;
     const sobrepagoGenerado = excedente > 0.01 && modoExcedente === "favor" ? excedente : 0;
 
@@ -1003,10 +998,16 @@ export async function mount(root, state) {
       }
     }
 
-    // Si entregó vuelto en efectivo, ajustar el neto que realmente quedó en caja en el último pago
+    // Prioriza descontar el vuelto de los métodos en Efectivo antes de tocar métodos digitales
     if (vueltoEntregadoUsd > 0.01 && pagosValidos.length) {
       let porRestar = vueltoEntregadoUsd;
-      for (let i = pagosValidos.length - 1; i >= 0 && porRestar > 0.005; i--) {
+      const ordenIndices = pagosValidos
+        .map((p, idx) => ({ idx, esEfectivo: p.metodo.toLowerCase().includes("efectivo") }))
+        .sort((a, b) => Number(b.esEfectivo) - Number(a.esEfectivo))
+        .map((x) => x.idx);
+
+      for (const i of ordenIndices) {
+        if (porRestar <= 0.005) break;
         const desc = Math.min(pagosValidos[i].montoUsd, porRestar);
         pagosValidos[i].recibidoUsd = pagosValidos[i].montoUsd;
         pagosValidos[i].montoUsd = Number((pagosValidos[i].montoUsd - desc).toFixed(2));
