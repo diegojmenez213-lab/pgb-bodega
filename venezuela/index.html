@@ -231,6 +231,7 @@
 
         snap.forEach((d) => {
           const n = d.data();
+          if (n.anulada) return;
           const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
           if (saldo > 0.01) {
             const baseTs = Number(n.creadoTs || 0);
@@ -336,6 +337,17 @@
       const drawer = document.getElementById("mobDrawer");
       if (drawer.classList.contains("open")) {
         drawer.classList.remove("open");
+      }
+
+      if (state.rutaActual === "configuracion-logos" && route !== "configuracion-logos") {
+        const temaGuardado = (() => {
+          try {
+            return localStorage.getItem(`nexus_ve_tema_${state.sesion?.tenantId || "default"}`);
+          } catch {
+            return null;
+          }
+        })();
+        aplicarTemaEmpresa(temaGuardado || "ejecutivo-oscuro");
       }
 
       state.rutaActual = route;
