@@ -295,9 +295,12 @@
       pillNext.classList.toggle("active-bcv", state.modoTasaBCV === "manana");
     }
 
-    async function cargarTasas() {
+    async function cargarTasas(forzar = false) {
+      const btn = document.getElementById("btnRefrescarTasas");
+      if (btn && forzar) btn.textContent = "↻ ...";
       try {
-        const resp = await fetch("/api/ve-tasas");
+        const url = `/api/ve-tasas?t=${Date.now()}${forzar ? "&force=1" : ""}`;
+        const resp = await fetch(url, { cache: "no-store" });
         if (!resp.ok) return;
         const data = await resp.json();
         state.tasas = {
@@ -311,6 +314,8 @@
         window.dispatchEvent(new CustomEvent("nexus-ve-tasas-updated", { detail: state.tasas }));
       } catch (err) {
         console.warn("Error tasas:", err);
+      } finally {
+        if (btn) btn.textContent = "↻ Tasas";
       }
     }
 
@@ -434,7 +439,7 @@
       document.getElementById("btnAlertaVencidos").addEventListener("click", () => abrirModulo("deudores", { pushHistory: true }));
       document.getElementById("pillBcvHoy").addEventListener("click", () => { state.modoTasaBCV = "hoy"; pintarTasas(); });
       document.getElementById("pillBcvNext").addEventListener("click", () => { state.modoTasaBCV = "manana"; pintarTasas(); });
-      document.getElementById("btnRefrescarTasas").addEventListener("click", cargarTasas);
+      document.getElementById("btnRefrescarTasas").addEventListener("click", () => cargarTasas(true));
       document.getElementById("btnLogoutPC").addEventListener("click", cerrarSesionVE);
       document.getElementById("btnLogoutMob").addEventListener("click", cerrarSesionVE);
 
@@ -452,7 +457,7 @@
       actualizarRelojCaracas();
       setInterval(actualizarRelojCaracas, 30000);
       await Promise.all([cargarTasas(), revisarAlertasDeudores()]);
-      setInterval(cargarTasas, 10 * 60 * 1000);
+      setInterval(() => cargarTasas(true), 60 * 60 * 1000);
       await abrirModulo("caja-pos", { pushHistory: false });
     }
 
