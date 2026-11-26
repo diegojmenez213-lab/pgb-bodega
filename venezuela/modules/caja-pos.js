@@ -17,6 +17,28 @@ function getTasaActiva(state) {
   return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
+function convertirUsdAMoneda(montoUsd, moneda, tasas) {
+  const usd = Number(montoUsd || 0);
+  const bcv = Number(tasas.bcvActiva || tasas.bcvHoy || 0);
+  const eur = Number(tasas.eur || 0);
+  const usdt = Number(tasas.usdt || 0);
+
+  if (moneda === "USD") return { ok: true, texto: `$${usd.toFixed(2)}` };
+  if (moneda === "BS") {
+    if (!bcv) return { ok: false, texto: "Bs. --" };
+    return { ok: true, texto: `Bs. ${(usd * bcv).toFixed(2)}` };
+  }
+  if (moneda === "USDT") {
+    const val = (bcv > 0 && usdt > 0) ? (usd * bcv) / usdt : usd;
+    return { ok: true, texto: `${val.toFixed(2)} USDT` };
+  }
+  if (moneda === "EUR") {
+    if (!bcv || !eur) return { ok: false, texto: "€ --" };
+    return { ok: true, texto: `€ ${(usd * bcv) / eur}` };
+  }
+  return { ok: true, texto: `$${usd.toFixed(2)}` };
+}
+
 function parseMultiplicadorTexto(raw) {
   const limpio = String(raw || "").replace(",", ".").trim();
   if (!limpio || limpio === "." || limpio.endsWith(".")) return null;
@@ -68,15 +90,33 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- Saldo a favor disponible del cliente -->
-      <div id="panelSaldoFavor" class="hidden ve-card border-emerald-300 bg-emerald-50/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
-        <div class="text-xs">
-          <div id="txtSaldoFavor" class="font-extrabold text-emerald-950"></div>
-          <div id="subSaldoFavor" class="text-[11px] text-emerald-800 font-semibold"></div>
+      <!-- Saldo a favor disponible del cliente: decisión de usar o guardar -->
+      <div id="panelSaldoFavor" class="hidden ve-card border-emerald-300 bg-emerald-50/80 p-3.5 space-y-2.5">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div class="text-xs space-y-1">
+            <div id="txtSaldoFavor" class="font-extrabold text-emerald-950"></div>
+            <div id="equivSaldoFavor" class="font-mono-ve text-[11px] font-bold text-emerald-900"></div>
+            <div id="subSaldoFavor" class="text-[11px] text-emerald-800 font-semibold"></div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <label class="text-[10px] font-extrabold uppercase text-emerald-900">Ver en:</label>
+            <select id="selMonedaFavor" class="bg-white border border-emerald-300 rounded-lg px-2 py-1 text-xs font-extrabold text-emerald-950">
+              <option value="USD">USD ($)</option>
+              <option value="BS">Bolívares (Bs. BCV)</option>
+              <option value="USDT">USDT</option>
+              <option value="EUR">EUR (€)</option>
+            </select>
+          </div>
         </div>
-        <button id="btnAplicarSaldoFavor" type="button" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">
-          Aplicar saldo a favor
-        </button>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 bg-emerald-100/80 p-1 rounded-xl">
+          <button type="button" id="btnDecidirUsarFavor" class="py-2 px-2.5 rounded-lg text-xs font-extrabold bg-emerald-700 text-white cursor-pointer">
+            ✓ Restar saldo a favor del total
+          </button>
+          <button type="button" id="btnDecidirGuardarFavor" class="py-2 px-2.5 rounded-lg text-xs font-extrabold bg-white text-emerald-950 border border-emerald-300 cursor-pointer">
+            Guardar aparte y pagar nota completa
+          </button>
+        </div>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -136,11 +176,11 @@ export async function mount(root, state) {
                 <span id="posTotalUsd" class="font-mono-ve">$0.00</span>
               </div>
               <div id="filaDescuentoFavor" class="hidden flex justify-between text-xs font-bold text-emerald-700">
-                <span>Saldo a favor aplicado</span>
+                <span>Saldo a favor descontado</span>
                 <span id="posDescuentoFavor" class="font-mono-ve">-$0.00</span>
               </div>
               <div id="filaNetoPagar" class="hidden flex justify-between text-sm font-extrabold text-slate-900">
-                <span>A PAGAR HOY</span>
+                <span>A PAGAR EN ESTA NOTA</span>
                 <span id="posNetoPagar" class="font-mono-ve">$0.00</span>
               </div>
               <div class="flex justify-between text-xs font-bold text-slate-500">
@@ -231,7 +271,8 @@ export async function mount(root, state) {
   let diasCredito = 15;
   let busqAbierta = false;
   let saldoFavorDisponible = 0;
-  let saldoFavorAplicado = 0;
+  let usarSaldoFavorEnNota = true;
+  let monedaVistaFavor = "USD";
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
@@ -243,6 +284,7 @@ export async function mount(root, state) {
   const pagosEl = root.querySelector("#posPagos");
   const alertaBox = root.querySelector("#alertaDeudaCliente");
   const favorBox = root.querySelector("#panelSaldoFavor");
+  const selMonFavor = root.querySelector("#selMonedaFavor");
 
   function aplicarFactorPos(nuevoFactor, sincronizarInput = false) {
     const val = parseMultiplicadorTexto(nuevoFactor);
@@ -269,9 +311,25 @@ export async function mount(root, state) {
     return carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
   }
 
+  function montoDescuentoFavorActual() {
+    if (saldoFavorDisponible <= 0.01 || !usarSaldoFavorEnNota) return 0;
+    return Math.min(saldoFavorDisponible, Number(totalVenta().toFixed(2)));
+  }
+
   function montoObjetivoHoy() {
-    const tot = totalVenta();
-    return Math.max(0, Number((tot - saldoFavorAplicado).toFixed(2)));
+    return Math.max(0, Number((totalVenta() - montoDescuentoFavorActual()).toFixed(2)));
+  }
+
+  function actualizarBotonesDecisionFavor() {
+    const btnUsar = root.querySelector("#btnDecidirUsarFavor");
+    const btnGuardar = root.querySelector("#btnDecidirGuardarFavor");
+    if (usarSaldoFavorEnNota) {
+      btnUsar.className = "py-2 px-2.5 rounded-lg text-xs font-extrabold bg-emerald-700 text-white cursor-pointer";
+      btnGuardar.className = "py-2 px-2.5 rounded-lg text-xs font-extrabold bg-white text-emerald-950 border border-emerald-300 cursor-pointer";
+    } else {
+      btnGuardar.className = "py-2 px-2.5 rounded-lg text-xs font-extrabold bg-emerald-700 text-white cursor-pointer";
+      btnUsar.className = "py-2 px-2.5 rounded-lg text-xs font-extrabold bg-white text-emerald-950 border border-emerald-300 cursor-pointer";
+    }
   }
 
   function refrescarEstadoClienteActual() {
@@ -280,28 +338,32 @@ export async function mount(root, state) {
       alertaBox.classList.add("hidden");
       favorBox.classList.add("hidden");
       saldoFavorDisponible = 0;
-      saldoFavorAplicado = 0;
       renderTotalesYRestante();
       return;
     }
 
     const cli = clientes.find((c) => c.id === docId);
     saldoFavorDisponible = Number(cli?.saldoAFavorUsd || 0);
-    if (saldoFavorAplicado > saldoFavorDisponible) {
-      saldoFavorAplicado = saldoFavorDisponible;
-    }
 
     if (saldoFavorDisponible > 0.01) {
       const cliNombre = nomEl.value.trim() || cli?.nombre || docId;
+      const tasas = getTasaActiva(state);
+      const convFavor = convertirUsdAMoneda(saldoFavorDisponible, monedaVistaFavor, tasas);
+      const convBs = convertirUsdAMoneda(saldoFavorDisponible, "BS", tasas);
+      const convUsdt = convertirUsdAMoneda(saldoFavorDisponible, "USDT", tasas);
+      const convEur = convertirUsdAMoneda(saldoFavorDisponible, "EUR", tasas);
+
       root.querySelector("#txtSaldoFavor").textContent =
-        `${cliNombre} tiene $${saldoFavorDisponible.toFixed(2)} de saldo a favor.`;
-      root.querySelector("#subSaldoFavor").textContent = saldoFavorAplicado > 0
-        ? `Ya aplicaste $${saldoFavorAplicado.toFixed(2)} a esta nota.`
-        : "Puedes descontarlo de esta nota antes de cobrar.";
+        `${cliNombre} tiene un saldo a favor de $${saldoFavorDisponible.toFixed(2)} (${convFavor.texto}).`;
+      root.querySelector("#equivSaldoFavor").textContent =
+        `Equivalencia del día: ${convBs.texto} • ${convUsdt.texto}${convEur.ok ? ` • ${convEur.texto}` : ""}`;
+      root.querySelector("#subSaldoFavor").textContent = usarSaldoFavorEnNota
+        ? "Se descontará automáticamente del total de esta nota."
+        : "Quedará intacto para después y se cobrará la nota aparte.";
+      actualizarBotonesDecisionFavor();
       favorBox.classList.remove("hidden");
     } else {
       favorBox.classList.add("hidden");
-      saldoFavorAplicado = 0;
     }
 
     const pendientes = todasNotas.filter((n) => {
@@ -332,13 +394,21 @@ export async function mount(root, state) {
     renderTotalesYRestante();
   }
 
-  root.querySelector("#btnAplicarSaldoFavor").addEventListener("click", () => {
-    const tot = totalVenta();
-    if (saldoFavorDisponible <= 0.01) return;
-    saldoFavorAplicado = Math.min(saldoFavorDisponible, Number(tot.toFixed(2)));
-    if (!esCredito && pagos.length === 1) {
-      pagos[0].auto = true;
-    }
+  selMonFavor.addEventListener("change", () => {
+    monedaVistaFavor = selMonFavor.value;
+    refrescarEstadoClienteActual();
+  });
+
+  root.querySelector("#btnDecidirUsarFavor").addEventListener("click", () => {
+    usarSaldoFavorEnNota = true;
+    if (!esCredito && pagos.length === 1) pagos[0].auto = true;
+    refrescarEstadoClienteActual();
+    renderPagos();
+  });
+
+  root.querySelector("#btnDecidirGuardarFavor").addEventListener("click", () => {
+    usarSaldoFavorEnNota = false;
+    if (!esCredito && pagos.length === 1) pagos[0].auto = true;
     refrescarEstadoClienteActual();
     renderPagos();
   });
@@ -351,6 +421,7 @@ export async function mount(root, state) {
 
   function renderTotalesYRestante() {
     const total = totalVenta();
+    const descuento = montoDescuentoFavorActual();
     const objetivo = montoObjetivoHoy();
     const tasas = getTasaActiva(state);
 
@@ -359,10 +430,10 @@ export async function mount(root, state) {
 
     const filaDesc = root.querySelector("#filaDescuentoFavor");
     const filaNeto = root.querySelector("#filaNetoPagar");
-    if (saldoFavorAplicado > 0.01) {
+    if (descuento > 0.01) {
       filaDesc.classList.remove("hidden");
       filaNeto.classList.remove("hidden");
-      root.querySelector("#posDescuentoFavor").textContent = `-$${saldoFavorAplicado.toFixed(2)}`;
+      root.querySelector("#posDescuentoFavor").textContent = `-$${descuento.toFixed(2)}`;
       root.querySelector("#posNetoPagar").textContent = `$${objetivo.toFixed(2)}`;
     } else {
       filaDesc.classList.add("hidden");
@@ -507,10 +578,6 @@ export async function mount(root, state) {
   }
 
   function renderCarrito() {
-    const total = totalVenta();
-    if (saldoFavorAplicado > total) {
-      saldoFavorAplicado = Number(total.toFixed(2));
-    }
     const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
     root.querySelector("#posCantItemsBadge").textContent = String(totalUnds);
 
@@ -680,6 +747,7 @@ export async function mount(root, state) {
       tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
       aplicarFactorPos(fCli, true);
     }
+    usarSaldoFavorEnNota = true;
     refrescarEstadoClienteActual();
   });
 
@@ -708,7 +776,7 @@ export async function mount(root, state) {
     carrito = [];
     esCredito = false;
     diasCredito = 15;
-    saldoFavorAplicado = 0;
+    usarSaldoFavorEnNota = true;
     pagos = [{ metodo: "Efectivo USD", montoUsd: 0 }];
     actualizarEstadoCreditoUI();
     renderCarrito();
@@ -729,7 +797,7 @@ export async function mount(root, state) {
       const folio = String(nuevoNum).padStart(5, "0");
 
       const totalUsd = Number(totalVenta().toFixed(2));
-      const usadoFavor = Math.min(saldoFavorAplicado, totalUsd);
+      const usadoFavor = montoDescuentoFavorActual();
       const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
       const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
       const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
@@ -767,6 +835,7 @@ export async function mount(root, state) {
         items: carrito,
         pagos: pagosValidos,
         saldoFavorAplicadoUsd: usadoFavor,
+        saldoFavorDejadoAparte: !usarSaldoFavorEnNota && saldoFavorDisponible > 0.01,
         sobrepagoUsd: sobrepagoGenerado,
         esCredito: esCredito && saldoPendienteUsd > 0.01,
         diasCredito: esCredito ? diasCredito : 0,
@@ -835,7 +904,7 @@ export async function mount(root, state) {
 
       const formato = root.querySelector("#posFormatoPrint").value;
       const partesObs = [];
-      if (usadoFavor > 0.01) partesObs.push(`Saldo a favor aplicado: $${usadoFavor.toFixed(2)}.`);
+      if (usadoFavor > 0.01) partesObs.push(`Saldo a favor descontado: $${usadoFavor.toFixed(2)}.`);
       if (sobrepagoGenerado > 0.01) partesObs.push(`Sobrepago acreditado a saldo a favor: +$${sobrepagoGenerado.toFixed(2)}.`);
       if (esCredito && saldoPendienteUsd > 0.01) {
         partesObs.push(`Venta a crédito (${diasCredito} días). Saldo pendiente: $${saldoPendienteUsd.toFixed(2)}.`);
