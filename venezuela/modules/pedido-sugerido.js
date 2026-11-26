@@ -30,7 +30,7 @@ export async function mount(root, state) {
           <h1 class="text-lg font-extrabold text-slate-900">Pedido Sugerido Inteligente</h1>
           <p class="text-xs text-slate-500">Diagnóstico de rotación (últimos 30 días), contexto de compra y ventana del próximo pedido.</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <button id="btnGenerarPedido" type="button" class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
             ⚡ Generar Pedido Sugerido
           </button>
@@ -47,6 +47,12 @@ export async function mount(root, state) {
             <div>
               <label class="text-[10px] font-bold text-slate-500 block">Cobertura de este pedido (días)</label>
               <input id="diasCobertura" type="number" min="5" max="90" value="15" class="w-24 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold" />
+            </div>
+            <div>
+              <label class="text-[10px] font-bold text-slate-500 block">Proveedor</label>
+              <select id="filtroProvSug" class="bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-extrabold">
+                <option value="">Todos los Proveedores</option>
+              </select>
             </div>
             <label class="flex items-center gap-2 text-xs font-bold text-slate-700 pt-3 cursor-pointer">
               <input id="chkSoloPlanta" type="checkbox" checked />
@@ -103,11 +109,49 @@ export async function mount(root, state) {
   let listaNoPedir = [];
 
   const diasEl = root.querySelector("#diasCobertura");
+  const provEl = root.querySelector("#filtroProvSug");
   const soloPlantaEl = root.querySelector("#chkSoloPlanta");
   const listaEl = root.querySelector("#listaSugerido");
 
+  function poblarProveedores() {
+    const provs = Array.from(
+      new Set(catalogo.map((p) => (p.proveedor || "").trim().toUpperCase()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "es"));
+
+    const actual = provEl.value;
+    provEl.innerHTML =
+      `<option value="">Todos los Proveedores (${provs.length})</option>` +
+      provs.map((pr) => `<option value="${pr}" ${actual === pr ? "selected" : ""}>${pr}</option>`).join("");
+  }
+
+  async function cargarDatosFrescos() {
+    const hace30d = Date.now() - DIAS_30_MS;
+    const [snapCat, snapNotas] = await Promise.all([getDocs(refs.catalogo()), getDocs(refs.notasEntrega())]);
+    catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    ventas30d = new Map();
+    pedidosPlanta30d = new Map();
+
+    snapNotas.forEach((d) => {
+      const n = d.data();
+      if (n.anulada) return;
+      if ((n.creadoTs || 0) < hace30d) return;
+      for (const it of n.items || []) {
+        const cant = Number(it.cantidad || 0);
+        if (cant <= 0) continue;
+        ventas30d.set(it.id, (ventas30d.get(it.id) || 0) + cant);
+        if (it.origen === "planta") {
+          pedidosPlanta30d.set(it.id, (pedidosPlanta30d.get(it.id) || 0) + cant);
+        }
+      }
+    });
+
+    poblarProveedores();
+  }
+
   function generarAnalisis() {
     const diasCobertura = Math.max(5, Number(diasEl.value) || 15);
+    const provFiltro = provEl.value;
     const soloPlanta = soloPlantaEl.checked;
     const factor = diasCobertura / 30;
     const corte30d = Date.now() - DIAS_30_MS;
@@ -117,6 +161,9 @@ export async function mount(root, state) {
     listaNoPedir = [];
 
     for (const p of catalogo) {
+      const provNombre = (p.proveedor || "SIN PROVEEDOR").toUpperCase();
+      if (provFiltro && provNombre !== provFiltro) continue;
+
       const vendidos = ventas30d.get(p.id) || 0;
       const pedidosDePlanta = pedidosPlanta30d.get(p.id) || 0;
       const actual = Number(p.stockAlmacen || 0);
@@ -126,14 +173,15 @@ export async function mount(root, state) {
       const ritmoDiario = vendidos / 30;
       const diasAutonomiaActual = ritmoDiario > 0 ? Math.floor(actual / ritmoDiario) : 99;
 
-      // 1. Se vende/pide desde Planta pero no tiene existencia en Almacén
+      // 1. Se pide desde Planta pero no tiene existencia en Almacén
       if (pedidosDePlanta > 0 && actual <= 0) {
         const basePedir = Math.max(1, Math.ceil(pedidosDePlanta * factor));
         if (!soloPlanta || dispPlanta > 0) {
           const cantFinal = soloPlanta ? Math.min(basePedir, dispPlanta) : basePedir;
-          const contexto = `En los últimos 30 días se solicitaron ${pedidosDePlanta} und desde Planta sin tener stock en Almacén (stock físico actual: 0). Conviene abastecer ${cantFinal} und para cubrir ${diasCobertura} días y capturar ese margen en almacén.`;
+          const contexto = `En los últimos 30 días se solicitaron ${pedidosDePlanta} und desde Planta sin stock en Almacén (stock físico actual: 0). Conviene abastecer ${cantFinal} und para cubrir ${diasCobertura} días.`;
           listaAumentar.push({
             ...p,
+            proveedor: provNombre,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
@@ -158,11 +206,12 @@ export async function mount(root, state) {
         if (pedirFinalCalculado > 0 && (!soloPlanta || dispPlanta > 0)) {
           const cantFinal = soloPlanta ? Math.min(pedirFinalCalculado, dispPlanta) : pedirFinalCalculado;
           const contexto = seAgotaRapido
-            ? `En los últimos 30 días salieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y hoy quedan solo ${actual} und en Almacén (~${diasAutonomiaActual} días de autonomía). Se sugieren ${cantFinal} und con margen extra para cubrir los próximos ${diasCobertura} días sin quiebre.`
-            : `En los últimos 30 días se movieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén hay ${actual} und. Para cubrir los próximos ${diasCobertura} días (meta ${metaCobertura} und) conviene pedir ${cantFinal} und.`;
+            ? `En los últimos 30 días salieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén quedan ${actual} und (~${diasAutonomiaActual} días de autonomía). Se sugieren ${cantFinal} und con margen extra para cubrir ${diasCobertura} días.`
+            : `En los últimos 30 días se movieron ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y en Almacén hay ${actual} und. Para cubrir ${diasCobertura} días (meta ${metaCobertura} und) conviene pedir ${cantFinal} und.`;
 
           listaAumentar.push({
             ...p,
+            proveedor: provNombre,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: cantFinal,
@@ -172,9 +221,10 @@ export async function mount(root, state) {
             inversion: cantFinal * costo
           });
         } else {
-          const contexto = `En los últimos 30 días vendió ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y el stock actual en Almacén (${actual} und) cubre cómodamente el ritmo actual sin necesidad de pedir hoy.`;
+          const contexto = `En los últimos 30 días vendió ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y el stock actual en Almacén (${actual} und) cubre el ritmo actual sin necesidad de pedir hoy.`;
           listaMantener.push({
             ...p,
+            proveedor: provNombre,
             vendidos30d: vendidos,
             pedidosPlanta: pedidosDePlanta,
             sugerido: 0,
@@ -185,10 +235,10 @@ export async function mount(root, state) {
           });
         }
       } else if (actual > 0 && sinMovimiento30d) {
-        // 3. Productos sin movimiento en +30 días con existencia en Almacén
-        const contexto = `Lleva más de 30 días sin registrar ventas y mantiene ${actual} und en Almacén. No conviene pedir más de este código; es mejor impulsarlo en ofertas o combos con clientes.`;
+        const contexto = `Lleva más de 30 días sin registrar ventas y mantiene ${actual} und en Almacén. No conviene pedir más de este código; conviene impulsarlo en ofertas o combos.`;
         listaNoPedir.push({
           ...p,
+          proveedor: provNombre,
           vendidos30d: 0,
           pedidosPlanta: 0,
           sugerido: 0,
@@ -211,14 +261,13 @@ export async function mount(root, state) {
     const totalInv = listaAumentar.reduce((acc, x) => acc + x.inversion, 0);
     root.querySelector("#totalInversion").textContent = `$${totalInv.toFixed(2)}`;
 
-    // Calcular cuándo conviene volver a generar el próximo pedido
     const menorRevision = listaAumentar.length
       ? Math.min(...listaAumentar.map((x) => x.proximoRevisionDias || diasCobertura))
       : diasCobertura;
     const fechaEstimada = sumarDiasIso(menorRevision);
 
     root.querySelector("#txtProximoPedido").textContent = listaAumentar.length
-      ? `Este pedido está proyectado para cubrir los próximos ${diasCobertura} días. Vuelve a generar el próximo pedido en aprox. ${menorRevision} días (o antes si algún ítem de alta rotación agota su stock).`
+      ? `Pedido proyectado para ${diasCobertura} días${provFiltro ? ` (${provFiltro})` : ""}. Vuelve a revisar en aprox. ${menorRevision} días.`
       : `Con el stock actual no hay compras urgentes hoy. Revisa nuevamente en ${diasCobertura} días o cuando baje el stock de tus ítems principales.`;
     root.querySelector("#badgeFechaProximo").textContent = `Próxima revisión: ~${menorRevision}d (${fechaEstimada})`;
 
@@ -250,6 +299,7 @@ export async function mount(root, state) {
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-mono-ve text-xs font-extrabold text-slate-950">${p.codigo || p.id}</span>
+                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-900">${p.proveedor}</span>
                 <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${badgeColor}">${p.etiqueta}</span>
               </div>
               <div class="text-xs font-extrabold text-slate-800 mt-1">${p.descripcion || ""}</div>
@@ -291,14 +341,28 @@ export async function mount(root, state) {
     });
   });
 
-  root.querySelector("#btnGenerarPedido").addEventListener("click", generarAnalisis);
+  root.querySelector("#btnGenerarPedido").addEventListener("click", async () => {
+    const btn = root.querySelector("#btnGenerarPedido");
+    btn.disabled = true;
+    btn.textContent = "Calculando...";
+    try {
+      await cargarDatosFrescos();
+      generarAnalisis();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "⚡ Generar Pedido Sugerido";
+    }
+  });
+
   diasEl.addEventListener("change", generarAnalisis);
+  provEl.addEventListener("change", generarAnalisis);
   soloPlantaEl.addEventListener("change", generarAnalisis);
 
   root.querySelector("#btnExportPedido").addEventListener("click", async () => {
     if (!listaAumentar.length) return alert("Primero genera o ten ítems en 'Aumentar / Pedir'.");
     const XLSX = await cargarSheetJS();
     const rows = listaAumentar.map((p) => ({
+      Proveedor: p.proveedor || "SIN PROVEEDOR",
       Codigo: p.codigo || p.id,
       Descripcion: p.descripcion || "",
       Diagnostico: p.etiqueta,
@@ -316,24 +380,10 @@ export async function mount(root, state) {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Pedido_Sugerido");
-    XLSX.writeFile(wb, `Pedido_Sugerido_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const sufijoProv = provEl.value ? `_${provEl.value.replace(/[^A-Z0-9]+/gi, "_")}` : "";
+    XLSX.writeFile(wb, `Pedido_Sugerido${sufijoProv}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
-  const hace30d = Date.now() - DIAS_30_MS;
-  const [snapCat, snapNotas] = await Promise.all([getDocs(refs.catalogo()), getDocs(refs.notasEntrega())]);
-  catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-  snapNotas.forEach((d) => {
-    const n = d.data();
-    if ((n.creadoTs || 0) < hace30d) return;
-    for (const it of n.items || []) {
-      const cant = Number(it.cantidad || 0);
-      ventas30d.set(it.id, (ventas30d.get(it.id) || 0) + cant);
-      if (it.origen === "planta") {
-        pedidosPlanta30d.set(it.id, (pedidosPlanta30d.get(it.id) || 0) + cant);
-      }
-    }
-  });
-
+  await cargarDatosFrescos();
   generarAnalisis();
 }
