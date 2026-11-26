@@ -85,6 +85,10 @@
             <span id="txtAlertaVencidos">+30d sin pagar</span>
           </button>
           <span id="relojCaracas" class="text-[11px] font-mono-ve font-bold text-slate-500 hidden sm:inline">--:-- VE</span>
+          <!-- TEMPORAL: BORRAR CATÁLOGO -->
+          <button type="button" id="btnVaciarCatalogoTemp" class="text-xs font-extrabold px-2.5 py-1.5 rounded-lg bg-rose-600 text-white cursor-pointer">
+            🗑️ Vaciar Catálogo
+          </button>
           <button type="button" id="btnRefrescarTasas" class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
             ↻ Tasas
           </button>
@@ -137,7 +141,7 @@
 
   <script type="module">
     import { verificarAccesoVE, cerrarSesionVE } from "./core/auth-tenant.js";
-    import { getTenantRefs, getDocs, query, where } from "./core/db.js";
+    import { db, getTenantRefs, getDocs, query, where, writeBatch } from "./core/db.js";
 
     const TEMAS_GUARDADOS = {
       "ejecutivo-oscuro": { p: "#0f172a", ps: "#1e293b", a: "#059669", f: "#f8fafc", s: "#ffffff", b: "#cbd5e1" },
@@ -442,6 +446,32 @@
       document.getElementById("btnRefrescarTasas").addEventListener("click", () => cargarTasas(true));
       document.getElementById("btnLogoutPC").addEventListener("click", cerrarSesionVE);
       document.getElementById("btnLogoutMob").addEventListener("click", cerrarSesionVE);
+
+      // TEMPORAL: BORRAR CATÁLOGO
+      document.getElementById("btnVaciarCatalogoTemp").addEventListener("click", async () => {
+        if (!confirm("⚠️ ¿Borrar TODOS los productos del catálogo?")) return;
+        const clave = prompt("Escribe BORRAR para confirmar:");
+        if (String(clave || "").trim().toUpperCase() !== "BORRAR") return alert("Cancelado.");
+
+        const btn = document.getElementById("btnVaciarCatalogoTemp");
+        btn.disabled = true;
+        btn.textContent = "Borrando...";
+        try {
+          const refs = getTenantRefs(state.sesion.tenantId);
+          const snap = await getDocs(refs.catalogo());
+          for (let i = 0; i < snap.docs.length; i += 450) {
+            const batch = writeBatch(db);
+            snap.docs.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
+            await batch.commit();
+          }
+          alert(`Listo: ${snap.docs.length} producto(s) eliminados.`);
+          location.reload();
+        } catch (err) {
+          alert("Error: " + err.message);
+          btn.disabled = false;
+          btn.textContent = "🗑️ Vaciar Catálogo";
+        }
+      });
 
       document.getElementById("btnMobMore").addEventListener("click", () => {
         document.getElementById("mobDrawer").classList.add("open");
