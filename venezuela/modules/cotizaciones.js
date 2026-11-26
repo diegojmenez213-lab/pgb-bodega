@@ -75,9 +75,14 @@ export async function mount(root, state) {
 
           <!-- Buscador de productos -->
           <div class="ve-card p-3 space-y-2">
-            <input id="cotBusqProd" type="text" placeholder="Buscar repuesto por código, descripción o marca..." class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-900" />
+            <div class="flex items-center gap-2">
+              <input id="cotBusqProd" type="text" placeholder="Buscar repuesto por código, descripción o marca..." class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-900" />
+              <button id="btnToggleBusqCot" type="button" class="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer shrink-0">
+                Catálogo
+              </button>
+            </div>
             <div id="cotResultados" class="space-y-1.5 max-h-72 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-4">Escribe para buscar en el catálogo...</div>
+              <div class="text-xs text-slate-400 text-center py-4">Escribe o toca "Catálogo" para agregar productos...</div>
             </div>
           </div>
         </div>
@@ -86,11 +91,11 @@ export async function mount(root, state) {
         <div id="cotResumenCard" class="lg:col-span-5">
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
-              <h2 class="text-sm font-extrabold text-slate-900">Detalle del Presupuesto (<span id="cotCantItemsBadge">0</span>)</h2>
+              <h2 class="text-sm font-extrabold text-slate-900">Detalle del Presupuesto (<span id="cotCantItemsBadge">0</span> und)</h2>
               <button id="btnLimpiarCot" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar</button>
             </div>
 
-            <div id="cotItems" class="space-y-2 max-h-72 overflow-y-auto">
+            <div id="cotItems" class="space-y-2 max-h-80 overflow-y-auto">
               <div class="text-xs text-slate-400 text-center py-6">Agrega productos desde el buscador.</div>
             </div>
 
@@ -138,6 +143,7 @@ export async function mount(root, state) {
   let cotizaciones = [];
   let carrito = [];
   let factorActual = fDetal;
+  let busqAbierta = false;
 
   const docEl = root.querySelector("#cotCliDoc");
   const nomEl = root.querySelector("#cotCliNom");
@@ -162,7 +168,7 @@ export async function mount(root, state) {
       }));
       renderCarrito();
     }
-    renderBusqueda();
+    if (busqAbierta || busqEl.value.trim()) renderBusqueda();
   }
 
   function obtenerMonedas() {
@@ -174,13 +180,14 @@ export async function mount(root, state) {
     return carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
   }
 
-  function agregarProductoCotizacion(prodId) {
+  function agregarProductoCotizacion(prodId, cantAgregar = 1) {
     const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
     if (!p) return;
+    const sum = Math.max(1, parseInt(cantAgregar, 10) || 1);
 
     const ex = carrito.find((x) => x.id === p.id);
     if (ex) {
-      ex.cantidad += 1;
+      ex.cantidad += sum;
     } else {
       carrito.push({
         id: p.id,
@@ -188,11 +195,16 @@ export async function mount(root, state) {
         descripcion: p.descripcion || p.codigo || p.id,
         costoUsd: Number(p.costoUsd || 0),
         precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
-        cantidad: 1,
+        cantidad: sum,
         origen: (p.stockAlmacen || 0) > 0 ? "almacen" : "planta"
       });
     }
+
     renderCarrito();
+    busqAbierta = false;
+    busqEl.value = "";
+    resEl.innerHTML = `<div class="text-xs text-emerald-700 font-bold text-center py-2">✓ Agregado al presupuesto. Toca "Catálogo" o escribe para sumar más.</div>`;
+    root.querySelector("#cotResumenCard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function renderCarrito() {
@@ -209,22 +221,23 @@ export async function mount(root, state) {
     }
 
     itemsEl.innerHTML = carrito.map((it, idx) => `
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5" data-idx="${idx}">
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2" data-idx="${idx}">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
             <div class="font-mono-ve text-[11px] font-extrabold text-slate-900">${it.codigo}</div>
             <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
           </div>
-          <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1">✕</button>
+          <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1.5 py-0.5">✕</button>
         </div>
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-1">
-            <span class="text-[10px] font-bold text-slate-500">Cant:</span>
-            <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs font-bold text-center" />
+            <button type="button" class="btn-menos w-7 h-7 rounded-lg bg-white border border-slate-300 text-xs font-extrabold text-slate-800 cursor-pointer">−</button>
+            <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 h-7 bg-white border border-slate-300 rounded-lg px-1 text-xs font-extrabold text-center font-mono-ve" />
+            <button type="button" class="btn-mas w-7 h-7 rounded-lg bg-slate-950 text-white text-xs font-extrabold cursor-pointer">+</button>
           </div>
           <div class="flex items-center gap-1">
             <span class="text-[10px] font-bold text-slate-500">$</span>
-            <input type="number" step="0.01" min="0" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs font-bold text-right font-mono-ve" />
+            <input type="number" step="0.01" min="0" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
           </div>
           <div class="font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
         </div>
@@ -234,6 +247,11 @@ export async function mount(root, state) {
 
   function renderBusqueda() {
     const q = busqEl.value.trim().toLowerCase();
+    if (!q && !busqAbierta) {
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">Escribe o toca "Catálogo" para agregar productos...</div>`;
+      return;
+    }
+
     const matches = (q
       ? catalogo.filter((p) => `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""}`.toLowerCase().includes(q))
       : catalogo
@@ -261,13 +279,22 @@ export async function mount(root, state) {
     }).join("");
   }
 
+  root.querySelector("#btnToggleBusqCot").addEventListener("click", () => {
+    busqAbierta = !busqAbierta;
+    if (!busqAbierta && !busqEl.value.trim()) {
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">Catálogo retraído.</div>`;
+    } else {
+      renderBusqueda();
+    }
+  });
+
   resEl.addEventListener("click", (e) => {
     const target = e.target.closest("[data-id]");
     if (!target) return;
     e.preventDefault();
     e.stopPropagation();
     const prodId = decodeURIComponent(target.dataset.id || "");
-    agregarProductoCotizacion(prodId);
+    agregarProductoCotizacion(prodId, 1);
   });
 
   itemsEl.addEventListener("input", (e) => {
@@ -283,10 +310,23 @@ export async function mount(root, state) {
   });
 
   itemsEl.addEventListener("click", (e) => {
-    if (!e.target.closest(".btn-rm")) return;
-    const idx = Number(e.target.closest("[data-idx]").dataset.idx);
-    carrito.splice(idx, 1);
-    renderCarrito();
+    const row = e.target.closest("[data-idx]");
+    if (!row) return;
+    const idx = Number(row.dataset.idx);
+    if (e.target.closest(".btn-rm")) {
+      carrito.splice(idx, 1);
+      renderCarrito();
+    } else if (e.target.closest(".btn-mas")) {
+      carrito[idx].cantidad += 1;
+      renderCarrito();
+    } else if (e.target.closest(".btn-menos")) {
+      if (carrito[idx].cantidad > 1) {
+        carrito[idx].cantidad -= 1;
+      } else {
+        carrito.splice(idx, 1);
+      }
+      renderCarrito();
+    }
   });
 
   docEl.addEventListener("blur", () => {
@@ -486,11 +526,14 @@ export async function mount(root, state) {
     renderListaCot();
   }
 
-  busqEl.addEventListener("input", renderBusqueda);
+  busqEl.addEventListener("input", () => {
+    busqAbierta = Boolean(busqEl.value.trim());
+    renderBusqueda();
+  });
 
   const [snapCat, snapCli] = await Promise.all([getDocs(refs.catalogo()), getDocs(refs.clientes())]);
   catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
   clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
-  renderBusqueda();
+  renderCarrito();
   await cargarCotizaciones();
 }
