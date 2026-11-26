@@ -25,6 +25,29 @@ function getTasaActiva(state) {
   return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
+function formatearEntradaMoneda(inputEl) {
+  const digitos = String(inputEl.value || "").replace(/\D/g, "");
+  const centavos = parseInt(digitos || "0", 10);
+  const valor = Number((centavos / 100).toFixed(2));
+  const texto = valor.toFixed(2);
+  inputEl.value = texto;
+  requestAnimationFrame(() => {
+    try {
+      inputEl.setSelectionRange(texto.length, texto.length);
+    } catch {}
+  });
+  return valor;
+}
+
+function fijarCursorAlFinal(inputEl) {
+  requestAnimationFrame(() => {
+    try {
+      const len = inputEl.value.length;
+      inputEl.setSelectionRange(len, len);
+    } catch {}
+  });
+}
+
 function equivalenciasTexto(montoUsd, tasas) {
   const usd = Number(montoUsd || 0);
   const bcv = Number(tasas.bcvActiva || tasas.bcvHoy || 0);
@@ -307,9 +330,8 @@ export async function mount(root, state) {
                         ${METODOS_PAGO.map((m) => `<option value="${m}">${m}</option>`).join("")}
                       </select>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0.01"
+                        type="text"
+                        inputmode="numeric"
                         value="${Number(n.saldoPendienteUsd).toFixed(2)}"
                         class="inp-abono w-24 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-bold text-right"
                       />
@@ -430,7 +452,22 @@ export async function mount(root, state) {
     await cargarDeudores();
   }
 
+  contEl.addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("inp-abono")) fijarCursorAlFinal(e.target);
+  });
+
+  contEl.addEventListener("input", (e) => {
+    if (e.target.classList.contains("inp-abono")) {
+      formatearEntradaMoneda(e.target);
+    }
+  });
+
   contEl.addEventListener("click", async (e) => {
+    if (e.target.classList.contains("inp-abono")) {
+      fijarCursorAlFinal(e.target);
+      return;
+    }
+
     const card = e.target.closest("[data-doc]");
     if (!card) return;
     const docId = decodeURIComponent(card.dataset.doc || "");
