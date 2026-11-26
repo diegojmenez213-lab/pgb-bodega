@@ -15,6 +15,8 @@ import {
   orderBy,
   limit,
   writeBatch,
+  runTransaction,
+  increment,
   onSnapshot,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -71,6 +73,8 @@ export function getTenantRefs(tenantId) {
     historialNovedades: () => collection(db, "empresas", id, "historial_novedades"),
     conteos: () => collection(db, "empresas", id, "conteos"),
     proveedores: () => collection(db, "empresas", id, "proveedores"),
+    cierresCaja: () => collection(db, "empresas", id, "cierresCaja"),
+    gastosCaja: () => collection(db, "empresas", id, "gastosCaja"),
     tasasGlobales: () => doc(db, "sistema_ve", "tasas_live")
   };
 }
@@ -98,6 +102,8 @@ export {
   orderBy,
   limit,
   writeBatch,
+  runTransaction,
+  increment,
   onSnapshot,
   serverTimestamp
 };
