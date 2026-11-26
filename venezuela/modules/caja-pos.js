@@ -17,6 +17,14 @@ function getTasaActiva(state) {
   return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
+function parseMultiplicadorTexto(raw) {
+  const limpio = String(raw || "").replace(",", ".").trim();
+  if (!limpio || limpio === "." || limpio.endsWith(".")) return null;
+  const num = Number(limpio);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num;
+}
+
 const METODOS_PAGO = [
   "Efectivo USD",
   "Pago Móvil Bs.",
@@ -73,7 +81,14 @@ export async function mount(root, state) {
                   <option value="mayor">Mayor (×${fMayor})</option>
                   <option value="custom">Mult.</option>
                 </select>
-                <input id="posMult" type="number" step="0.05" min="0.1" value="${fDetal}" title="Multiplicador libre sobre costo" class="w-20 bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-mono-ve font-extrabold text-center" />
+                <input
+                  id="posMult"
+                  type="text"
+                  inputmode="decimal"
+                  value="${fDetal}"
+                  title="Multiplicador libre sobre costo"
+                  class="w-20 bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-mono-ve font-extrabold text-center"
+                />
               </div>
             </div>
           </div>
@@ -197,11 +212,13 @@ export async function mount(root, state) {
   const pagosEl = root.querySelector("#posPagos");
   const alertaBox = root.querySelector("#alertaDeudaCliente");
 
-  function aplicarFactorPos(nuevoFactor) {
-    const val = Number(nuevoFactor);
-    if (isNaN(val) || val <= 0) return;
+  function aplicarFactorPos(nuevoFactor, sincronizarInput = false) {
+    const val = parseMultiplicadorTexto(nuevoFactor);
+    if (val === null) return;
     factorActual = val;
-    multEl.value = String(val);
+    if (sincronizarInput) {
+      multEl.value = String(val);
+    }
     if (carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
@@ -521,20 +538,31 @@ export async function mount(root, state) {
       if (!nomEl.value.trim()) nomEl.value = cli.nombre || "";
       const fCli = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
       tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
-      aplicarFactorPos(fCli);
+      aplicarFactorPos(fCli, true);
     }
     chequearDeudaClienteActual();
   });
 
   tarifaEl.addEventListener("change", () => {
-    if (tarifaEl.value === "mayor") aplicarFactorPos(fMayor);
-    else if (tarifaEl.value === "detal") aplicarFactorPos(fDetal);
+    if (tarifaEl.value === "mayor") aplicarFactorPos(fMayor, true);
+    else if (tarifaEl.value === "detal") aplicarFactorPos(fDetal, true);
     else multEl.focus();
   });
 
+  // No sobreescribimos multEl.value en "input" para evitar que "2." se convierta en "0.2" en teclados móviles
   multEl.addEventListener("input", () => {
     tarifaEl.value = "custom";
-    aplicarFactorPos(multEl.value);
+    aplicarFactorPos(multEl.value, false);
+  });
+
+  multEl.addEventListener("blur", () => {
+    const val = parseMultiplicadorTexto(multEl.value);
+    if (val !== null) {
+      multEl.value = String(val);
+      aplicarFactorPos(val, false);
+    } else {
+      multEl.value = String(factorActual);
+    }
   });
 
   function limpiarCaja() {
@@ -599,7 +627,6 @@ export async function mount(root, state) {
 
       batch.set(refs.empresaRef, { correlativos: { notaEntregaActual: nuevoNum } }, { merge: true });
 
-      // Descuenta SOLO lo vendido desde Almacén; lo de Planta NO se descuenta de Planta
       for (const it of carrito) {
         if (it.origen === "almacen") {
           const prod = catalogo.find((p) => p.id === it.id);
@@ -694,7 +721,7 @@ export async function mount(root, state) {
     state.cotizacionPendiente = null;
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
-    if (cot.multiplicador) aplicarFactorPos(cot.multiplicador);
+    if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
     carrito = (cot.items || []).map((it) => ({ ...it }));
     chequearDeudaClienteActual();
   }
