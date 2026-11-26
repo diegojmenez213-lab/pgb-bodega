@@ -94,22 +94,27 @@ export async function mount(root, state) {
           </div>
 
           <div class="ve-card p-3 space-y-2">
-            <input id="posBusq" type="text" placeholder="Buscar producto por código, descripción o marca (F1)..." class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-950" />
+            <div class="flex items-center gap-2">
+              <input id="posBusq" type="text" placeholder="Buscar producto por código, descripción o marca (F1)..." class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-950" />
+              <button id="btnToggleBusqPos" type="button" class="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer shrink-0">
+                Catálogo
+              </button>
+            </div>
             <div id="posResultados" class="space-y-1.5 max-h-80 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-6">Escribe para agregar repuestos a la Nota de Entrega...</div>
+              <div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Catálogo" para agregar repuestos...</div>
             </div>
           </div>
         </div>
 
         <!-- Derecha: Carrito, Condición Contado/Crédito, Pagos y Emisión -->
-        <div class="lg:col-span-5 space-y-3">
+        <div id="posCarritoCard" class="lg:col-span-5 space-y-3">
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
-              <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota (<span id="posCantItemsBadge">0</span>)</h2>
+              <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota (<span id="posCantItemsBadge">0</span> und)</h2>
               <button id="btnLimpiarPos" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
             </div>
 
-            <div id="posCarrito" class="space-y-2 max-h-64 overflow-y-auto">
+            <div id="posCarrito" class="space-y-2 max-h-80 overflow-y-auto">
               <div class="text-xs text-slate-400 text-center py-6">Carrito vacío.</div>
             </div>
 
@@ -201,6 +206,7 @@ export async function mount(root, state) {
   let ultimoFolio = Number(state.empresa?.correlativos?.notaEntregaActual || 0);
   let esCredito = false;
   let diasCredito = 15;
+  let busqAbierta = false;
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
@@ -226,7 +232,7 @@ export async function mount(root, state) {
       }));
       renderCarrito();
     }
-    renderBusqueda();
+    if (busqAbierta || busqEl.value.trim()) renderBusqueda();
   }
 
   function actualizarFolioUI() {
@@ -372,13 +378,14 @@ export async function mount(root, state) {
       : (restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
   }
 
-  function agregarProductoCaja(prodId) {
+  function agregarProductoCaja(prodId, cantAgregar = 1) {
     const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
     if (!p) return;
+    const sum = Math.max(1, parseInt(cantAgregar, 10) || 1);
 
     const ex = carrito.find((x) => x.id === p.id);
     if (ex) {
-      ex.cantidad += 1;
+      ex.cantidad += sum;
     } else {
       carrito.push({
         id: p.id,
@@ -386,11 +393,16 @@ export async function mount(root, state) {
         descripcion: p.descripcion || p.codigo || p.id,
         costoUsd: Number(p.costoUsd || 0),
         precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
-        cantidad: 1,
+        cantidad: sum,
         origen: (p.stockAlmacen || 0) > 0 ? "almacen" : "planta"
       });
     }
+
     renderCarrito();
+    busqAbierta = false;
+    busqEl.value = "";
+    resEl.innerHTML = `<div class="text-xs text-emerald-700 font-bold text-center py-2">✓ Agregado a la nota. Toca "Catálogo" o escribe para sumar más.</div>`;
+    root.querySelector("#posCarritoCard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function renderCarrito() {
@@ -405,7 +417,7 @@ export async function mount(root, state) {
       cartEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Carrito vacío.</div>`;
     } else {
       cartEl.innerHTML = carrito.map((it, idx) => `
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5" data-idx="${idx}">
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2" data-idx="${idx}">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
               <div class="flex items-center gap-1.5">
@@ -416,13 +428,17 @@ export async function mount(root, state) {
               </div>
               <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
             </div>
-            <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1">✕</button>
+            <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1.5 py-0.5">✕</button>
           </div>
           <div class="flex items-center justify-between gap-2">
-            <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs font-bold text-center" />
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn-menos w-7 h-7 rounded-lg bg-white border border-slate-300 text-xs font-extrabold text-slate-800 cursor-pointer">−</button>
+              <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 h-7 bg-white border border-slate-300 rounded-lg px-1 text-xs font-extrabold text-center font-mono-ve" />
+              <button type="button" class="btn-mas w-7 h-7 rounded-lg bg-slate-950 text-white text-xs font-extrabold cursor-pointer">+</button>
+            </div>
             <div class="flex items-center gap-1">
               <span class="text-[10px] font-bold text-slate-500">$</span>
-              <input type="number" step="0.01" min="0" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs font-bold text-right font-mono-ve" />
+              <input type="number" step="0.01" min="0" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
             </div>
             <div class="font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
           </div>
@@ -434,6 +450,11 @@ export async function mount(root, state) {
 
   function renderBusqueda() {
     const q = busqEl.value.trim().toLowerCase();
+    if (!q && !busqAbierta) {
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Catálogo" para agregar repuestos...</div>`;
+      return;
+    }
+
     const matches = (q
       ? catalogo.filter((p) => `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""}`.toLowerCase().includes(q))
       : catalogo
@@ -461,13 +482,22 @@ export async function mount(root, state) {
     }).join("");
   }
 
+  root.querySelector("#btnToggleBusqPos").addEventListener("click", () => {
+    busqAbierta = !busqAbierta;
+    if (!busqAbierta && !busqEl.value.trim()) {
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Catálogo retraído.</div>`;
+    } else {
+      renderBusqueda();
+    }
+  });
+
   resEl.addEventListener("click", (e) => {
     const target = e.target.closest("[data-id]");
     if (!target) return;
     e.preventDefault();
     e.stopPropagation();
     const prodId = decodeURIComponent(target.dataset.id || "");
-    agregarProductoCaja(prodId);
+    agregarProductoCaja(prodId, 1);
   });
 
   cartEl.addEventListener("input", (e) => {
@@ -491,6 +521,16 @@ export async function mount(root, state) {
       renderCarrito();
     } else if (e.target.closest(".btn-origen")) {
       carrito[idx].origen = carrito[idx].origen === "almacen" ? "planta" : "almacen";
+      renderCarrito();
+    } else if (e.target.closest(".btn-mas")) {
+      carrito[idx].cantidad += 1;
+      renderCarrito();
+    } else if (e.target.closest(".btn-menos")) {
+      if (carrito[idx].cantidad > 1) {
+        carrito[idx].cantidad -= 1;
+      } else {
+        carrito.splice(idx, 1);
+      }
       renderCarrito();
     }
   });
@@ -708,7 +748,10 @@ export async function mount(root, state) {
   };
   window.addEventListener("keydown", onKeyDown);
 
-  busqEl.addEventListener("input", renderBusqueda);
+  busqEl.addEventListener("input", () => {
+    busqAbierta = Boolean(busqEl.value.trim());
+    renderBusqueda();
+  });
 
   actualizarFolioUI();
   const [snapCat, snapCli, snapNotas] = await Promise.all([
@@ -730,6 +773,5 @@ export async function mount(root, state) {
     chequearDeudaClienteActual();
   }
 
-  renderBusqueda();
   renderCarrito();
 }
