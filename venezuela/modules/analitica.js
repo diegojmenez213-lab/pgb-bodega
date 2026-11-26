@@ -1,369 +1,208 @@
 // venezuela/modules/analitica.js
-import { getTenantRefs, getDocs } from "../core/db.js";
-import { imprimirDocumentoCarta } from "./documentos-pdf.js";
+import { getTenantRefs, getDocs, normalizarIdVE } from "../core/db.js";
 
-function hoyIso() {
-  return new Date().toISOString().slice(0, 10);
+function getTasaActiva(state) {
+  const t = state.tasas || {};
+  const bcv = state.modoTasaBCV === "manana" && t.bcvManana ? t.bcvManana : t.bcvHoy;
+  return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
-function haceDiasIso(dias) {
-  return new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
-}
-
-async function cargarChartJS() {
-  if (window.Chart) return window.Chart;
-  await new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js";
-    s.onload = resolve;
-    s.onerror = () => reject(new Error("No se pudo cargar Chart.js"));
-    document.head.appendChild(s);
-  });
-  return window.Chart;
+function diasEntre(inicioTs, finTs) {
+  if (!inicioTs || !finTs) return 0;
+  return Math.max(0, (finTs - inicioTs) / 86400000);
 }
 
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
   root.innerHTML = `
-    <div class="space-y-4 max-w-6xl mx-auto">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 class="text-lg font-extrabold text-slate-900">Analítica & Registro de Caja</h1>
-          <p class="text-xs text-slate-500">Consulta cualquier día o rango (hoy, ayer, hace 10 días) con gráficas y cuadre completo.</p>
+    <div class="space-y-5 max-w-6xl mx-auto">
+      <div>
+        <h1 class="text-lg font-extrabold text-slate-900">Analítica & Comportamiento de Crédito</h1>
+        <p class="text-xs text-slate-500">
+          Revisa tus ingresos, utilidad y qué clientes pagan a tiempo o antes vs. quiénes se pasan de los días de crédito.
+        </p>
+      </div>
+
+      <!-- KPIs generales -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="ve-card p-4">
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Ventas Totales (USD)</div>
+          <div id="kpiVentasUsd" class="font-mono-ve text-xl font-extrabold text-slate-900 mt-1">$0.00</div>
+          <div id="kpiVentasBs" class="font-mono-ve text-xs font-bold text-slate-500 mt-0.5">Bs. 0.00</div>
         </div>
-        <div class="flex flex-wrap items-end gap-1.5">
-          <div>
-            <label class="text-[10px] font-bold text-slate-500 block">Desde</label>
-            <input id="anaDesde" type="date" value="${hoyIso()}" class="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold" />
-          </div>
-          <div>
-            <label class="text-[10px] font-bold text-slate-500 block">Hasta</label>
-            <input id="anaHasta" type="date" value="${hoyIso()}" class="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold" />
-          </div>
-          <button type="button" id="btnAnaHoy" class="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-extrabold cursor-pointer">Hoy</button>
-          <button type="button" id="btnAnaAyer" class="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-extrabold cursor-pointer">Ayer</button>
-          <button type="button" id="btnAna10d" class="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-extrabold cursor-pointer">10d</button>
-          <button type="button" id="btnAnaFiltrar" class="px-3.5 py-2 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">Ver Caja</button>
+
+        <div class="ve-card p-4">
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Utilidad Estimada</div>
+          <div id="kpiUtilidadUsd" class="font-mono-ve text-xl font-extrabold text-emerald-700 mt-1">$0.00</div>
+          <div id="kpiMargenPct" class="text-xs font-bold text-slate-500 mt-0.5">Margen: 0%</div>
+        </div>
+
+        <div class="ve-card p-4">
+          <div class="text-[10px] font-extrabold uppercase text-slate-400">Cartera a Crédito Activa</div>
+          <div id="kpiCreditoUsd" class="font-mono-ve text-xl font-extrabold text-rose-700 mt-1">$0.00</div>
+          <div id="kpiClientesCred" class="text-xs font-bold text-slate-500 mt-0.5">0 clientes con crédito</div>
         </div>
       </div>
 
-      <!-- KPIs principales -->
-      <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div class="ve-card">
-          <div class="text-[10px] font-extrabold text-slate-400">VENTA BRUTA</div>
-          <div id="kpiVentas" class="text-xl font-extrabold font-mono-ve mt-1">$0.00</div>
-        </div>
-        <div class="ve-card">
-          <div class="text-[10px] font-extrabold text-slate-400">INVERSIÓN / COSTO</div>
-          <div id="kpiCosto" class="text-xl font-extrabold font-mono-ve text-slate-600 mt-1">$0.00</div>
-        </div>
-        <div class="ve-card border-emerald-200 bg-emerald-50/40">
-          <div class="text-[10px] font-extrabold text-emerald-700">GANANCIA NETA</div>
-          <div id="kpiUtilidad" class="text-xl font-extrabold font-mono-ve text-emerald-700 mt-1">$0.00</div>
-        </div>
-        <div class="ve-card">
-          <div class="text-[10px] font-extrabold text-slate-400">NOTAS EMITIDAS</div>
-          <div id="kpiDocs" class="text-xl font-extrabold font-mono-ve mt-1">0</div>
-        </div>
-        <div class="ve-card border-amber-200 bg-amber-50/40">
-          <div class="text-[10px] font-extrabold text-amber-800">CLIENTES EN CRÉDITO</div>
-          <div id="kpiCreditos" class="text-xl font-extrabold font-mono-ve text-amber-800 mt-1">0</div>
-        </div>
-      </div>
-
-      <!-- Gráficas profesionales -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div class="lg:col-span-7 ve-card space-y-2">
+      <!-- Ranking Mejores vs Peores Pagadores a Crédito -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="ve-card p-4 space-y-3 border-rose-200">
           <div class="flex items-center justify-between">
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Venta vs. Costo vs. Ganancia Neta (USD)</h2>
-            <span id="margenPromTxt" class="text-[11px] font-extrabold text-emerald-700">Margen: 0%</span>
-          </div>
-          <div class="relative h-56">
-            <canvas id="chartFlujo"></canvas>
-          </div>
-        </div>
-
-        <div class="lg:col-span-5 ve-card space-y-2">
-          <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Distribución por Método de Pago</h2>
-          <div class="relative h-56">
-            <canvas id="chartPagos"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Arqueo de métodos de pago + Ventas de Planta + Notas emitidas -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div class="lg:col-span-5 space-y-4">
-          <div class="ve-card space-y-2">
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Arqueo por Método de Pago</h2>
-            <div id="desglosePagos" class="space-y-1.5 text-xs">
-              <div class="text-slate-400 py-4 text-center">Sin pagos registrados.</div>
+            <div>
+              <h2 class="text-xs font-extrabold uppercase tracking-wider text-rose-800">
+                Se Pasan de los Días de Crédito (Atrasados / Riesgo)
+              </h2>
+              <p class="text-[11px] text-slate-500">Ordenados por mayor exceso de días sobre el plazo pactado.</p>
             </div>
+            <span id="badgePeores" class="px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[11px] font-extrabold">0</span>
           </div>
-
-          <div id="panelVentasPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-2">
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">
-              Productos Vendidos Desde Planta (Sin descontar Planta)
-            </h2>
-            <div id="listaVentasPlanta" class="space-y-1.5 text-xs"></div>
+          <div id="listaPeoresClientes" class="space-y-2 max-h-96 overflow-y-auto">
+            <div class="text-xs text-slate-400 py-6 text-center">Analizando historial...</div>
           </div>
         </div>
 
-        <div class="lg:col-span-7 space-y-2">
-          <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500 px-1">Registro de Notas de Entrega del Período</h2>
-          <div id="viewNotas" class="space-y-2"></div>
+        <div class="ve-card p-4 space-y-3 border-emerald-200">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-xs font-extrabold uppercase tracking-wider text-emerald-800">
+                Mejores Clientes (Pagan al Día o Antes)
+              </h2>
+              <p class="text-[11px] text-slate-500">Cumplen dentro o antes del plazo de días de crédito.</p>
+            </div>
+            <span id="badgeMejores" class="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-extrabold">0</span>
+          </div>
+          <div id="listaMejoresClientes" class="space-y-2 max-h-96 overflow-y-auto">
+            <div class="text-xs text-slate-400 py-6 text-center">Analizando historial...</div>
+          </div>
         </div>
       </div>
     </div>
   `;
 
-  let todasNotas = [];
-  let chartFlujoInst = null;
-  let chartPagosInst = null;
-
-  const desdeEl = root.querySelector("#anaDesde");
-  const hastaEl = root.querySelector("#anaHasta");
-  const viewNotas = root.querySelector("#viewNotas");
-
-  async function actualizarGraficas(diasLabels, ventasArr, costoArr, utilArr, metodosLabels, metodosVals) {
-    try {
-      const Chart = await cargarChartJS();
-      const ctxFlujo = root.querySelector("#chartFlujo").getContext("2d");
-      const ctxPagos = root.querySelector("#chartPagos").getContext("2d");
-
-      if (chartFlujoInst) chartFlujoInst.destroy();
-      if (chartPagosInst) chartPagosInst.destroy();
-
-      chartFlujoInst = new Chart(ctxFlujo, {
-        type: "bar",
-        data: {
-          labels: diasLabels.length ? diasLabels : ["Sin datos"],
-          datasets: [
-            { label: "Venta ($)", data: ventasArr.length ? ventasArr : [0], backgroundColor: "#0f172a", borderRadius: 6 },
-            { label: "Costo ($)", data: costoArr.length ? costoArr : [0], backgroundColor: "#94a3b8", borderRadius: 6 },
-            { label: "Ganancia ($)", data: utilArr.length ? utilArr : [0], backgroundColor: "#16a34a", borderRadius: 6 }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 11 } } } },
-          scales: { y: { beginAtZero: true } }
-        }
-      });
-
-      const colores = ["#0f172a", "#16a34a", "#0284c7", "#d97706", "#7c3aed", "#db2777", "#0d9488"];
-      chartPagosInst = new Chart(ctxPagos, {
-        type: "doughnut",
-        data: {
-          labels: metodosLabels.length ? metodosLabels : ["Sin pagos"],
-          datasets: [{
-            data: metodosVals.length ? metodosVals : [1],
-            backgroundColor: metodosVals.length ? colores : ["#e2e8f0"],
-            borderWidth: 2,
-            borderColor: "#ffffff"
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 11 } } } }
-        }
-      });
-    } catch (e) {
-      console.warn("Chart no disponible:", e);
-    }
-  }
-
-  function render() {
-    const desde = desdeEl.value;
-    const hasta = hastaEl.value;
-
-    const notas = todasNotas.filter((n) => {
-      const f = n.fechaIso || "";
-      if (desde && f < desde) return false;
-      if (hasta && f > hasta) return false;
-      return true;
-    });
-
-    const totalVentas = notas.reduce((a, n) => a + Number(n.totalUsd || 0), 0);
-    const totalCosto = notas.reduce((a, n) => a + Number(n.costoTotalUsd || 0), 0);
-    const totalUtil = notas.reduce((a, n) => a + Number(n.utilidadUsd ?? (Number(n.totalUsd || 0) - Number(n.costoTotalUsd || 0))), 0);
-    const margen = totalVentas > 0 ? ((totalUtil / totalVentas) * 100).toFixed(1) : "0.0";
-
-    const deudoresSet = new Set();
-    for (const n of todasNotas) {
-      const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
-      if (saldo > 0.01) {
-        deudoresSet.add(String(n.cliente?.documento || n.cliente?.nombre || n.id).toUpperCase());
-      }
-    }
-
-    root.querySelector("#kpiVentas").textContent = `$${totalVentas.toFixed(2)}`;
-    root.querySelector("#kpiCosto").textContent = `$${totalCosto.toFixed(2)}`;
-    root.querySelector("#kpiUtilidad").textContent = `$${totalUtil.toFixed(2)}`;
-    root.querySelector("#kpiDocs").textContent = String(notas.length);
-    root.querySelector("#kpiCreditos").textContent = String(deudoresSet.size);
-    root.querySelector("#margenPromTxt").textContent = `Margen neto: ${margen}%`;
-
-    const porDia = new Map();
-    const porMetodo = new Map();
-    const ventasPlantaMap = new Map();
-
-    for (const n of notas) {
-      const f = n.fechaIso || "Sin fecha";
-      if (!porDia.has(f)) porDia.set(f, { venta: 0, costo: 0, util: 0 });
-      const row = porDia.get(f);
-      const v = Number(n.totalUsd || 0);
-      const c = Number(n.costoTotalUsd || 0);
-      const u = Number(n.utilidadUsd ?? (v - c));
-      row.venta += v;
-      row.costo += c;
-      row.util += u;
-
-      for (const p of n.pagos || []) {
-        const m = p.metodo || "Otro";
-        porMetodo.set(m, (porMetodo.get(m) || 0) + Number(p.montoUsd || 0));
-      }
-      const saldoPend = Number(n.saldoPendienteUsd ?? 0);
-      if (saldoPend > 0.01) {
-        porMetodo.set("A Crédito (Por Cobrar)", (porMetodo.get("A Crédito (Por Cobrar)") || 0) + saldoPend);
-      }
-
-      for (const it of n.items || []) {
-        if (it.origen === "planta") {
-          const prev = ventasPlantaMap.get(it.id) || {
-            codigo: it.codigo,
-            descripcion: it.descripcion,
-            cant: 0,
-            montoUsd: 0
-          };
-          prev.cant += Number(it.cantidad || 0);
-          prev.montoUsd += Number(it.cantidad || 0) * Number(it.precioUsd || 0);
-          ventasPlantaMap.set(it.id, prev);
-        }
-      }
-    }
-
-    const diasOrdenados = Array.from(porDia.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    const metodosOrdenados = Array.from(porMetodo.entries()).sort((a, b) => b[1] - a[1]);
-    const itemsPlanta = Array.from(ventasPlantaMap.values()).sort((a, b) => b.montoUsd - a.montoUsd);
-
-    const desEl = root.querySelector("#desglosePagos");
-    if (!metodosOrdenados.length) {
-      desEl.innerHTML = `<div class="text-slate-400 py-4 text-center">Sin pagos registrados en esta fecha.</div>`;
-    } else {
-      desEl.innerHTML = metodosOrdenados.map(([m, val]) => `
-        <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <span class="font-bold text-slate-700">${m}</span>
-          <span class="font-mono-ve font-extrabold text-slate-950">$${val.toFixed(2)}</span>
-        </div>
-      `).join("");
-    }
-
-    const panelPlanta = root.querySelector("#panelVentasPlanta");
-    const listaPlanta = root.querySelector("#listaVentasPlanta");
-    if (itemsPlanta.length) {
-      panelPlanta.classList.remove("hidden");
-      listaPlanta.innerHTML = itemsPlanta.map((x) => `
-        <div class="flex items-center justify-between bg-white px-2.5 py-2 rounded-xl border border-sky-200">
-          <div class="min-w-0">
-            <div class="font-mono-ve font-extrabold text-slate-900">${x.codigo}</div>
-            <div class="text-[11px] text-slate-600 truncate">${x.descripcion}</div>
-          </div>
-          <div class="text-right shrink-0 ml-2 font-mono-ve">
-            <div class="font-extrabold text-sky-900">${x.cant} und</div>
-            <div class="text-[11px] text-slate-500">$${x.montoUsd.toFixed(2)}</div>
-          </div>
-        </div>
-      `).join("");
-    } else {
-      panelPlanta.classList.add("hidden");
-    }
-
-    if (!notas.length) {
-      viewNotas.innerHTML = `<div class="ve-card text-center py-8 text-xs text-slate-500 font-bold">No hay registros de caja para la fecha seleccionada.</div>`;
-    } else {
-      viewNotas.innerHTML = notas.map((n) => {
-        const utilNota = Number(n.utilidadUsd ?? (Number(n.totalUsd || 0) - Number(n.costoTotalUsd || 0)));
-        const metTxt = (n.pagos || []).map((p) => `${p.metodo}: $${Number(p.montoUsd || 0).toFixed(2)}`).join(" • ");
-        const cantPlantaNota = (n.items || []).filter((i) => i.origen === "planta").reduce((a, b) => a + Number(b.cantidad || 0), 0);
-        return `
-          <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-folio="${n.id}">
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-mono-ve text-xs font-extrabold text-slate-950">N° ${n.folio || n.id}</span>
-                <span class="text-xs font-bold text-slate-800">${n.cliente?.nombre || "Consumidor Final"}</span>
-                <span class="text-[10px] font-bold text-slate-400">${n.fechaIso || ""}</span>
-                ${cantPlantaNota > 0 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">Planta: ${cantPlantaNota} und</span>` : ""}
-                ${n.esCredito && Number(n.saldoPendienteUsd || 0) > 0.01 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Crédito $${Number(n.saldoPendienteUsd).toFixed(2)}</span>` : ""}
-              </div>
-              <div class="text-[11px] text-slate-500 mt-0.5">
-                Venta: <strong class="text-slate-900">$${Number(n.totalUsd || 0).toFixed(2)}</strong> • Costo: $${Number(n.costoTotalUsd || 0).toFixed(2)} • Ganancia: <strong class="text-emerald-700">$${utilNota.toFixed(2)}</strong>
-              </div>
-              ${metTxt ? `<div class="text-[10px] font-semibold text-slate-400 mt-0.5">${metTxt}</div>` : ""}
-            </div>
-            <button type="button" class="btn-reprint px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold cursor-pointer">
-              PDF
-            </button>
-          </div>
-        `;
-      }).join("");
-    }
-
-    actualizarGraficas(
-      diasOrdenados.map((d) => d[0].slice(5)),
-      diasOrdenados.map((d) => Number(d[1].venta.toFixed(2))),
-      diasOrdenados.map((d) => Number(d[1].costo.toFixed(2))),
-      diasOrdenados.map((d) => Number(d[1].util.toFixed(2))),
-      metodosOrdenados.map((m) => m[0]),
-      metodosOrdenados.map((m) => Number(m[1].toFixed(2)))
-    );
-  }
-
-  viewNotas.addEventListener("click", (e) => {
-    const btn = e.target.closest(".btn-reprint");
-    if (!btn) return;
-    const id = btn.closest("[data-folio]").dataset.folio;
-    const nota = todasNotas.find((n) => n.id === id);
-    if (!nota) return;
-    imprimirDocumentoCarta({
-      tipo: "NOTA DE ENTREGA",
-      folio: nota.folio || nota.id,
-      empresa: state.empresa,
-      cliente: nota.cliente || {},
-      items: nota.items || [],
-      totalUsd: nota.totalUsd || 0,
-      monedas: nota.monedas || ["USD", "BS"],
-      tasas: { bcvActiva: nota.tasaBcvUsada || state.tasas?.bcvHoy || 0, eur: state.tasas?.eur || 0, usdt: state.tasas?.usdt || 0 },
-      pagos: nota.pagos || [],
-      fecha: nota.fechaIso || ""
-    });
-  });
-
-  root.querySelector("#btnAnaHoy").addEventListener("click", () => {
-    desdeEl.value = hoyIso();
-    hastaEl.value = hoyIso();
-    render();
-  });
-
-  root.querySelector("#btnAnaAyer").addEventListener("click", () => {
-    const ayer = haceDiasIso(1);
-    desdeEl.value = ayer;
-    hastaEl.value = ayer;
-    render();
-  });
-
-  root.querySelector("#btnAna10d").addEventListener("click", () => {
-    desdeEl.value = haceDiasIso(10);
-    hastaEl.value = hoyIso();
-    render();
-  });
-
-  root.querySelector("#btnAnaFiltrar").addEventListener("click", render);
-
   const snapNotas = await getDocs(refs.notasEntrega());
-  todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
-  render();
+  const notas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const ahora = Date.now();
+  const tasas = getTasaActiva(state);
+
+  const ventasUsd = notas.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
+  const utilidadUsd = notas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
+  const margen = ventasUsd > 0 ? ((utilidadUsd / ventasUsd) * 100).toFixed(1) : "0.0";
+
+  // Agrupar notas que tuvieron condición de crédito o saldo pendiente
+  const porCliente = new Map();
+  let carteraActivaUsd = 0;
+
+  for (const n of notas) {
+    const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
+    if (saldo > 0.01) carteraActivaUsd += saldo;
+
+    const fueCredito = Boolean(n.esCredito) || Number(n.diasCredito || 0) > 0 || saldo > 0.01 || (Array.isArray(n.abonos) && n.abonos.length > 0);
+    if (!fueCredito) continue;
+
+    const docId = normalizarIdVE(n.cliente?.documento || "") || "V-00000000";
+    const nombre = (n.cliente?.nombre || "").trim() || "Consumidor Final";
+    const plazo = Math.max(1, Number(n.diasCredito || 15));
+    const inicioTs = Number(n.creadoTs || 0);
+
+    // Si ya está saldada, usamos la fecha de saldo o el último abono; si sigue abierta, medimos hasta hoy
+    let finReferenciaTs = ahora;
+    if (saldo <= 0.01) {
+      const ultimoAbonoTs = Array.isArray(n.abonos) && n.abonos.length
+        ? Math.max(...n.abonos.map((a) => Number(a.ts || 0)))
+        : 0;
+      finReferenciaTs = Number(n.saldadaTs || ultimoAbonoTs || n.venceTs || inicioTs);
+    }
+
+    const diasTomados = diasEntre(inicioTs, finReferenciaTs);
+    const diferenciaDias = Number((diasTomados - plazo).toFixed(1)); // > 0 significa que se pasó del plazo
+
+    if (!porCliente.has(docId)) {
+      porCliente.set(docId, {
+        documento: docId,
+        nombre,
+        totalCreditoUsd: 0,
+        saldoPendienteUsd: 0,
+        operaciones: 0,
+        vecesPasado: 0,
+        sumaExcesoDias: 0,
+        sumaDiasTomados: 0,
+        sumaPlazos: 0
+      });
+    }
+
+    const c = porCliente.get(docId);
+    c.totalCreditoUsd += Number(n.totalUsd || 0);
+    c.saldoPendienteUsd += saldo;
+    c.operaciones += 1;
+    c.sumaDiasTomados += diasTomados;
+    c.sumaPlazos += plazo;
+    if (diferenciaDias > 0.5) {
+      c.vecesPasado += 1;
+      c.sumaExcesoDias += diferenciaDias;
+    }
+  }
+
+  const evaluados = Array.from(porCliente.values()).map((c) => {
+    const promDias = c.operaciones ? (c.sumaDiasTomados / c.operaciones).toFixed(1) : "0.0";
+    const promPlazo = c.operaciones ? (c.sumaPlazos / c.operaciones).toFixed(0) : "15";
+    const promExceso = c.vecesPasado ? (c.sumaExcesoDias / c.vecesPasado).toFixed(1) : "0.0";
+    const scoreAtraso = c.sumaExcesoDias + (c.saldoPendienteUsd > 0.01 && c.vecesPasado > 0 ? 15 : 0);
+    return { ...c, promDias, promPlazo, promExceso, scoreAtraso };
+  });
+
+  const peores = evaluados
+    .filter((c) => c.vecesPasado > 0)
+    .sort((a, b) => b.scoreAtraso - a.scoreAtraso);
+
+  const mejores = evaluados
+    .filter((c) => c.vecesPasado === 0)
+    .sort((a, b) => b.totalCreditoUsd - a.totalCreditoUsd);
+
+  root.querySelector("#kpiVentasUsd").textContent = `$${ventasUsd.toFixed(2)}`;
+  root.querySelector("#kpiVentasBs").textContent = tasas.bcvActiva ? `Bs. ${(ventasUsd * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
+  root.querySelector("#kpiUtilidadUsd").textContent = `$${utilidadUsd.toFixed(2)}`;
+  root.querySelector("#kpiMargenPct").textContent = `Margen: ${margen}%`;
+  root.querySelector("#kpiCreditoUsd").textContent = `$${carteraActivaUsd.toFixed(2)}`;
+  root.querySelector("#kpiClientesCred").textContent = `${evaluados.length} clientes con historial a crédito`;
+
+  root.querySelector("#badgePeores").textContent = String(peores.length);
+  root.querySelector("#badgeMejores").textContent = String(mejores.length);
+
+  const contPeores = root.querySelector("#listaPeoresClientes");
+  const contMejores = root.querySelector("#listaMejoresClientes");
+
+  contPeores.innerHTML = peores.length
+    ? peores.map((c) => `
+      <div class="p-3 rounded-xl bg-rose-50/60 border border-rose-200 flex items-center justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-extrabold text-slate-900 truncate">${c.nombre} <span class="font-mono-ve text-[10px] text-slate-500">(${c.documento})</span></div>
+          <div class="text-[11px] text-rose-800 font-semibold mt-0.5">
+            Se pasó en <strong>${c.vecesPasado}</strong> de ${c.operaciones} crédito(s) • Prom. exceso: <strong>+${c.promExceso}d</strong> (tarda ~${c.promDias}d vs plazo ${c.promPlazo}d)
+          </div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="font-mono-ve text-xs font-extrabold text-rose-700">$${c.totalCreditoUsd.toFixed(2)}</div>
+          ${c.saldoPendienteUsd > 0.01 ? `<div class="font-mono-ve text-[10px] font-bold text-rose-900">Debe: $${c.saldoPendienteUsd.toFixed(2)}</div>` : `<div class="text-[10px] font-bold text-slate-500">Al día hoy</div>`}
+        </div>
+      </div>
+    `).join("")
+    : `<div class="text-xs text-slate-400 py-6 text-center">Ningún cliente se ha pasado de sus días de crédito.</div>`;
+
+  contMejores.innerHTML = mejores.length
+    ? mejores.map((c) => `
+      <div class="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 flex items-center justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-extrabold text-slate-900 truncate">${c.nombre} <span class="font-mono-ve text-[10px] text-slate-500">(${c.documento})</span></div>
+          <div class="text-[11px] text-emerald-800 font-semibold mt-0.5">
+            <strong>100% puntual</strong> en ${c.operaciones} crédito(s) • Prom. pago: <strong>${c.promDias}d</strong> (plazo ${c.promPlazo}d)
+          </div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="font-mono-ve text-xs font-extrabold text-emerald-800">$${c.totalCreditoUsd.toFixed(2)}</div>
+          ${c.saldoPendienteUsd > 0.01 ? `<div class="font-mono-ve text-[10px] font-bold text-amber-800">Pendiente: $${c.saldoPendienteUsd.toFixed(2)}</div>` : `<div class="text-[10px] font-bold text-emerald-700">Pagado</div>`}
+        </div>
+      </div>
+    `).join("")
+    : `<div class="text-xs text-slate-400 py-6 text-center">Aún no hay clientes con historial puntual a crédito.</div>`;
 }
