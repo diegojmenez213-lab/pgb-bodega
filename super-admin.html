@@ -7,19 +7,16 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <title>NEXUS ERP • Consola Maestra</title>
   <script>
-    // BLOQUEO DE RETROCESO / BFCACHE EN CONSOLA MAESTRA
     (function () {
       window.addEventListener("pageshow", function (ev) {
-        if (ev.persisted) {
-          window.location.reload();
-        }
+        if (ev.persisted) window.location.reload();
       });
     })();
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -58,8 +55,6 @@
     const db = firebase.firestore();
     const FieldValue = firebase.firestore.FieldValue;
 
-    const RUT_PGB = "769497226";
-
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
     const formatearRut = (r) => {
       const c = limpiarRut(r);
@@ -91,47 +86,6 @@
 
     const validarDocVE = (val = "") => /^[VEJGP]-\d{6,9}(-\d)?$/.test(String(val || "").trim().toUpperCase());
 
-    // CIFRADO SHA-256 PARA PIN MAESTRO (SIN EXPONER CLAVE EN TEXTO PLANO)
-    const sha256Hex = async (texto) => {
-      const str = String(texto || "").trim();
-      if (window.crypto && window.crypto.subtle) {
-        const data = new TextEncoder().encode(str);
-        const hashBuf = await window.crypto.subtle.digest("SHA-256", data);
-        return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-      }
-      return str;
-    };
-
-    const obtenerHashBootstrapInicial = async () => {
-      const semilla = String.fromCharCode(50, 48, 50, 54);
-      return await sha256Hex(semilla);
-    };
-
-    const verificarPinMaestro = async (pinIngresado) => {
-      const limpio = String(pinIngresado || "").trim();
-      if (!limpio) return { ok: false, desdeFirestore: false };
-      if (!auth.currentUser) {
-        await auth.signInAnonymously().catch(() => {});
-      }
-      const hashIngresado = await sha256Hex(limpio);
-      const cfgRef = db.collection("saas_config").doc("master_admin");
-      try {
-        const snap = await cfgRef.get();
-        if (snap.exists && snap.data()?.pinMaestroHash) {
-          return { ok: hashIngresado === snap.data().pinMaestroHash, desdeFirestore: true };
-        }
-      } catch (err) {
-        // Continúa con bootstrap inicial si aún no existe configuración en Firestore
-      }
-      const hashBootstrap = await obtenerHashBootstrapInicial();
-      if (hashIngresado === hashBootstrap) {
-        cfgRef.set({ pinMaestroHash: hashBootstrap, actualizadoTs: Date.now() }, { merge: true }).catch(() => {});
-        return { ok: true, desdeFirestore: false };
-      }
-      return { ok: false, desdeFirestore: false };
-    };
-
-    // VALIDADOR OFICIAL DE RUT CHILENO (MÓDULO 11)
     const validarRutChileno = (rut) => {
       const limpio = limpiarRut(rut);
       if (limpio.length < 7 || limpio.length > 9) return false;
@@ -149,65 +103,72 @@
       return dv === dvCalc;
     };
 
-    const fechaIsoChile = (ts = Date.now()) => {
-      try {
-        return new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/Santiago",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit"
-        }).format(new Date(ts));
-      } catch (e) {
-        const d = new Date(ts);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const sha256Hex = async (texto) => {
+      const str = String(texto || "").trim();
+      if (window.crypto && window.crypto.subtle) {
+        const data = new TextEncoder().encode(str);
+        const hashBuf = await window.crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
       }
+      return str;
     };
 
-    // COMPRESOR AUTOMÁTICO DE LOGOTIPOS PARA NUNCA SUPERAR EL LÍMITE DE 1 MB DE FIRESTORE
+    const obtenerHashBootstrapInicial = async () => {
+      const semilla = String.fromCharCode(50, 48, 50, 54);
+      return await sha256Hex(semilla);
+    };
+
+    const verificarPinMaestro = async (pinIngresado) => {
+      const limpio = String(pinIngresado || "").trim();
+      if (!limpio) return { ok: false };
+      if (!auth.currentUser) await auth.signInAnonymously().catch(() => {});
+      const hashIngresado = await sha256Hex(limpio);
+      const cfgRef = db.collection("saas_config").doc("master_admin");
+      try {
+        const snap = await cfgRef.get();
+        if (snap.exists && snap.data()?.pinMaestroHash) {
+          return { ok: hashIngresado === snap.data().pinMaestroHash };
+        }
+      } catch (err) {}
+      const hashBootstrap = await obtenerHashBootstrapInicial();
+      if (hashIngresado === hashBootstrap) {
+        cfgRef.set({ pinMaestroHash: hashBootstrap, actualizadoTs: Date.now() }, { merge: true }).catch(() => {});
+        return { ok: true };
+      }
+      return { ok: false };
+    };
+
     const comprimirLogoImagen = (file) => {
       return new Promise((resolve, reject) => {
         const urlObj = URL.createObjectURL(file);
         const img = new Image();
         img.onload = () => {
           try {
-            const MAX_W = 520;
-            const MAX_H = 240;
+            const MAX_W = 520, MAX_H = 240;
             let w = img.naturalWidth || img.width;
             let h = img.naturalHeight || img.height;
             const ratio = Math.min(1, MAX_W / w, MAX_H / h);
             w = Math.max(1, Math.round(w * ratio));
             h = Math.max(1, Math.round(h * ratio));
-
             const canvas = document.createElement("canvas");
             canvas.width = w;
             canvas.height = h;
             const ctx = canvas.getContext("2d");
             ctx.clearRect(0, 0, w, h);
             ctx.drawImage(img, 0, 0, w, h);
-
             let dataUrl = canvas.toDataURL("image/webp", 0.85);
-
-            if (!dataUrl.startsWith("data:image/webp")) {
-              dataUrl = canvas.toDataURL("image/png");
-            }
-
+            if (!dataUrl.startsWith("data:image/webp")) dataUrl = canvas.toDataURL("image/png");
             if (dataUrl.length > 350000) {
-              const canvasJpg = document.createElement("canvas");
-              canvasJpg.width = w;
-              canvasJpg.height = h;
-              const ctxJpg = canvasJpg.getContext("2d");
-              ctxJpg.fillStyle = "#ffffff";
-              ctxJpg.fillRect(0, 0, w, h);
-              ctxJpg.drawImage(img, 0, 0, w, h);
-              dataUrl = canvasJpg.toDataURL("image/jpeg", 0.82);
+              const c2 = document.createElement("canvas");
+              c2.width = w; c2.height = h;
+              const ctx2 = c2.getContext("2d");
+              ctx2.fillStyle = "#ffffff";
+              ctx2.fillRect(0, 0, w, h);
+              ctx2.drawImage(img, 0, 0, w, h);
+              dataUrl = c2.toDataURL("image/jpeg", 0.82);
             }
-
             URL.revokeObjectURL(urlObj);
-
-            if (dataUrl.length > 480000) {
-              return reject(new Error("La imagen sigue siendo demasiado pesada incluso tras comprimir. Usa un archivo más simple."));
-            }
-
+            if (dataUrl.length > 480000) return reject(new Error("Imagen demasiado pesada incluso tras comprimir."));
             const kb = Math.max(1, Math.round((dataUrl.length * 0.75) / 1024));
             resolve({ dataUrl, kb, w, h });
           } catch (err) {
@@ -223,29 +184,14 @@
       });
     };
 
-    // PERFIL LIMPIO PARA EMPRESAS NUEVAS E-COMMERCE CHILE
     const MODULOS_DEFAULT = {
-      m1_aislamiento: true,
-      m2_roles: true,
-      m3_catalogo: true,
-      m4_apis: true,
-      m5_inv_general: false,
-      m6_conteo_ciclico: false,
-      m7_auditoria_inv: false,
-      m8_omnicanal: true,
-      m9_stock_sync: true,
-      m10_sii_dte: true,
-      m11_colas_print: true,
-      m12_ruta_inc: false,
-      m13_retornos_merma: false,
-      m14_analitica_err: false,
-      m15_pos_ventas: false,
-      m16_caja_cobros: false,
-      m17_compras_prov: true,
-      m18_finanzas_bi: true
+      m1_aislamiento: true, m2_roles: true, m3_catalogo: true, m4_apis: true,
+      m5_inv_general: false, m6_conteo_ciclico: false, m7_auditoria_inv: false,
+      m8_omnicanal: true, m9_stock_sync: true, m10_sii_dte: true, m11_colas_print: true,
+      m12_ruta_inc: false, m13_retornos_merma: false, m14_analitica_err: false,
+      m15_pos_ventas: false, m16_caja_cobros: false, m17_compras_prov: true, m18_finanzas_bi: true
     };
 
-    // PERFIL LIMPIO PARA EMPRESAS NUEVAS VENEZUELA
     const MODULOS_VE_DEFAULT = {
       dobleInventario: true,
       cotizaciones72h: true,
@@ -310,22 +256,11 @@
       <button
         type="button"
         role="switch"
-        aria-checked={checked}
-        onClick={(e) => {
-          if (onChange) {
-            e.stopPropagation();
-            onChange();
-          }
-        }}
-        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-          checked ? "bg-slate-900" : "bg-slate-200"
-        }`}
+        aria-checked={!!checked}
+        onClick={(e) => { if (onChange) { e.stopPropagation(); onChange(); } }}
+        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${checked ? "bg-slate-900" : "bg-slate-200"}`}
       >
-        <span
-          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-            checked ? "translate-x-5" : "translate-x-0"
-          }`}
-        />
+        <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${checked ? "translate-x-5" : "translate-x-0"}`} />
       </button>
     );
 
@@ -342,18 +277,16 @@
       const [logoInfoTxt, setLogoInfoTxt] = useState("");
       const [hayCambiosSinGuardar, setHayCambiosSinGuardar] = useState(false);
 
-      // Cambio de PIN Maestro (SHA-256)
       const [seguridadAbierta, setSeguridadAbierta] = useState(false);
       const [pinActualMaster, setPinActualMaster] = useState("");
       const [pinNuevoMaster, setPinNuevoMaster] = useState("");
       const [pinConfirmMaster, setPinConfirmMaster] = useState("");
 
-      // Formulario nueva empresa (Switch Chile / Venezuela)
       const [crearAbierto, setCrearAbierto] = useState(false);
-      const [nuevoPais, setNuevoPais] = useState("CL");
+      const [nuevoPais, setNuevoPais] = useState("VE");
       const [nuevoNombre, setNuevoNombre] = useState("");
       const [nuevoRut, setNuevoRut] = useState("");
-      const [nuevoRubro, setNuevoRubro] = useState("Comercio y Retail");
+      const [nuevoRubro, setNuevoRubro] = useState("Repuestos y Comercio");
       const [nuevaClave, setNuevaClave] = useState("");
       const [veDireccion, setVeDireccion] = useState("");
       const [veTelefonos, setVeTelefonos] = useState("");
@@ -363,10 +296,8 @@
       const [veFolioInicial, setVeFolioInicial] = useState("1");
       const [veDobleInv, setVeDobleInv] = useState(true);
 
-      // Edición empresa seleccionada
       const [editForm, setEditForm] = useState(null);
       const ultimoKeyCargadoRef = useRef("");
-      const txLockRef = useRef(false);
 
       const empresas = useMemo(() => {
         const todas = [...empresasCL, ...empresasVE];
@@ -386,29 +317,14 @@
         auth.signInAnonymously().catch(() => {});
 
         const unsubCL = db.collection("saas_empresas").onSnapshot((snap) => {
-          const lista = snap.docs.map((d) => ({
-            id: d.id,
-            _pais: "CL",
-            _key: `CL::${d.id}`,
-            ...d.data()
-          }));
-          setEmpresasCL(lista);
+          setEmpresasCL(snap.docs.map((d) => ({ id: d.id, _pais: "CL", _key: `CL::${d.id}`, ...d.data() })));
         });
 
         const unsubVE = db.collection("empresas").where("pais", "==", "VE").onSnapshot((snap) => {
-          const lista = snap.docs.map((d) => ({
-            id: d.id,
-            _pais: "VE",
-            _key: `VE::${d.id}`,
-            ...d.data()
-          }));
-          setEmpresasVE(lista);
+          setEmpresasVE(snap.docs.map((d) => ({ id: d.id, _pais: "VE", _key: `VE::${d.id}`, ...d.data() })));
         });
 
-        return () => {
-          unsubCL();
-          unsubVE();
-        };
+        return () => { unsubCL(); unsubVE(); };
       }, [autorizado]);
 
       useEffect(() => {
@@ -420,20 +336,539 @@
         });
       }, [empresas]);
 
-      // Carga editForm SOLO al cambiar de empresa seleccionada
       useEffect(() => {
         if (!seleccionadaKey || seleccionadaKey === ultimoKeyCargadoRef.current) return;
         const emp = empresas.find((e) => e._key === seleccionadaKey);
         if (!emp) return;
-
         ultimoKeyCargadoRef.current = seleccionadaKey;
+        setLogoInfoTxt("");
+        setHayCambiosSinGuardar(false);
 
         if (emp._pais === "VE") {
-          const logoActual = emp.logoBase64 || emp.logoUrl || "";
           setEditForm({
             id: emp.id,
             _pais: "VE",
             _key: emp._key,
             nombre: emp.nombre || "",
             rut: emp.rif || emp.id,
-            rubro: emp.rubro || "Repuestos y Comercio
+            rubro: emp.rubro || "Repuestos y Comercio",
+            direccion: emp.direccion || "",
+            telefonos: emp.telefonos || "",
+            correo: emp.correo || "",
+            claveAcceso: emp.claveAcceso || "",
+            activo: emp.activo !== false,
+            logoBase64: emp.logoBase64 || emp.logoUrl || "",
+            factorMayor: emp.precios?.factorMayor ?? 2.0,
+            factorDetal: emp.precios?.factorDetal ?? 2.5,
+            notaEntregaActual: emp.correlativos?.notaEntregaActual ?? 0,
+            modulos: { ...MODULOS_VE_DEFAULT, ...(emp.modulos || {}) }
+          });
+        } else {
+          setEditForm({
+            id: emp.id,
+            _pais: "CL",
+            _key: emp._key,
+            nombre: emp.nombre || "",
+            rut: emp.rut || emp.id,
+            rubro: emp.rubro || "Comercio y Retail",
+            claveAcceso: emp.claveAcceso || emp.clave || "",
+            activo: emp.activo !== false,
+            logoBase64: emp.logoBase64 || emp.logoUrl || "",
+            modulos: { ...MODULOS_DEFAULT, ...(emp.modulos || {}) }
+          });
+        }
+      }, [seleccionadaKey, empresas]);
+
+      const ingresarAdmin = async (e) => {
+        e.preventDefault();
+        setPinError("");
+        setValidandoLogin(true);
+        try {
+          const res = await verificarPinMaestro(pinInput);
+          if (res.ok) {
+            sessionStorage.setItem("nexus_admin_ok", "1");
+            setAutorizado(true);
+          } else {
+            setPinError("PIN Maestro incorrecto.");
+          }
+        } catch (err) {
+          setPinError("Error validando PIN.");
+        } finally {
+          setValidandoLogin(false);
+        }
+      };
+
+      const actualizarCampoEdit = (campo, valor) => {
+        setEditForm((prev) => ({ ...prev, [campo]: valor }));
+        setHayCambiosSinGuardar(true);
+      };
+
+      const toggleModuloEdit = (key) => {
+        setEditForm((prev) => ({
+          ...prev,
+          modulos: { ...prev.modulos, [key]: !prev.modulos?.[key] }
+        }));
+        setHayCambiosSinGuardar(true);
+      };
+
+      const manejarSubidaLogo = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const res = await comprimirLogoImagen(file);
+          actualizarCampoEdit("logoBase64", res.dataUrl);
+          setLogoInfoTxt(`Logo optimizado: ${res.w}x${res.h}px (${res.kb} KB)`);
+        } catch (err) {
+          alert(err.message || "Error procesando logo.");
+        }
+      };
+
+      const guardarCambiosEmpresa = async () => {
+        if (!editForm || procesando) return;
+        setProcesando(true);
+        try {
+          if (editForm._pais === "VE") {
+            await db.collection("empresas").doc(editForm.id).set({
+              pais: "VE",
+              rif: editForm.id,
+              nombre: editForm.nombre.trim(),
+              rubro: editForm.rubro.trim(),
+              direccion: editForm.direccion.trim(),
+              telefonos: editForm.telefonos.trim(),
+              correo: editForm.correo.trim(),
+              claveAcceso: editForm.claveAcceso.trim(),
+              activo: !!editForm.activo,
+              logoBase64: editForm.logoBase64 || "",
+              precios: {
+                factorMayor: Number(editForm.factorMayor) || 2.0,
+                factorDetal: Number(editForm.factorDetal) || 2.5
+              },
+              correlativos: {
+                notaEntregaActual: Math.max(0, Number(editForm.notaEntregaActual) || 0)
+              },
+              modulos: editForm.modulos,
+              actualizadoEn: FieldValue.serverTimestamp()
+            }, { merge: true });
+          } else {
+            await db.collection("saas_empresas").doc(editForm.id).set({
+              nombre: editForm.nombre.trim(),
+              rubro: editForm.rubro.trim(),
+              claveAcceso: editForm.claveAcceso.trim(),
+              activo: !!editForm.activo,
+              logoBase64: editForm.logoBase64 || "",
+              modulos: editForm.modulos,
+              actualizadoEn: FieldValue.serverTimestamp()
+            }, { merge: true });
+          }
+          setHayCambiosSinGuardar(false);
+          alert("Cambios guardados correctamente.");
+        } catch (err) {
+          alert("Error guardando cambios: " + err.message);
+        } finally {
+          setProcesando(false);
+        }
+      };
+
+      const crearEmpresaNueva = async (e) => {
+        e.preventDefault();
+        if (procesando) return;
+        if (!nuevoNombre.trim() || !nuevoRut.trim() || !nuevaClave.trim()) {
+          alert("Completa Nombre, Documento (RUT o RIF/Cédula) y Clave.");
+          return;
+        }
+
+        setProcesando(true);
+        try {
+          if (nuevoPais === "VE") {
+            const rifId = normalizarIdVE(nuevoRut);
+            if (!validarDocVE(rifId)) {
+              alert("Formato de RIF/Cédula inválido. Ej: J-50343856-8 o V-20504570");
+              setProcesando(false);
+              return;
+            }
+            await db.collection("empresas").doc(rifId).set({
+              pais: "VE",
+              activo: true,
+              rif: rifId,
+              nombre: nuevoNombre.trim(),
+              rubro: nuevoRubro.trim() || "Repuestos y Comercio",
+              direccion: veDireccion.trim(),
+              telefonos: veTelefonos.trim(),
+              correo: veCorreo.trim(),
+              claveAcceso: nuevaClave.trim(),
+              logoBase64: "",
+              modulos: { ...MODULOS_VE_DEFAULT, dobleInventario: veDobleInv },
+              precios: {
+                factorMayor: Number(veFactorMayor) || 2.0,
+                factorDetal: Number(veFactorDetal) || 2.5
+              },
+              correlativos: {
+                notaEntregaActual: Math.max(0, (Number(veFolioInicial) || 1) - 1)
+              },
+              creadoEn: FieldValue.serverTimestamp()
+            });
+            setCrearAbierto(false);
+            ultimoKeyCargadoRef.current = "";
+            setSeleccionadaKey(`VE::${rifId}`);
+            alert(`Empresa Venezuela creada: ${nuevoNombre.trim()} (${rifId})`);
+          } else {
+            const rutId = limpiarRut(nuevoRut);
+            if (!validarRutChileno(rutId)) {
+              alert("RUT chileno inválido.");
+              setProcesando(false);
+              return;
+            }
+            await db.collection("saas_empresas").doc(rutId).set({
+              rut: rutId,
+              nombre: nuevoNombre.trim(),
+              rubro: nuevoRubro.trim() || "Comercio y Retail",
+              claveAcceso: nuevaClave.trim(),
+              activo: true,
+              logoBase64: "",
+              modulos: { ...MODULOS_DEFAULT },
+              creadoEn: FieldValue.serverTimestamp()
+            });
+            setCrearAbierto(false);
+            ultimoKeyCargadoRef.current = "";
+            setSeleccionadaKey(`CL::${rutId}`);
+            alert(`Empresa Chile creada: ${nuevoNombre.trim()} (${formatearRut(rutId)})`);
+          }
+          setNuevoNombre(""); setNuevoRut(""); setNuevaClave("");
+          setVeDireccion(""); setVeTelefonos(""); setVeCorreo("");
+        } catch (err) {
+          alert("Error creando empresa: " + err.message);
+        } finally {
+          setProcesando(false);
+        }
+      };
+
+      const cambiarPinMaestro = async (e) => {
+        e.preventDefault();
+        if (!pinActualMaster || !pinNuevoMaster || pinNuevoMaster !== pinConfirmMaster) {
+          alert("Verifica el PIN actual y que el nuevo PIN coincida.");
+          return;
+        }
+        const check = await verificarPinMaestro(pinActualMaster);
+        if (!check.ok) {
+          alert("El PIN actual es incorrecto.");
+          return;
+        }
+        const nuevoHash = await sha256Hex(pinNuevoMaster);
+        await db.collection("saas_config").doc("master_admin").set({
+          pinMaestroHash: nuevoHash,
+          actualizadoTs: Date.now()
+        }, { merge: true });
+        setPinActualMaster(""); setPinNuevoMaster(""); setPinConfirmMaster("");
+        setSeguridadAbierta(false);
+        alert("PIN Maestro actualizado.");
+      };
+
+      if (!autorizado) {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-4">
+            <form onSubmit={ingresarAdmin} className="w-full max-w-sm bg-white border border-slate-200 rounded-3xl p-7 shadow-xl space-y-5">
+              <div className="text-center space-y-1">
+                <div className="w-11 h-11 rounded-2xl bg-slate-950 text-white font-extrabold flex items-center justify-center mx-auto">N</div>
+                <h1 className="text-xl font-extrabold text-slate-950 pt-1">Consola Maestra</h1>
+                <p className="text-xs text-slate-500">Acceso restringido • Chile & Venezuela</p>
+              </div>
+              {pinError && <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold p-3 rounded-xl text-center">{pinError}</div>}
+              <input
+                type="password"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="PIN Maestro"
+                className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3.5 text-sm font-bold outline-none focus:border-slate-950"
+                required
+              />
+              <button type="submit" disabled={validandoLogin} className="w-full bg-slate-950 hover:bg-slate-800 text-white font-extrabold py-3.5 rounded-2xl text-xs uppercase tracking-wider cursor-pointer">
+                {validandoLogin ? "Validando..." : "Desbloquear Consola"}
+              </button>
+              <a href="index.html" className="block text-center text-xs font-bold text-slate-500 hover:text-slate-900">← Volver al Portal</a>
+            </form>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <header className="bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between sticky top-0 z-30">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-slate-950 text-white flex items-center justify-center font-extrabold text-sm">N</div>
+              <div>
+                <div className="font-extrabold text-sm text-slate-950 leading-none">NEXUS SUPER ADMIN</div>
+                <div className="text-[10px] font-bold text-slate-500">CHILE ({empresasCL.length}) • VENEZUELA ({empresasVE.length})</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setCrearAbierto(true)} className="bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer">
+                + Nueva Empresa
+              </button>
+              <button onClick={() => setSeguridadAbierta(true)} className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-3 py-2 rounded-xl cursor-pointer">
+                PIN
+              </button>
+              <button onClick={() => { sessionStorage.removeItem("nexus_admin_ok"); window.location.href = "index.html"; }} className="text-xs font-bold text-rose-600 px-2.5 py-2 rounded-xl hover:bg-rose-50 cursor-pointer">
+                Salir
+              </button>
+            </div>
+          </header>
+
+          <div className="max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1">
+            {/* Lista de empresas */}
+            <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-3 space-y-2 h-fit">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 px-2 pt-1">Empresas Registradas</div>
+              {empresas.length === 0 && <div className="text-xs text-slate-400 p-4 text-center">No hay empresas registradas.</div>}
+              <div className="space-y-1.5 max-h-[70vh] overflow-y-auto">
+                {empresas.map((emp) => {
+                  const activa = emp._key === seleccionadaKey;
+                  return (
+                    <button
+                      key={emp._key}
+                      onClick={() => { ultimoKeyCargadoRef.current = ""; setSeleccionadaKey(emp._key); }}
+                      className={`w-full text-left p-3 rounded-xl border transition cursor-pointer ${
+                        activa ? "bg-slate-950 text-white border-slate-950" : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-900"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-extrabold text-xs truncate">{emp.nombre || emp.id}</span>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                          emp._pais === "VE"
+                            ? (activa ? "bg-amber-400 text-slate-950" : "bg-amber-100 text-amber-800")
+                            : (activa ? "bg-sky-400 text-slate-950" : "bg-sky-100 text-sky-800")
+                        }`}>
+                          {emp._pais}
+                        </span>
+                      </div>
+                      <div className={`text-[11px] mt-0.5 ${activa ? "text-slate-300" : "text-slate-500"}`}>
+                        {emp._pais === "VE" ? emp.id : formatearRut(emp.id)} • {emp.activo === false ? "Suspendida" : "Activa"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            {/* Editor empresa seleccionada */}
+            <main className="lg:col-span-8">
+              {!editForm ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500">
+                  Selecciona una empresa o crea una nueva.
+                </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${editForm._pais === "VE" ? "bg-amber-100 text-amber-800" : "bg-sky-100 text-sky-800"}`}>
+                          {editForm._pais === "VE" ? "ENTORNO VENEZUELA" : "ENTORNO CHILE"}
+                        </span>
+                        <span className="text-xs font-bold text-slate-500">{editForm._pais === "VE" ? editForm.id : formatearRut(editForm.id)}</span>
+                      </div>
+                      <h2 className="text-xl font-extrabold text-slate-950 mt-1">{editForm.nombre || editForm.id}</h2>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                        Activa
+                        <SwitchItem checked={editForm.activo} onChange={() => actualizarCampoEdit("activo", !editForm.activo)} />
+                      </label>
+                      <button
+                        onClick={guardarCambiosEmpresa}
+                        disabled={procesando}
+                        className="bg-slate-950 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer"
+                      >
+                        {procesando ? "Guardando..." : hayCambiosSinGuardar ? "Guardar Cambios *" : "Guardar"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Datos generales */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Razón Social</label>
+                      <input value={editForm.nombre} onChange={(e) => actualizarCampoEdit("nombre", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Rubro</label>
+                      <input value={editForm.rubro} onChange={(e) => actualizarCampoEdit("rubro", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Clave de Acceso</label>
+                      <input value={editForm.claveAcceso} onChange={(e) => actualizarCampoEdit("claveAcceso", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Logo Corporativo (PNG/JPG)</label>
+                      <input type="file" accept="image/*" onChange={manejarSubidaLogo} className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-1.5" />
+                      {logoInfoTxt && <p className="text-[10px] font-bold text-emerald-600 mt-1">{logoInfoTxt}</p>}
+                    </div>
+                  </div>
+
+                  {editForm.logoBase64 && (
+                    <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                      <img src={editForm.logoBase64} alt="Logo" className="h-12 object-contain bg-white rounded-lg p-1 border border-slate-200" />
+                      <button type="button" onClick={() => actualizarCampoEdit("logoBase64", "")} className="text-xs font-bold text-rose-600 hover:underline cursor-pointer">
+                        Quitar logo
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Campos exclusivos de Venezuela */}
+                  {editForm._pais === "VE" && (
+                    <div className="space-y-4 pt-2 border-t border-slate-200">
+                      <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Configuración Comercial Venezuela</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1">Dirección Comercial</label>
+                          <input value={editForm.direccion} onChange={(e) => actualizarCampoEdit("direccion", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1">Teléfonos</label>
+                          <input value={editForm.telefonos} onChange={(e) => actualizarCampoEdit("telefonos", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1">Correo</label>
+                          <input value={editForm.correo} onChange={(e) => actualizarCampoEdit("correo", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1">Factor Mayor (ej: 2.0)</label>
+                          <input type="number" step="0.1" value={editForm.factorMayor} onChange={(e) => actualizarCampoEdit("factorMayor", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1">Factor Detal (ej: 2.5)</label>
+                          <input type="number" step="0.1" value={editForm.factorDetal} onChange={(e) => actualizarCampoEdit("factorDetal", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1">Último Correlativo Nota de Entrega</label>
+                          <input type="number" value={editForm.notaEntregaActual} onChange={(e) => actualizarCampoEdit("notaEntregaActual", e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Módulos Activos Venezuela</div>
+                        {SWITCHES_VE.map((item) => (
+                          <div key={item.key} onClick={() => toggleModuloEdit(item.key)} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                            <div>
+                              <span className="text-[10px] font-extrabold text-amber-700 mr-2">{item.code}</span>
+                              <span className="text-xs font-bold text-slate-800">{item.label}</span>
+                            </div>
+                            <SwitchItem checked={!!editForm.modulos?.[item.key]} onChange={() => toggleModuloEdit(item.key)} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Módulos exclusivos de Chile */}
+                  {editForm._pais === "CL" && (
+                    <div className="space-y-4 pt-2 border-t border-slate-200">
+                      {GRUPOS_SWITCHES.map((grupo) => (
+                        <div key={grupo.titulo} className="space-y-2">
+                          <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500">{grupo.titulo}</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {grupo.items.map((item) => (
+                              <div key={item.key} onClick={() => toggleModuloEdit(item.key)} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                                <div className="min-w-0 pr-2">
+                                  <span className="text-[10px] font-extrabold text-slate-400 mr-1.5">{item.code}</span>
+                                  <span className="text-xs font-bold text-slate-800">{item.label}</span>
+                                </div>
+                                <SwitchItem checked={!!editForm.modulos?.[item.key]} onChange={() => toggleModuloEdit(item.key)} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </main>
+          </div>
+
+          {/* Modal Crear Empresa */}
+          {crearAbierto && (
+            <div className="fixed inset-0 bg-slate-950/50 z-50 flex items-center justify-center p-4">
+              <form onSubmit={crearEmpresaNueva} className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-extrabold text-slate-950">Nueva Empresa</h3>
+                  <button type="button" onClick={() => setCrearAbierto(false)} className="text-xs font-bold text-slate-500 cursor-pointer">Cerrar ✕</button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { setNuevoPais("CL"); setNuevoRut(""); }} className={`py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer ${nuevoPais === "CL" ? "bg-slate-950 text-white border-slate-950" : "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                    Chile (RUT / SII)
+                  </button>
+                  <button type="button" onClick={() => { setNuevoPais("VE"); setNuevoRut(""); }} className={`py-2.5 rounded-xl text-xs font-extrabold border cursor-pointer ${nuevoPais === "VE" ? "bg-slate-950 text-white border-slate-950" : "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                    Venezuela (RIF / BCV)
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <input
+                    value={nuevoRut}
+                    onChange={(e) => setNuevoRut(nuevoPais === "VE" ? formatearDocVE(e.target.value) : formatearRut(e.target.value))}
+                    placeholder={nuevoPais === "VE" ? "RIF o Cédula (Ej: J-50343856-8)" : "RUT Empresa (Ej: 77.528.042-5)"}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold"
+                    required
+                  />
+                  <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Razón Social (Ej: INVERSIONES V&D 2023, C.A)" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold" required />
+                  <input value={nuevoRubro} onChange={(e) => setNuevoRubro(e.target.value)} placeholder="Rubro" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold" />
+                  <input value={nuevaClave} onChange={(e) => setNuevaClave(e.target.value)} placeholder="Clave de acceso inicial" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold" required />
+
+                  {nuevoPais === "VE" && (
+                    <div className="space-y-3 pt-2 border-t border-slate-200">
+                      <input value={veDireccion} onChange={(e) => setVeDireccion(e.target.value)} placeholder="Dirección comercial" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={veTelefonos} onChange={(e) => setVeTelefonos(e.target.value)} placeholder="Teléfonos" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm" />
+                        <input value={veCorreo} onChange={(e) => setVeCorreo(e.target.value)} placeholder="Correo electrónico" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500">Mayor (×)</label>
+                          <input type="number" step="0.1" value={veFactorMayor} onChange={(e) => setVeFactorMayor(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500">Detal (×)</label>
+                          <input type="number" step="0.1" value={veFactorDetal} onChange={(e) => setVeFactorDetal(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500">Folio Inicial</label>
+                          <input type="number" value={veFolioInicial} onChange={(e) => setVeFolioInicial(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold" />
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                        <input type="checkbox" checked={veDobleInv} onChange={(e) => setVeDobleInv(e.target.checked)} />
+                        Activar doble inventario (Almacén + Planta)
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                <button type="submit" disabled={procesando} className="w-full bg-slate-950 hover:bg-slate-800 text-white font-extrabold py-3.5 rounded-2xl text-xs uppercase tracking-wider cursor-pointer">
+                  {procesando ? "Creando..." : `Crear Empresa (${nuevoPais})`}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Modal Cambiar PIN */}
+          {seguridadAbierta && (
+            <div className="fixed inset-0 bg-slate-950/50 z-50 flex items-center justify-center p-4">
+              <form onSubmit={cambiarPinMaestro} className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-3 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-950">Cambiar PIN Maestro</h3>
+                  <button type="button" onClick={() => setSeguridadAbierta(false)} className="text-xs font-bold text-slate-500 cursor-pointer">Cerrar ✕</button>
+                </div>
+                <input type="password" value={pinActualMaster} onChange={(e) => setPinActualMaster(e.target.value)} placeholder="PIN Actual" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm" required />
+                <input type="password" value={pinNuevoMaster} onChange={(e) => setPinNuevoMaster(e.target.value)} placeholder="Nuevo PIN" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm" required />
+                <input type="password" value={pinConfirmMaster} onChange={(e) => setPinConfirmMaster(e.target.value)} placeholder="Confirmar Nuevo PIN" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm" required />
+                <button type="submit" className="w-full bg-slate-950 text-white font-extrabold py-3 rounded-xl text-xs uppercase cursor-pointer">Actualizar PIN</button>
+              </form>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<SuperAdminApp />);
+  </script>
+</body>
+</html>
