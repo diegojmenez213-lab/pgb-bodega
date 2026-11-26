@@ -60,7 +60,7 @@ export async function mount(root, state) {
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Analítica & Cierre de Caja</h1>
           <p class="text-xs text-slate-500">
-            Cuadra ventas + abonos de facturas anteriores con fecha y hora exacta, cierra caja y evalúa el historial de crédito.
+            Cuadra ventas + abonos por método de pago (incluyendo sobrepagos), cierra caja y evalúa el historial de crédito.
           </p>
         </div>
         <button id="btnCerrarCaja" type="button" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer">
@@ -68,7 +68,6 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- Filtros de fecha / jornada -->
       <div class="ve-card p-3 flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap gap-1.5" id="filtroRangoBtns">
           <button type="button" data-rango="jornada" class="btn-rango px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">Jornada Actual</button>
@@ -79,7 +78,6 @@ export async function mount(root, state) {
         <div id="infoCierreReciente" class="text-[11px] font-bold text-slate-500"></div>
       </div>
 
-      <!-- KPIs del rango -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="ve-card p-4">
           <div class="text-[10px] font-extrabold uppercase text-slate-400">Ventas del Período (USD)</div>
@@ -106,6 +104,21 @@ export async function mount(root, state) {
         </div>
       </div>
 
+      <!-- Desglose exacto por Método de Pago -->
+      <div class="ve-card p-4 space-y-2.5 border-emerald-200">
+        <div>
+          <h2 class="text-xs font-extrabold uppercase tracking-wider text-emerald-900">
+            Cuadre por Método de Pago (Ventas + Abonos del Período)
+          </h2>
+          <p class="text-[11px] text-slate-500">
+            Exactamente cuánto dinero debe haber en cada cuenta o gaveta física (incluye sobrepagos recibidos).
+          </p>
+        </div>
+        <div id="gridMetodosCaja" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          <div class="text-xs text-slate-400 py-3">Sin ingresos registrados en este período.</div>
+        </div>
+      </div>
+
       <!-- Detalle exacto de abonos cobrados en caja -->
       <div class="ve-card p-4 space-y-2.5 border-sky-200">
         <div class="flex items-center justify-between gap-2">
@@ -124,7 +137,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Ranking Mejores vs Peores Pagadores a Crédito -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div class="ve-card p-4 space-y-3 border-rose-200">
           <div class="flex items-center justify-between">
@@ -157,7 +169,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Cierres de caja archivados -->
       <div class="ve-card p-4 space-y-2.5">
         <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Cierres de Caja Archivados</h2>
         <div id="listaCierres" class="space-y-2">
@@ -173,9 +184,7 @@ export async function mount(root, state) {
 
   function filtrarNotasPorRango(notasRaw) {
     const validas = notasRaw.filter((n) => !n.anulada);
-    if (rangoActual === "jornada") {
-      return validas.filter((n) => !n.cierreId);
-    }
+    if (rangoActual === "jornada") return validas.filter((n) => !n.cierreId);
     const desdeTs = inicioRangoTs(rangoActual);
     if (!desdeTs) return validas;
     return validas.filter((n) => Number(n.creadoTs || 0) >= desdeTs);
@@ -192,11 +201,15 @@ export async function mount(root, state) {
       for (const ab of n.abonos) {
         const ts = Number(ab.ts || 0);
         if (!desdeTs || ts > desdeTs) {
+          const monto = Number(ab.montoUsd || 0);
+          const sobre = Number(ab.sobrepagoUsd || 0);
           lista.push({
             folio: n.folio || n.id,
             clienteNombre: n.cliente?.nombre || "Consumidor Final",
             clienteDoc: n.cliente?.documento || "",
-            montoUsd: Number(ab.montoUsd || 0),
+            montoUsd: monto,
+            sobrepagoUsd: sobre,
+            totalFisicoUsd: Number((monto + sobre).toFixed(2)),
             metodo: ab.metodo || "Efectivo USD",
             usandoSaldoFavor: Boolean(ab.usandoSaldoFavor),
             fechaHoraTxt: ab.fechaHoraTxt || formatearFechaHora(ts, ab.fechaIso),
@@ -207,6 +220,26 @@ export async function mount(root, state) {
       }
     }
     return lista.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  }
+
+  function calcularDesgloseMetodos(notasRango, abonosRango) {
+    const mapa = new Map();
+    const sumar = (metodo, monto) => {
+      const m = metodo || "Efectivo USD";
+      const val = Number(monto || 0);
+      if (val <= 0) return;
+      mapa.set(m, Number(((mapa.get(m) || 0) + val).toFixed(2)));
+    };
+
+    for (const n of notasRango) {
+      if (Array.isArray(n.pagos)) {
+        for (const p of n.pagos) sumar(p.metodo, p.montoUsd);
+      }
+    }
+    for (const a of abonosRango) {
+      if (!a.usandoSaldoFavor) sumar(a.metodo, a.totalFisicoUsd);
+    }
+    return Array.from(mapa.entries()).sort((a, b) => b[1] - a[1]);
   }
 
   function pintarAnalitica() {
@@ -222,6 +255,7 @@ export async function mount(root, state) {
 
     const notasRango = filtrarNotasPorRango(todasNotas);
     const abonosRango = obtenerAbonosEnRango(todasNotas);
+    const desgloseMetodos = calcularDesgloseMetodos(notasRango, abonosRango);
 
     const ventasUsd = notasRango.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
     const utilidadUsd = notasRango.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
@@ -231,7 +265,7 @@ export async function mount(root, state) {
     );
     const abonosEfectivoCajaUsd = abonosRango
       .filter((a) => !a.usandoSaldoFavor)
-      .reduce((acc, a) => acc + a.montoUsd, 0);
+      .reduce((acc, a) => acc + a.totalFisicoUsd, 0);
     const totalCajaRealUsd = Number((pagosNotasRangoUsd + abonosEfectivoCajaUsd).toFixed(2));
 
     const porCliente = new Map();
@@ -307,6 +341,15 @@ export async function mount(root, state) {
     root.querySelector("#kpiCreditoUsd").textContent = `$${carteraActivaUsd.toFixed(2)}`;
     root.querySelector("#kpiClientesCred").textContent = `${evaluados.length} clientes con crédito`;
 
+    root.querySelector("#gridMetodosCaja").innerHTML = desgloseMetodos.length
+      ? desgloseMetodos.map(([met, val]) => `
+        <div class="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200 flex items-center justify-between gap-2">
+          <span class="text-xs font-extrabold text-slate-800 truncate">${met}</span>
+          <span class="font-mono-ve text-sm font-extrabold text-emerald-800">$${val.toFixed(2)}</span>
+        </div>
+      `).join("")
+      : `<div class="text-xs text-slate-400 py-3 col-span-full text-center">Sin ingresos registrados en este período.</div>`;
+
     root.querySelector("#badgeAbonosCaja").textContent = String(abonosRango.length);
     root.querySelector("#listaAbonosCaja").innerHTML = abonosRango.length
       ? abonosRango.map((a) => `
@@ -314,13 +357,14 @@ export async function mount(root, state) {
           <div class="min-w-0 flex-1">
             <div class="font-extrabold text-slate-900">
               Abono de ${a.clienteNombre} • <span class="font-mono-ve text-sky-900">Nota pendiente #${a.folio}</span>
+              ${a.sobrepagoUsd > 0.01 ? `<span class="text-[10px] font-bold text-emerald-700 ml-1">(+$${a.sobrepagoUsd.toFixed(2)} a favor)</span>` : ""}
             </div>
             <div class="text-[11px] text-slate-600 font-mono-ve">
               ${a.fechaHoraTxt} • <strong>${a.metodo}</strong> • por ${a.usuario}
             </div>
           </div>
           <div class="font-mono-ve text-sm font-extrabold text-emerald-700 shrink-0">
-            +$${a.montoUsd.toFixed(2)}
+            +$${a.totalFisicoUsd.toFixed(2)}
           </div>
         </div>
       `).join("")
@@ -402,7 +446,8 @@ export async function mount(root, state) {
     const totalUtilidad = abiertas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
     const totalAbonos = abonosAbiertos
       .filter((a) => !a.usandoSaldoFavor)
-      .reduce((acc, a) => acc + a.montoUsd, 0);
+      .reduce((acc, a) => acc + a.totalFisicoUsd, 0);
+    const desglose = Object.fromEntries(calcularDesgloseMetodos(abiertas, abonosAbiertos));
 
     if (!confirm(`¿Cerrar caja con ${abiertas.length} nota(s) ($${totalVentas.toFixed(2)}) y ${abonosAbiertos.length} abono(s) ($${totalAbonos.toFixed(2)})?`)) {
       return;
@@ -427,6 +472,7 @@ export async function mount(root, state) {
         totalVentasUsd: Number(totalVentas.toFixed(2)),
         totalAbonosUsd: Number(totalAbonos.toFixed(2)),
         totalUtilidadUsd: Number(totalUtilidad.toFixed(2)),
+        desgloseMetodos: desglose,
         usuario: state.sesion?.usuario || "Administrador",
         creadoEn: serverTimestamp()
       });
@@ -445,7 +491,7 @@ export async function mount(root, state) {
       if (state.empresa) state.empresa.jornadaActivaId = nuevaJornadaId;
 
       await cargarDatos();
-      alert(`Caja cerrada (${cierreId}). Ventas y abonos del día quedaron archivados.`);
+      alert(`Caja cerrada (${cierreId}). Ventas, abonos y desglose por método quedaron archivados.`);
     } catch (err) {
       alert("Error al cerrar caja: " + err.message);
     } finally {
