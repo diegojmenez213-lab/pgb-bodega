@@ -30,7 +30,7 @@ export async function mount(root, state) {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Analítica & Registro de Caja</h1>
-          <p class="text-xs text-slate-500">Consulta cualquier día o rango (hoy, ayer, hace 10 días) con gráficas y arqueo completo.</p>
+          <p class="text-xs text-slate-500">Consulta cualquier día o rango (hoy, ayer, hace 10 días) con gráficas y cuadre completo.</p>
         </div>
         <div class="flex flex-wrap items-end gap-1.5">
           <div>
@@ -63,7 +63,7 @@ export async function mount(root, state) {
           <div id="kpiUtilidad" class="text-xl font-extrabold font-mono-ve text-emerald-700 mt-1">$0.00</div>
         </div>
         <div class="ve-card">
-          <div class="text-[10px] font-extrabold text-slate-400">NOTAS / CLIENTES</div>
+          <div class="text-[10px] font-extrabold text-slate-400">NOTAS EMITIDAS</div>
           <div id="kpiDocs" class="text-xl font-extrabold font-mono-ve mt-1">0</div>
         </div>
         <div class="ve-card border-amber-200 bg-amber-50/40">
@@ -92,16 +92,25 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Desglose numérico de métodos de pago + Notas emitidas -->
+      <!-- Arqueo de métodos de pago + Ventas de Planta + Notas emitidas -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div class="lg:col-span-4 ve-card space-y-2 h-fit">
-          <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Arqueo por Método de Pago</h2>
-          <div id="desglosePagos" class="space-y-1.5 text-xs">
-            <div class="text-slate-400 py-4 text-center">Sin pagos registrados.</div>
+        <div class="lg:col-span-5 space-y-4">
+          <div class="ve-card space-y-2">
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">Arqueo por Método de Pago</h2>
+            <div id="desglosePagos" class="space-y-1.5 text-xs">
+              <div class="text-slate-400 py-4 text-center">Sin pagos registrados.</div>
+            </div>
+          </div>
+
+          <div id="panelVentasPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-2">
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">
+              Productos Vendidos Desde Planta (Sin descontar Planta)
+            </h2>
+            <div id="listaVentasPlanta" class="space-y-1.5 text-xs"></div>
           </div>
         </div>
 
-        <div class="lg:col-span-8 space-y-2">
+        <div class="lg:col-span-7 space-y-2">
           <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500 px-1">Registro de Notas de Entrega del Período</h2>
           <div id="viewNotas" class="space-y-2"></div>
         </div>
@@ -183,7 +192,6 @@ export async function mount(root, state) {
     const totalUtil = notas.reduce((a, n) => a + Number(n.utilidadUsd ?? (Number(n.totalUsd || 0) - Number(n.costoTotalUsd || 0))), 0);
     const margen = totalVentas > 0 ? ((totalUtil / totalVentas) * 100).toFixed(1) : "0.0";
 
-    // Clientes únicos con crédito activo en el sistema
     const deudoresSet = new Set();
     for (const n of todasNotas) {
       const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
@@ -199,8 +207,10 @@ export async function mount(root, state) {
     root.querySelector("#kpiCreditos").textContent = String(deudoresSet.size);
     root.querySelector("#margenPromTxt").textContent = `Margen neto: ${margen}%`;
 
-    // Agrupar por día para gráfica
     const porDia = new Map();
+    const porMetodo = new Map();
+    const ventasPlantaMap = new Map();
+
     for (const n of notas) {
       const f = n.fechaIso || "Sin fecha";
       if (!porDia.has(f)) porDia.set(f, { venta: 0, costo: 0, util: 0 });
@@ -211,12 +221,7 @@ export async function mount(root, state) {
       row.venta += v;
       row.costo += c;
       row.util += u;
-    }
-    const diasOrdenados = Array.from(porDia.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-    // Métodos de pago
-    const porMetodo = new Map();
-    for (const n of notas) {
       for (const p of n.pagos || []) {
         const m = p.metodo || "Otro";
         porMetodo.set(m, (porMetodo.get(m) || 0) + Number(p.montoUsd || 0));
@@ -225,8 +230,25 @@ export async function mount(root, state) {
       if (saldoPend > 0.01) {
         porMetodo.set("A Crédito (Por Cobrar)", (porMetodo.get("A Crédito (Por Cobrar)") || 0) + saldoPend);
       }
+
+      for (const it of n.items || []) {
+        if (it.origen === "planta") {
+          const prev = ventasPlantaMap.get(it.id) || {
+            codigo: it.codigo,
+            descripcion: it.descripcion,
+            cant: 0,
+            montoUsd: 0
+          };
+          prev.cant += Number(it.cantidad || 0);
+          prev.montoUsd += Number(it.cantidad || 0) * Number(it.precioUsd || 0);
+          ventasPlantaMap.set(it.id, prev);
+        }
+      }
     }
+
+    const diasOrdenados = Array.from(porDia.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     const metodosOrdenados = Array.from(porMetodo.entries()).sort((a, b) => b[1] - a[1]);
+    const itemsPlanta = Array.from(ventasPlantaMap.values()).sort((a, b) => b.montoUsd - a.montoUsd);
 
     const desEl = root.querySelector("#desglosePagos");
     if (!metodosOrdenados.length) {
@@ -240,12 +262,33 @@ export async function mount(root, state) {
       `).join("");
     }
 
+    const panelPlanta = root.querySelector("#panelVentasPlanta");
+    const listaPlanta = root.querySelector("#listaVentasPlanta");
+    if (itemsPlanta.length) {
+      panelPlanta.classList.remove("hidden");
+      listaPlanta.innerHTML = itemsPlanta.map((x) => `
+        <div class="flex items-center justify-between bg-white px-2.5 py-2 rounded-xl border border-sky-200">
+          <div class="min-w-0">
+            <div class="font-mono-ve font-extrabold text-slate-900">${x.codigo}</div>
+            <div class="text-[11px] text-slate-600 truncate">${x.descripcion}</div>
+          </div>
+          <div class="text-right shrink-0 ml-2 font-mono-ve">
+            <div class="font-extrabold text-sky-900">${x.cant} und</div>
+            <div class="text-[11px] text-slate-500">$${x.montoUsd.toFixed(2)}</div>
+          </div>
+        </div>
+      `).join("");
+    } else {
+      panelPlanta.classList.add("hidden");
+    }
+
     if (!notas.length) {
       viewNotas.innerHTML = `<div class="ve-card text-center py-8 text-xs text-slate-500 font-bold">No hay registros de caja para la fecha seleccionada.</div>`;
     } else {
       viewNotas.innerHTML = notas.map((n) => {
         const utilNota = Number(n.utilidadUsd ?? (Number(n.totalUsd || 0) - Number(n.costoTotalUsd || 0)));
         const metTxt = (n.pagos || []).map((p) => `${p.metodo}: $${Number(p.montoUsd || 0).toFixed(2)}`).join(" • ");
+        const cantPlantaNota = (n.items || []).filter((i) => i.origen === "planta").reduce((a, b) => a + Number(b.cantidad || 0), 0);
         return `
           <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-folio="${n.id}">
             <div class="min-w-0 flex-1">
@@ -253,6 +296,7 @@ export async function mount(root, state) {
                 <span class="font-mono-ve text-xs font-extrabold text-slate-950">N° ${n.folio || n.id}</span>
                 <span class="text-xs font-bold text-slate-800">${n.cliente?.nombre || "Consumidor Final"}</span>
                 <span class="text-[10px] font-bold text-slate-400">${n.fechaIso || ""}</span>
+                ${cantPlantaNota > 0 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">Planta: ${cantPlantaNota} und</span>` : ""}
                 ${n.esCredito && Number(n.saldoPendienteUsd || 0) > 0.01 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Crédito $${Number(n.saldoPendienteUsd).toFixed(2)}</span>` : ""}
               </div>
               <div class="text-[11px] text-slate-500 mt-0.5">
