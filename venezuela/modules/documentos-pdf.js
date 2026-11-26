@@ -82,8 +82,6 @@ export function imprimirDocumentoCarta({ tipo = "NOTA DE ENTREGA", folio = "0000
   .tot-box { width: 290px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; background: #f8fafc; }
   .tot-row { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; padding: 4px 0; }
   .tot-row.main { font-size: 15px; font-weight: 800; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 4px; }
-  .sign { margin-top: 38px; display: flex; justify-content: space-between; gap: 40px; font-size: 11px; color: #64748b; }
-  .sign div { flex: 1; border-top: 1px solid #94a3b8; padding-top: 6px; text-align: center; }
   @media print { body { padding: 0; } }
 </style>
 </head>
@@ -147,11 +145,6 @@ export function imprimirDocumentoCarta({ tipo = "NOTA DE ENTREGA", folio = "0000
       <div class="tot-box">
         ${bloqueTotalesMonedas(totalUsd, monedas, tasas)}
       </div>
-    </div>
-
-    <div class="sign">
-      <div>Entregado por</div>
-      <div>Recibido conforme (Firma y Cédula)</div>
     </div>
   </div>
   <script>window.onload = () => { window.print(); };</script>
