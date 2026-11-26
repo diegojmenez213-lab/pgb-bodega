@@ -263,6 +263,7 @@ export async function mount(root, state) {
       destinoAbonosAlAnular: destinoAbonos,
       saldoPendienteUsd: 0,
       esCredito: false,
+      tieneAbonosSinCerrar: false,
       actualizadoEn: serverTimestamp()
     }, { merge: true });
 
@@ -324,9 +325,10 @@ export async function mount(root, state) {
   }
 
   async function cerrarCajaDia() {
-    const [snapAbiertas, snapDeudas, snapGastos] = await Promise.all([
+    const [snapAbiertas, snapDeudas, snapAbonosPend, snapGastos] = await Promise.all([
       getDocs(query(refs.notasEntrega(), where("cierreId", "==", null))),
       getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
+      getDocs(query(refs.notasEntrega(), where("tieneAbonosSinCerrar", "==", true))),
       getDocs(query(refs.gastosCaja(), where("cierreId", "==", null)))
     ]);
 
@@ -337,7 +339,7 @@ export async function mount(root, state) {
     const gastosAbiertos = snapGastos.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     const mapaRev = new Map();
-    for (const d of [...snapAbiertas.docs, ...snapDeudas.docs]) {
+    for (const d of [...snapAbiertas.docs, ...snapDeudas.docs, ...snapAbonosPend.docs]) {
       mapaRev.set(d.id, { id: d.id, ...d.data() });
     }
 
@@ -433,7 +435,10 @@ export async function mount(root, state) {
         const abonosSellados = nota.abonos.map((ab) => (
           ab.cierreId === null || ab.cierreId === undefined ? { ...ab, cierreId } : ab
         ));
-        batch.set(doc(refs.notasEntrega(), notaId), { abonos: abonosSellados }, { merge: true });
+        batch.set(doc(refs.notasEntrega(), notaId), {
+          abonos: abonosSellados,
+          tieneAbonosSinCerrar: false
+        }, { merge: true });
       }
 
       for (const g of gastosAbiertos) {
