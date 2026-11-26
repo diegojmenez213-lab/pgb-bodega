@@ -79,6 +79,14 @@ export async function mount(root, state) {
         </div>
       </div>
 
+      <!-- Explicación breve general de por qué se está moviendo y por qué se pide -->
+      <div id="cajaExplicacionGeneral" class="hidden ve-card p-3.5 border-sky-200 bg-sky-50/50 space-y-1.5">
+        <div class="text-[11px] font-extrabold uppercase tracking-wider text-sky-950">
+          Por qué se está moviendo y por qué se sugiere pedir esto
+        </div>
+        <p id="txtExplicacionGeneral" class="text-xs text-slate-700 leading-relaxed"></p>
+      </div>
+
       <!-- Tabs de clasificación -->
       <div class="flex flex-wrap gap-1.5">
         <button type="button" data-tab="aumentar" class="tab-sug px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">
@@ -107,6 +115,16 @@ export async function mount(root, state) {
   let listaAumentar = [];
   let listaMantener = [];
   let listaNoPedir = [];
+  let resumenGeneral = {
+    diasCobertura: 15,
+    provFiltro: "",
+    soloPlanta: true,
+    totalUndPedir: 0,
+    totalInv: 0,
+    itemsAltaRotacion: 0,
+    itemsQuiebrePlanta: 0,
+    totalVendidos30d: 0
+  };
 
   const diasEl = root.querySelector("#diasCobertura");
   const provEl = root.querySelector("#filtroProvSug");
@@ -149,6 +167,52 @@ export async function mount(root, state) {
     poblarProveedores();
   }
 
+  function actualizarExplicacionGeneral() {
+    const box = root.querySelector("#cajaExplicacionGeneral");
+    const txt = root.querySelector("#txtExplicacionGeneral");
+
+    if (tabActiva !== "aumentar" || !listaAumentar.length) {
+      box.classList.add("hidden");
+      return;
+    }
+
+    const {
+      diasCobertura,
+      provFiltro,
+      soloPlanta,
+      totalUndPedir,
+      totalInv,
+      itemsAltaRotacion,
+      itemsQuiebrePlanta,
+      totalVendidos30d
+    } = resumenGeneral;
+
+    const ambito = provFiltro ? `del proveedor ${provFiltro}` : "en el catálogo filtrado";
+    const partes = [
+      `Se está moviendo un volumen de ${totalVendidos30d} und en los últimos 30 días ${ambito}, con ${listaAumentar.length} referencia(s) que requieren reposición (${totalUndPedir} und en total por $${totalInv.toFixed(2)} a precio costo) para cubrir ${diasCobertura} días.`
+    ];
+
+    if (itemsAltaRotacion > 0 || itemsQuiebrePlanta > 0) {
+      const motivos = [];
+      if (itemsAltaRotacion > 0) motifsPush(motivos, `${itemsAltaRotacion} referencia(s) con salida rápida y poco stock en almacén (se les añade margen de seguridad para no quedarse cortos)`);
+      if (itemsQuiebrePlanta > 0) motifsPush(motivos, `${itemsQuiebrePlanta} referencia(s) pedidas desde Planta sin existencia física en almacén`);
+      partes.push(`La compra se concentra principalmente en ${motivos.join(" y ")}.`);
+    } else {
+      partes.push(`El pedido responde a la reposición normal según el ritmo de salida de los últimos 30 días y tu stock actual en almacén.`);
+    }
+
+    if (soloPlanta) {
+      partes.push(`Solo se consideran cantidades disponibles hoy en Planta para que el pedido sea despachable de inmediato.`);
+    }
+
+    txt.textContent = partes.join(" ");
+    box.classList.remove("hidden");
+  }
+
+  function motifsPush(arr, item) {
+    arr.push(item);
+  }
+
   function generarAnalisis() {
     const diasCobertura = Math.max(5, Number(diasEl.value) || 15);
     const provFiltro = provEl.value;
@@ -159,6 +223,11 @@ export async function mount(root, state) {
     listaAumentar = [];
     listaMantener = [];
     listaNoPedir = [];
+
+    let totalUndPedir = 0;
+    let itemsAltaRotacion = 0;
+    let itemsQuiebrePlanta = 0;
+    let totalVendidos30d = 0;
 
     for (const p of catalogo) {
       const provNombre = (p.proveedor || "SIN PROVEEDOR").toUpperCase();
@@ -173,7 +242,6 @@ export async function mount(root, state) {
       const ritmoDiario = vendidos / 30;
       const diasAutonomiaActual = ritmoDiario > 0 ? Math.floor(actual / ritmoDiario) : 99;
 
-      // 1. Se pide desde Planta pero no tiene existencia en Almacén
       if (pedidosDePlanta > 0 && actual <= 0) {
         const basePedir = Math.max(1, Math.ceil(pedidosDePlanta * factor));
         if (!soloPlanta || dispPlanta > 0) {
@@ -190,11 +258,13 @@ export async function mount(root, state) {
             proximoRevisionDias: Math.max(3, Math.ceil(diasCobertura * 0.7)),
             inversion: cantFinal * costo
           });
+          totalUndPedir += cantFinal;
+          itemsQuiebrePlanta += 1;
+          totalVendidos30d += vendidos;
         }
         continue;
       }
 
-      // 2. Productos con movimiento en los últimos 30 días
       if (vendidos > 0) {
         const metaCobertura = Math.ceil(vendidos * factor);
         const pedirBase = Math.max(0, metaCobertura - actual);
@@ -220,6 +290,9 @@ export async function mount(root, state) {
             proximoRevisionDias: Math.max(4, Math.min(diasCobertura, diasAutonomiaActual + Math.round(diasCobertura * 0.6))),
             inversion: cantFinal * costo
           });
+          totalUndPedir += cantFinal;
+          if (seAgotaRapido) itemsAltaRotacion += 1;
+          totalVendidos30d += vendidos;
         } else {
           const contexto = `En los últimos 30 días vendió ${vendidos} und (~${ritmoDiario.toFixed(1)}/día) y el stock actual en Almacén (${actual} und) cubre el ritmo actual sin necesidad de pedir hoy.`;
           listaMantener.push({
@@ -261,6 +334,17 @@ export async function mount(root, state) {
     const totalInv = listaAumentar.reduce((acc, x) => acc + x.inversion, 0);
     root.querySelector("#totalInversion").textContent = `$${totalInv.toFixed(2)}`;
 
+    resumenGeneral = {
+      diasCobertura,
+      provFiltro,
+      soloPlanta,
+      totalUndPedir,
+      totalInv,
+      itemsAltaRotacion,
+      itemsQuiebrePlanta,
+      totalVendidos30d
+    };
+
     const menorRevision = listaAumentar.length
       ? Math.min(...listaAumentar.map((x) => x.proximoRevisionDias || diasCobertura))
       : diasCobertura;
@@ -275,6 +359,8 @@ export async function mount(root, state) {
   }
 
   function renderTab() {
+    actualizarExplicacionGeneral();
+
     const arr = tabActiva === "aumentar"
       ? listaAumentar
       : tabActiva === "mantener"
