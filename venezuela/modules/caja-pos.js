@@ -68,6 +68,17 @@ export async function mount(root, state) {
         </button>
       </div>
 
+      <!-- Saldo a favor disponible del cliente -->
+      <div id="panelSaldoFavor" class="hidden ve-card border-emerald-300 bg-emerald-50/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
+        <div class="text-xs">
+          <div id="txtSaldoFavor" class="font-extrabold text-emerald-950"></div>
+          <div id="subSaldoFavor" class="text-[11px] text-emerald-800 font-semibold"></div>
+        </div>
+        <button id="btnAplicarSaldoFavor" type="button" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">
+          Aplicar saldo a favor
+        </button>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <!-- Izquierda: Cliente y Buscador -->
         <div class="lg:col-span-7 space-y-3">
@@ -124,6 +135,14 @@ export async function mount(root, state) {
                 <span>TOTAL USD</span>
                 <span id="posTotalUsd" class="font-mono-ve">$0.00</span>
               </div>
+              <div id="filaDescuentoFavor" class="hidden flex justify-between text-xs font-bold text-emerald-700">
+                <span>Saldo a favor aplicado</span>
+                <span id="posDescuentoFavor" class="font-mono-ve">-$0.00</span>
+              </div>
+              <div id="filaNetoPagar" class="hidden flex justify-between text-sm font-extrabold text-slate-900">
+                <span>A PAGAR HOY</span>
+                <span id="posNetoPagar" class="font-mono-ve">$0.00</span>
+              </div>
               <div class="flex justify-between text-xs font-bold text-slate-500">
                 <span>Total Bs. (BCV)</span>
                 <span id="posTotalBs" class="font-mono-ve">Bs. 0.00</span>
@@ -171,6 +190,10 @@ export async function mount(root, state) {
                 <span id="lblRestante" class="text-slate-500">Restante por cubrir:</span>
                 <span id="posRestante" class="font-mono-ve text-rose-600">$0.00</span>
               </div>
+              <div id="filaSobrepago" class="hidden flex justify-between text-[11px] font-bold text-emerald-700">
+                <span>Sobrepago irá a saldo a favor:</span>
+                <span id="posSobrepago" class="font-mono-ve">+$0.00</span>
+              </div>
             </div>
 
             <!-- Monedas del documento y Formato -->
@@ -207,6 +230,8 @@ export async function mount(root, state) {
   let esCredito = false;
   let diasCredito = 15;
   let busqAbierta = false;
+  let saldoFavorDisponible = 0;
+  let saldoFavorAplicado = 0;
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
@@ -217,6 +242,7 @@ export async function mount(root, state) {
   const cartEl = root.querySelector("#posCarrito");
   const pagosEl = root.querySelector("#posPagos");
   const alertaBox = root.querySelector("#alertaDeudaCliente");
+  const favorBox = root.querySelector("#panelSaldoFavor");
 
   function aplicarFactorPos(nuevoFactor, sincronizarInput = false) {
     const val = parseMultiplicadorTexto(nuevoFactor);
@@ -243,14 +269,43 @@ export async function mount(root, state) {
     return carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
   }
 
-  function chequearDeudaClienteActual() {
+  function montoObjetivoHoy() {
+    const tot = totalVenta();
+    return Math.max(0, Number((tot - saldoFavorAplicado).toFixed(2)));
+  }
+
+  function refrescarEstadoClienteActual() {
     const docId = normalizarIdVE(docEl.value);
     if (!docId || docId.length < 5) {
       alertaBox.classList.add("hidden");
+      favorBox.classList.add("hidden");
+      saldoFavorDisponible = 0;
+      saldoFavorAplicado = 0;
+      renderTotalesYRestante();
       return;
     }
 
+    const cli = clientes.find((c) => c.id === docId);
+    saldoFavorDisponible = Number(cli?.saldoAFavorUsd || 0);
+    if (saldoFavorAplicado > saldoFavorDisponible) {
+      saldoFavorAplicado = saldoFavorDisponible;
+    }
+
+    if (saldoFavorDisponible > 0.01) {
+      const cliNombre = nomEl.value.trim() || cli?.nombre || docId;
+      root.querySelector("#txtSaldoFavor").textContent =
+        `${cliNombre} tiene $${saldoFavorDisponible.toFixed(2)} de saldo a favor.`;
+      root.querySelector("#subSaldoFavor").textContent = saldoFavorAplicado > 0
+        ? `Ya aplicaste $${saldoFavorAplicado.toFixed(2)} a esta nota.`
+        : "Puedes descontarlo de esta nota antes de cobrar.";
+      favorBox.classList.remove("hidden");
+    } else {
+      favorBox.classList.add("hidden");
+      saldoFavorAplicado = 0;
+    }
+
     const pendientes = todasNotas.filter((n) => {
+      if (n.anulada) return false;
       if (normalizarIdVE(n.cliente?.documento || "") !== docId) return false;
       const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
       return saldo > 0.01;
@@ -258,6 +313,7 @@ export async function mount(root, state) {
 
     if (!pendientes.length) {
       alertaBox.classList.add("hidden");
+      renderTotalesYRestante();
       return;
     }
 
@@ -270,16 +326,67 @@ export async function mount(root, state) {
     root.querySelector("#txtAlertaDeuda").textContent =
       `${nombreCli} (${docId}) tiene una deuda total de $${totalDeuda.toFixed(2)}.`;
     root.querySelector("#subAlertaDeuda").textContent = pendientes.length === 1
-      ? `Corresponde a 1 factura/nota pendiente por $${totalDeuda.toFixed(2)}.`
-      : `Suma de ${pendientes.length} facturas/notas pendientes: $${totalDeuda.toFixed(2)}.`;
+      ? `Corresponde a 1 nota pendiente por $${totalDeuda.toFixed(2)}.`
+      : `Suma de ${pendientes.length} notas pendientes: $${totalDeuda.toFixed(2)}.`;
     alertaBox.classList.remove("hidden");
+    renderTotalesYRestante();
   }
+
+  root.querySelector("#btnAplicarSaldoFavor").addEventListener("click", () => {
+    const tot = totalVenta();
+    if (saldoFavorDisponible <= 0.01) return;
+    saldoFavorAplicado = Math.min(saldoFavorDisponible, Number(tot.toFixed(2)));
+    if (!esCredito && pagos.length === 1) {
+      pagos[0].auto = true;
+    }
+    refrescarEstadoClienteActual();
+    renderPagos();
+  });
 
   root.querySelector("#btnVerDeudaCliente").addEventListener("click", () => {
     if (typeof window.NEXUS_VE_NAV === "function") {
       window.NEXUS_VE_NAV("deudores");
     }
   });
+
+  function renderTotalesYRestante() {
+    const total = totalVenta();
+    const objetivo = montoObjetivoHoy();
+    const tasas = getTasaActiva(state);
+
+    root.querySelector("#posTotalUsd").textContent = `$${total.toFixed(2)}`;
+    root.querySelector("#posTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
+
+    const filaDesc = root.querySelector("#filaDescuentoFavor");
+    const filaNeto = root.querySelector("#filaNetoPagar");
+    if (saldoFavorAplicado > 0.01) {
+      filaDesc.classList.remove("hidden");
+      filaNeto.classList.remove("hidden");
+      root.querySelector("#posDescuentoFavor").textContent = `-$${saldoFavorAplicado.toFixed(2)}`;
+      root.querySelector("#posNetoPagar").textContent = `$${objetivo.toFixed(2)}`;
+    } else {
+      filaDesc.classList.add("hidden");
+      filaNeto.classList.add("hidden");
+    }
+
+    const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
+    const restante = Math.max(0, objetivo - cubierto);
+    const sobrepago = !esCredito ? Math.max(0, Number((cubierto - objetivo).toFixed(2))) : 0;
+
+    const restEl = root.querySelector("#posRestante");
+    restEl.textContent = `$${restante.toFixed(2)}`;
+    restEl.className = esCredito
+      ? "font-mono-ve text-amber-800"
+      : (restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
+
+    const filaSobre = root.querySelector("#filaSobrepago");
+    if (sobrepago > 0.01) {
+      filaSobre.classList.remove("hidden");
+      root.querySelector("#posSobrepago").textContent = `+$${sobrepago.toFixed(2)}`;
+    } else {
+      filaSobre.classList.add("hidden");
+    }
+  }
 
   function actualizarEstadoCreditoUI() {
     const btnCon = root.querySelector("#btnModoContado");
@@ -354,9 +461,9 @@ export async function mount(root, state) {
   });
 
   function renderPagos() {
-    const total = totalVenta();
+    const objetivo = montoObjetivoHoy();
     if (!esCredito && pagos.length === 1 && pagos[0].auto !== false) {
-      pagos[0].montoUsd = Number(total.toFixed(2));
+      pagos[0].montoUsd = Number(objetivo.toFixed(2));
     }
 
     pagosEl.innerHTML = pagos.map((p, idx) => `
@@ -369,13 +476,7 @@ export async function mount(root, state) {
       </div>
     `).join("");
 
-    const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
-    const restante = Math.max(0, total - cubierto);
-    const restEl = root.querySelector("#posRestante");
-    restEl.textContent = `$${restante.toFixed(2)}`;
-    restEl.className = esCredito
-      ? "font-mono-ve text-amber-800"
-      : (restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
+    renderTotalesYRestante();
   }
 
   function agregarProductoCaja(prodId, cantAgregar = 1) {
@@ -407,11 +508,11 @@ export async function mount(root, state) {
 
   function renderCarrito() {
     const total = totalVenta();
-    const tasas = getTasaActiva(state);
+    if (saldoFavorAplicado > total) {
+      saldoFavorAplicado = Number(total.toFixed(2));
+    }
     const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
     root.querySelector("#posCantItemsBadge").textContent = String(totalUnds);
-    root.querySelector("#posTotalUsd").textContent = `$${total.toFixed(2)}`;
-    root.querySelector("#posTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
 
     if (!carrito.length) {
       cartEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Carrito vacío.</div>`;
@@ -549,13 +650,7 @@ export async function mount(root, state) {
     if (e.target.classList.contains("inp-pmonto")) {
       pagos[idx].auto = false;
       pagos[idx].montoUsd = Math.max(0, parseFloat(e.target.value) || 0);
-      const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
-      const rest = Math.max(0, totalVenta() - cubierto);
-      const restEl = root.querySelector("#posRestante");
-      restEl.textContent = `$${rest.toFixed(2)}`;
-      restEl.className = esCredito
-        ? "font-mono-ve text-amber-800"
-        : (rest <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
+      renderTotalesYRestante();
     }
   });
 
@@ -569,12 +664,12 @@ export async function mount(root, state) {
   root.querySelector("#btnAddPago").addEventListener("click", () => {
     if (pagos.length >= 4) return alert("Máximo 4 formas de pago por documento.");
     const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
-    const rest = Math.max(0, Number((totalVenta() - cubierto).toFixed(2)));
+    const rest = Math.max(0, Number((montoObjetivoHoy() - cubierto).toFixed(2)));
     pagos.push({ metodo: "Pago Móvil Bs.", montoUsd: rest, auto: false });
     renderPagos();
   });
 
-  docEl.addEventListener("input", chequearDeudaClienteActual);
+  docEl.addEventListener("input", refrescarEstadoClienteActual);
   docEl.addEventListener("blur", () => {
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
@@ -585,7 +680,7 @@ export async function mount(root, state) {
       tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
       aplicarFactorPos(fCli, true);
     }
-    chequearDeudaClienteActual();
+    refrescarEstadoClienteActual();
   });
 
   tarifaEl.addEventListener("change", () => {
@@ -613,6 +708,7 @@ export async function mount(root, state) {
     carrito = [];
     esCredito = false;
     diasCredito = 15;
+    saldoFavorAplicado = 0;
     pagos = [{ metodo: "Efectivo USD", montoUsd: 0 }];
     actualizarEstadoCreditoUI();
     renderCarrito();
@@ -633,17 +729,29 @@ export async function mount(root, state) {
       const folio = String(nuevoNum).padStart(5, "0");
 
       const totalUsd = Number(totalVenta().toFixed(2));
+      const usadoFavor = Math.min(saldoFavorAplicado, totalUsd);
+      const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
       const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
       const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
       const pagosValidos = pagos.filter((p) => Number(p.montoUsd) > 0);
-      const abonoInicial = Number(pagosValidos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0).toFixed(2));
-      const saldoPendienteUsd = esCredito ? Math.max(0, Number((totalUsd - abonoInicial).toFixed(2))) : 0;
+      const totalPagadoHoy = Number(pagosValidos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0).toFixed(2));
+
+      let saldoPendienteUsd = 0;
+      let sobrepagoGenerado = 0;
+
+      if (esCredito) {
+        saldoPendienteUsd = Math.max(0, Number((objetivoHoy - totalPagadoHoy).toFixed(2)));
+        sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
+      } else {
+        sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
+      }
 
       const tasas = getTasaActiva(state);
       const monedas = Array.from(root.querySelectorAll(".pos-mon:checked")).map((el) => el.value);
       const docCli = normalizarIdVE(docEl.value) || "V-00000000";
       const nomCli = nomEl.value.trim() || "Consumidor Final";
       const now = Date.now();
+      const jornadaId = state.empresa?.jornadaActivaId || new Date().toISOString().slice(0, 10);
 
       const batch = writeBatch(db);
 
@@ -651,10 +759,15 @@ export async function mount(root, state) {
         folio,
         numero: nuevoNum,
         fechaIso: new Date().toISOString().slice(0, 10),
+        jornadaId,
+        cierreId: null,
+        anulada: false,
         creadoTs: now,
         cliente: { documento: docCli, nombre: nomCli },
         items: carrito,
         pagos: pagosValidos,
+        saldoFavorAplicadoUsd: usadoFavor,
+        sobrepagoUsd: sobrepagoGenerado,
         esCredito: esCredito && saldoPendienteUsd > 0.01,
         diasCredito: esCredito ? diasCredito : 0,
         venceTs: esCredito ? now + diasCredito * 86400000 : now,
@@ -670,6 +783,25 @@ export async function mount(root, state) {
       });
 
       batch.set(refs.empresaRef, { correlativos: { notaEntregaActual: nuevoNum } }, { merge: true });
+
+      const cliExistente = clientes.find((c) => c.id === docCli);
+      const nuevoSaldoFavorCli = Math.max(
+        0,
+        Number(((cliExistente?.saldoAFavorUsd || 0) - usadoFavor + sobrepagoGenerado).toFixed(2))
+      );
+
+      if (docCli !== "V-00000000" || nuevoSaldoFavorCli > 0.01 || cliExistente) {
+        batch.set(
+          doc(refs.clientes(), docCli),
+          {
+            documento: docCli,
+            nombre: nomCli,
+            saldoAFavorUsd: nuevoSaldoFavorCli,
+            actualizadoEn: serverTimestamp()
+          },
+          { merge: true }
+        );
+      }
 
       for (const it of carrito) {
         if (it.origen === "almacen") {
@@ -693,16 +825,21 @@ export async function mount(root, state) {
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
       actualizarFolioUI();
 
-      const snapNotas = await getDocs(refs.notasEntrega());
+      const [snapNotas, snapCli] = await Promise.all([getDocs(refs.notasEntrega()), getDocs(refs.clientes())]);
       todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+      clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
+
       if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
         await window.NEXUS_VE_REFRESH_ALERTAS();
       }
 
       const formato = root.querySelector("#posFormatoPrint").value;
-      const obsCredito = esCredito && saldoPendienteUsd > 0.01
-        ? `Venta a crédito (${diasCredito} días). Saldo pendiente: $${saldoPendienteUsd.toFixed(2)}.`
-        : "";
+      const partesObs = [];
+      if (usadoFavor > 0.01) partesObs.push(`Saldo a favor aplicado: $${usadoFavor.toFixed(2)}.`);
+      if (sobrepagoGenerado > 0.01) partesObs.push(`Sobrepago acreditado a saldo a favor: +$${sobrepagoGenerado.toFixed(2)}.`);
+      if (esCredito && saldoPendienteUsd > 0.01) {
+        partesObs.push(`Venta a crédito (${diasCredito} días). Saldo pendiente: $${saldoPendienteUsd.toFixed(2)}.`);
+      }
 
       const docData = {
         tipo: "NOTA DE ENTREGA",
@@ -714,7 +851,7 @@ export async function mount(root, state) {
         monedas: monedas.length ? monedas : ["USD", "BS"],
         tasas,
         pagos: pagosValidos,
-        observaciones: obsCredito
+        observaciones: partesObs.join(" ")
       };
 
       if (formato === "carta") imprimirDocumentoCarta(docData);
@@ -722,7 +859,7 @@ export async function mount(root, state) {
       else alert(`Nota de Entrega N° ${folio} emitida correctamente.`);
 
       limpiarCaja();
-      chequearDeudaClienteActual();
+      refrescarEstadoClienteActual();
       renderBusqueda();
     } catch (err) {
       alert("Error emitiendo Nota de Entrega: " + err.message);
@@ -770,7 +907,7 @@ export async function mount(root, state) {
     nomEl.value = cot.cliente?.nombre || "";
     if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
     carrito = (cot.items || []).map((it) => ({ ...it }));
-    chequearDeudaClienteActual();
+    refrescarEstadoClienteActual();
   }
 
   renderCarrito();
