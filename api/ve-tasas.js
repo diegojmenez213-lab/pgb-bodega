@@ -1,70 +1,54 @@
-// api/ve-tasas.js
+// api/ve-tasas.js — Endpoint Vercel para tasas en vivo Venezuela (BCV, EUR, USDT)
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=300");
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-
-  const fetchJson = async (url, timeoutMs = 6500) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const r = await fetch(url, { signal: ctrl.signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return await r.json();
-    } finally {
-      clearTimeout(t);
-    }
-  };
+  let bcvHoy = 0;
+  let bcvManana = 0;
+  let eur = 0;
+  let usdt = 0;
 
   try {
-    const [dolaresRes, eurosRes] = await Promise.allSettled([
-      fetchJson("https://ve.dolarapi.com/v1/dolares"),
-      fetchJson("https://ve.dolarapi.com/v1/euros")
-    ]);
-
-    let usdBcv = 0;
-    let usdt = 0;
-    let eurBcv = 0;
-    let fechaBcv = null;
-
-    if (dolaresRes.status === "fulfilled" && Array.isArray(dolaresRes.value)) {
-      const oficial = dolaresRes.value.find((d) => d.fuente === "oficial");
-      const paralelo = dolaresRes.value.find((d) => d.fuente === "paralelo");
-      if (oficial?.promedio) {
-        usdBcv = Number(oficial.promedio);
-        fechaBcv = oficial.fechaActualizacion || null;
-      }
-      if (paralelo?.promedio) {
-        usdt = Number(paralelo.promedio);
-      }
-    }
-
-    if (eurosRes.status === "fulfilled" && Array.isArray(eurosRes.value)) {
-      const eurOficial = eurosRes.value.find((e) => e.fuente === "oficial");
-      if (eurOficial?.promedio) eurBcv = Number(eurOficial.promedio);
-    }
-
-    // Respaldo de cálculo EUR si la fuente no respondió
-    if (!eurBcv && usdBcv) eurBcv = Number((usdBcv * 1.08).toFixed(4));
-
-    return res.status(200).json({
-      ok: true,
-      tasas: {
-        usdBcvHoy: usdBcv,
-        usdBcvProximo: null, // Se llena automático si se registra tasa próxima o manual
-        eurBcv,
-        usdt,
-        fechaBcv,
-        actualizadoEn: new Date().toISOString()
-      }
+    // 1. Dólar Oficial (BCV) y Paralelo/USDT desde DolarAPI Venezuela
+    const respUsd = await fetch("https://ve.dolarapi.com/v1/dolares", {
+      headers: { "User-Agent": "NEXUS-ERP-VE/1.0" }
     });
-  } catch (err) {
-    return res.status(200).json({
-      ok: false,
-      error: "No se pudo consultar la API externa; usa modo manual o caché.",
-      tasas: null
-    });
+    if (respUsd.ok) {
+      const dataUsd = await respUsd.json();
+      const oficial = dataUsd.find((d) => d.fuente === "oficial" || /oficial|bcv/i.test(d.nombre || ""));
+      const paralelo = dataUsd.find((d) => d.fuente === "paralelo" || /paralelo|usdt/i.test(d.nombre || ""));
+      if (oficial?.promedio) bcvHoy = Number(oficial.promedio);
+      if (paralelo?.promedio) usdt = Number(paralelo.promedio);
+    }
+  } catch (e) {
+    console.warn("Error consultando USD VE:", e.message);
   }
+
+  try {
+    // 2. Euro BCV (con cálculo de respaldo si la API de euros no responde)
+    const respEur = await fetch("https://ve.dolarapi.com/v1/euros", {
+      headers: { "User-Agent": "NEXUS-ERP-VE/1.0" }
+    });
+    if (respEur.ok) {
+      const dataEur = await respEur.json();
+      const eurOficial = dataEur.find((d) => d.fuente === "oficial" || /oficial|bcv/i.test(d.nombre || ""));
+      if (eurOficial?.promedio) eur = Number(eurOficial.promedio);
+    }
+  } catch (e) {
+    console.warn("Error consultando EUR VE:", e.message);
+  }
+
+  // Respaldo de Euro si no llegó directo
+  if (!eur && bcvHoy > 0) {
+    eur = Number((bcvHoy * 1.08).toFixed(2));
+  }
+
+  return res.status(200).json({
+    ok: bcvHoy > 0 || usdt > 0,
+    bcvHoy,
+    bcvManana,
+    eur,
+    usdt,
+    actualizado: new Date().toISOString()
+  });
 }
