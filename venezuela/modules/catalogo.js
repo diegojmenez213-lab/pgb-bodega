@@ -47,7 +47,7 @@ function normalizarIdProveedor(nombre) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
-    .slice(0, 80);
+    .slice(0, 40);
 }
 
 function limpiarDocId(codigo) {
@@ -262,9 +262,13 @@ function mapearFilaExcel(row, proveedorForzado = "") {
   )
     .trim()
     .toUpperCase();
+  const provId = normalizarIdProveedor(provFinal) || "GENERAL";
+
+  // ID aislado por proveedor para evitar colisiones si dos proveedores repiten códigos
+  const docIdAislado = limpiarDocId(`${provId}__${limpiarDocId(codigo)}`);
 
   return {
-    id: limpiarDocId(codigo),
+    id: docIdAislado,
     codigo,
     sinCodigo,
     descripcion: descripcion || codigo,
@@ -279,7 +283,7 @@ function mapearFilaExcel(row, proveedorForzado = "") {
       .trim()
       .toUpperCase(),
     proveedor: provFinal,
-    proveedorId: normalizarIdProveedor(provFinal),
+    proveedorId: provId,
     costoUsd,
     stockPlanta
   };
@@ -479,7 +483,7 @@ export async function mount(root, state) {
 
   let productos = [];
   let proveedores = [];
-  let reportesPorProv = new Map(); // provId -> reporte
+  let reportesPorProv = new Map();
   let provReporteActivo = null;
   let origen = "almacen";
   let proveedorActivoSubida = "";
@@ -555,7 +559,6 @@ export async function mount(root, state) {
     const btn = e.target.closest(".btn-pick-prov");
     if (!btn) return;
     inpProv.value = decodeURIComponent(btn.dataset.nombre || "");
-    sugProv.classList.add("hidden");
     renderSugerenciasProveedor();
     sugProv.classList.add("hidden");
   });
@@ -617,7 +620,6 @@ export async function mount(root, state) {
 
     panelCambios.classList.remove("hidden");
 
-    // Pestañas para cambiar entre proveedores
     root.querySelector("#tabsReportesProv").innerHTML = listaReportes.map((rep) => {
       const activo = rep.proveedorId === provReporteActivo;
       return `
@@ -817,7 +819,7 @@ export async function mount(root, state) {
     fileInput.value = "";
 
     const provNombre = (proveedorActivoSubida || inpProv.value.trim() || "GENERAL").toUpperCase();
-    const provId = normalizarIdProveedor(provNombre);
+    const provId = normalizarIdProveedor(provNombre) || "GENERAL";
 
     const progWrap = root.querySelector("#progExcelWrap");
     const progBar = root.querySelector("#progExcelBar");
@@ -1001,7 +1003,6 @@ export async function mount(root, state) {
         }
       }
 
-      // Sobrescribe automáticamente el reporte anterior SOLO de este proveedor
       const reportePayload = {
         archivo: file.name,
         proveedor: provNombre,
