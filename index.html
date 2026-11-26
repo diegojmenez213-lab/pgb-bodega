@@ -63,7 +63,7 @@
         </div>
         <a href="presentacion.html" class="leading-none">
           <span class="font-extrabold text-sm tracking-tight text-slate-950 block">NEXUS ERP</span>
-          <span class="text-[10px] font-semibold text-slate-500 tracking-wide">CHILE • SII & OMNICANAL</span>
+          <span class="text-[10px] font-semibold text-slate-500 tracking-wide">CHILE & VENEZUELA • MULTI-EMPRESA</span>
         </a>
       </div>
 
@@ -79,7 +79,7 @@
   </main>
 
   <footer class="py-5 text-center text-[11px] font-medium text-slate-400">
-    NEXUS ERP • Infraestructura aislada multi-empresa • Santiago, Chile
+    NEXUS ERP • Infraestructura aislada multi-empresa • Chile & Venezuela
   </footer>
 
   <script>
@@ -105,11 +105,73 @@
     })();
   </script>
 
+  <!-- Puente modular aislado para acceso de empresas Venezuela -->
+  <script type="module">
+    import { db, doc, getDoc, normalizarIdVE } from "./venezuela/core/db.js";
+    import { guardarSesionVE } from "./venezuela/core/auth-tenant.js";
+
+    window.NEXUS_VE_AUTH = {
+      normalizarIdVE,
+      async intentarLoginVenezuela(documentoIngresado, claveIngresada) {
+        const idVE = normalizarIdVE(documentoIngresado);
+        const snap = await getDoc(doc(db, "empresas", idVE));
+
+        if (!snap.exists()) {
+          return { ok: false, status: 404, error: "RIF / Cédula o clave de acceso incorrectos." };
+        }
+
+        const empresa = snap.data();
+        if (empresa.pais !== "VE") {
+          return { ok: false, status: 404, error: "Esta empresa no pertenece al entorno Venezuela." };
+        }
+
+        if (empresa.activo === false) {
+          return { ok: false, status: 403, error: "Esta cuenta se encuentra suspendida." };
+        }
+
+        if (String(empresa.claveAcceso || "") !== String(claveIngresada || "")) {
+          return { ok: false, status: 401, error: "RIF / Cédula o clave de acceso incorrectos." };
+        }
+
+        sessionStorage.clear();
+        guardarSesionVE({
+          tenantId: snap.id,
+          nombreEmpresa: empresa.nombre || snap.id,
+          usuario: "Administrador",
+          rol: "dueno"
+        });
+
+        window.location.replace("./venezuela/index.html");
+        return { ok: true };
+      }
+    };
+  </script>
+
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
     const NEXUS_API_BASE = "https://pgb-bodega.vercel.app/api";
     const RUT_PGB = "769497226";
+
+    const esInputVenezuela = (val) => /^[VEJGP]/i.test(String(val || "").trim());
+
+    const formatearDocVE = (raw) => {
+      const s = String(raw || "").toUpperCase().replace(/[^VEJGP0-9-]/g, "");
+      if (!s) return "";
+      const letra = s[0];
+      if (!/[VEJGP]/.test(letra)) return s;
+      const resto = s.slice(1).replace(/[^0-9]/g, "");
+      if (!resto) return letra;
+      if ((letra === "J" || letra === "G") && resto.length > 8) {
+        return `${letra}-${resto.slice(0, 8)}-${resto.slice(8, 9)}`;
+      }
+      return `${letra}-${resto.slice(0, 9)}`;
+    };
+
+    const validarDocVE = (val) => {
+      const s = String(val || "").trim().toUpperCase();
+      return /^[VEJGP]-\d{6,9}(-\d)?$/.test(s);
+    };
 
     const limpiarRut = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase().slice(0, 9);
     const formatearRut = (r) => {
@@ -138,7 +200,7 @@
     };
 
     function LoginNexusApp() {
-      const [rutInput, setRutInput] = useState("");
+      const [docInput, setDocInput] = useState("");
       const [claveInput, setClaveInput] = useState("");
       const [verClave, setVerClave] = useState(false);
       const [cargando, setCargando] = useState(false);
@@ -182,6 +244,14 @@
         }
       };
 
+      const manejarCambioDocumento = (valor) => {
+        if (esInputVenezuela(valor)) {
+          setDocInput(formatearDocVE(valor));
+        } else {
+          setDocInput(formatearRut(valor));
+        }
+      };
+
       const ingresarEmpresa = async (e) => {
         e.preventDefault();
         if (loginLockRef.current) return;
@@ -192,9 +262,47 @@
         }
 
         setErrorMsg("");
-        const rutLimpio = limpiarRut(rutInput);
+        const esVE = esInputVenezuela(docInput);
+
+        if (esVE) {
+          if (!validarDocVE(docInput)) {
+            setErrorMsg("Ingresa una Cédula o RIF venezolano válido (Ej: J-50343856-8 o V-20504570).");
+            return;
+          }
+
+          if (!window.NEXUS_VE_AUTH) {
+            setErrorMsg("Módulo de acceso Venezuela cargando. Intenta de nuevo en un segundo.");
+            return;
+          }
+
+          loginLockRef.current = true;
+          setCargando(true);
+          try {
+            const resVE = await window.NEXUS_VE_AUTH.intentarLoginVenezuela(docInput, claveInput.trim());
+            if (!resVE.ok) {
+              if (resVE.status === 401 || resVE.status === 404) {
+                registrarFalloAcceso(resVE.error);
+              } else {
+                setErrorMsg(resVE.error || "No se pudo validar el acceso en este momento.");
+              }
+            }
+          } catch (err) {
+            if (!navigator.onLine) {
+              setErrorMsg("Sin conexión a internet. Verifica tu señal e intenta nuevamente.");
+            } else {
+              setErrorMsg("Error de conexión con Firestore. Verifica la configuración de db.js.");
+            }
+          } finally {
+            setCargando(false);
+            loginLockRef.current = false;
+          }
+          return;
+        }
+
+        // Flujo Chile (intacto)
+        const rutLimpio = limpiarRut(docInput);
         if (rutLimpio.length < 7) {
-          setErrorMsg("Ingresa un RUT empresarial válido (mínimo 7 caracteres).");
+          setErrorMsg("Ingresa un RUT chileno o Cédula/RIF venezolano válido.");
           return;
         }
 
@@ -213,8 +321,19 @@
           const data = await resp.json().catch(() => ({}));
 
           if (!resp.ok || !data.ok) {
+            // Respaldo silencioso por si ingresaron una cédula venezolana solo con números
+            if (resp.status === 404 && /^\d{6,9}$/.test(rutLimpio) && window.NEXUS_VE_AUTH) {
+              const resVE = await window.NEXUS_VE_AUTH.intentarLoginVenezuela(rutLimpio, claveInput.trim());
+              if (resVE.ok) return;
+              if (resVE.status === 401 || resVE.status === 403) {
+                if (resVE.status === 401) registrarFalloAcceso(resVE.error);
+                else setErrorMsg(resVE.error);
+                return;
+              }
+            }
+
             if (resp.status === 401 || resp.status === 404) {
-              registrarFalloAcceso(data.error || "RUT o clave de acceso incorrectos.");
+              registrarFalloAcceso(data.error || "Documento o clave de acceso incorrectos.");
             } else {
               setErrorMsg(data.error || "No se pudo validar el acceso en este momento.");
             }
@@ -248,7 +367,8 @@
         }
       };
 
-      const rutLimpioActual = limpiarRut(rutInput);
+      const modoVE = esInputVenezuela(docInput);
+      const rutLimpioActual = limpiarRut(docInput);
       const bloqueadoAhora = segundosRestantes > 0;
 
       return (
@@ -262,7 +382,7 @@
               Portal Corporativo
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 font-medium">
-              Ingresa el RUT de tu empresa para entrar a tu entorno privado.
+              Ingresa tu RUT (Chile) o Cédula / RIF (Venezuela) para entrar a tu entorno privado.
             </p>
           </div>
 
@@ -274,17 +394,24 @@
 
           <form onSubmit={ingresarEmpresa} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1.5">RUT Empresa *</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">RUT / Cédula o RIF *</label>
               <input
                 type="text"
-                value={rutInput}
-                onChange={(e) => setRutInput(formatearRut(e.target.value))}
-                placeholder="Ej: 77.528.042-5"
+                value={docInput}
+                onChange={(e) => manejarCambioDocumento(e.target.value)}
+                placeholder="Ej: 77.528.042-5 o J-50343856-8"
                 autoComplete="username"
                 className="w-full bg-slate-50 border border-slate-300 focus:border-slate-950 focus:bg-white rounded-2xl px-4 py-3.5 text-sm font-bold text-slate-950 placeholder:text-slate-400 outline-none transition"
                 required
               />
-              {rutLimpioActual.length >= 7 && (
+              {modoVE && docInput.length >= 3 && (
+                <p className={`text-[11px] font-bold mt-1.5 px-1 ${validarDocVE(docInput) ? "text-emerald-600" : "text-slate-500"}`}>
+                  {validarDocVE(docInput)
+                    ? "✓ Formato Cédula / RIF Venezuela detectado"
+                    : "Ingresa prefijo y números (Ej: J-50343856-8 o V-20504570)"}
+                </p>
+              )}
+              {!modoVE && rutLimpioActual.length >= 7 && (
                 <p className={`text-[11px] font-bold mt-1.5 px-1 ${validarRutChileno(rutLimpioActual) ? "text-emerald-600" : "text-amber-600"}`}>
                   {validarRutChileno(rutLimpioActual)
                     ? "✓ Formato de RUT chileno verificado"
@@ -323,12 +450,14 @@
                 ? "Verificando Acceso..."
                 : bloqueadoAhora
                   ? `Espera ${segundosRestantes}s...`
-                  : "Ingresar a mi Empresa →"}
+                  : modoVE
+                    ? "Ingresar a Entorno Venezuela →"
+                    : "Ingresar a mi Empresa →"}
             </button>
           </form>
 
           <div className="pt-4 border-t border-slate-100 flex items-center justify-center text-[11px] text-slate-400 font-medium">
-            <span className="font-mono-tech text-[10px]">AISLAMIENTO POR RUT • SESIÓN CIFRADA</span>
+            <span className="font-mono-tech text-[10px]">AISLAMIENTO POR RUT / RIF • SESIÓN CIFRADA</span>
           </div>
         </div>
       );
