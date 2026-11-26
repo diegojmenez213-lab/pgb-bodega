@@ -44,7 +44,7 @@ export async function mount(root, state) {
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Historial de Notas y Cierre Diario</h1>
           <p class="text-xs text-slate-500">
-            Carga rápida de la jornada actual. Consulta el archivo infinito bajo demanda, anula con control de abonos o cierra caja.
+            Carga rápida de la jornada actual. Activa el Archivo Infinito para filtrar por rango de fechas, folio, nombre o cédula.
           </p>
         </div>
         <button id="btnCerrarCajaHist" type="button" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer">
@@ -68,12 +68,39 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Filtros y búsqueda -->
-      <div class="ve-card p-3 flex flex-wrap items-center justify-between gap-2">
-        <input id="busqNotaHist" type="text" placeholder="Buscar por N° folio, cliente o cédula/RIF..." class="flex-1 min-w-[200px] bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-slate-950" />
-        <div class="flex gap-1.5" id="filtroEstadoNotas">
-          <button type="button" data-estado="dia" class="btn-est px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">Del Día</button>
-          <button type="button" data-estado="todas" class="btn-est px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer">Archivadas / Todas</button>
+      <!-- Filtro Infinito (Texto + Fechas Desde/Hasta + Condición) -->
+      <div class="ve-card p-3 space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <input id="busqNotaHist" type="text" placeholder="Buscar por N° folio, nombre, cédula/RIF o producto..." class="flex-1 min-w-[200px] bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-slate-950" />
+          <div class="flex gap-1.5" id="filtroEstadoNotas">
+            <button type="button" data-estado="dia" class="btn-est px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">Del Día</button>
+            <button type="button" data-estado="todas" class="btn-est px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer">Archivo Infinito</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-100">
+          <div class="flex flex-col gap-0.5">
+            <label class="text-[10px] font-extrabold uppercase text-slate-400">Desde</label>
+            <input id="filtroFechaDesde" type="date" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold" />
+          </div>
+          <div class="flex flex-col gap-0.5">
+            <label class="text-[10px] font-extrabold uppercase text-slate-400">Hasta</label>
+            <input id="filtroFechaHasta" type="date" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold" />
+          </div>
+          <div class="flex flex-col gap-0.5">
+            <label class="text-[10px] font-extrabold uppercase text-slate-400">Condición</label>
+            <select id="filtroCondicion" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold">
+              <option value="todas">Todas</option>
+              <option value="contado">Contado</option>
+              <option value="credito">Crédito</option>
+              <option value="anuladas">Anuladas</option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button id="btnLimpiarFiltrosHist" type="button" class="w-full py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-extrabold cursor-pointer">
+              Limpiar filtros
+            </button>
+          </div>
         </div>
       </div>
 
@@ -88,6 +115,9 @@ export async function mount(root, state) {
   let vistaEstado = "dia";
 
   const busqEl = root.querySelector("#busqNotaHist");
+  const desdeEl = root.querySelector("#filtroFechaDesde");
+  const hastaEl = root.querySelector("#filtroFechaHasta");
+  const condEl = root.querySelector("#filtroCondicion");
   const contEl = root.querySelector("#listaNotasHist");
 
   function actualizarResumenDia() {
@@ -105,22 +135,36 @@ export async function mount(root, state) {
   function renderNotas() {
     actualizarResumenDia();
     const q = busqEl.value.trim().toLowerCase();
+    const fDesde = desdeEl.value;
+    const fHasta = hastaEl.value;
+    const fCond = condEl.value;
 
     const base = vistaEstado === "dia"
       ? notas.filter((n) => !n.cierreId)
       : notas;
 
     const filtradas = base.filter((n) => {
-      if (!q) return true;
-      const txt = `${n.folio || n.id || ""} ${n.cliente?.nombre || ""} ${n.cliente?.documento || ""}`.toLowerCase();
-      return txt.includes(q);
+      const fecha = String(n.fechaIso || "");
+      if (fDesde && fecha && fecha < fDesde) return false;
+      if (fHasta && fecha && fecha > fHasta) return false;
+
+      if (fCond === "anuladas" && !n.anulada) return false;
+      if (fCond === "contado" && (n.anulada || n.esCredito)) return false;
+      if (fCond === "credito" && (n.anulada || !n.esCredito)) return false;
+
+      if (q) {
+        const itemsTxt = (n.items || []).map((it) => `${it.codigo} ${it.descripcion}`).join(" ");
+        const txt = `${n.folio || n.id || ""} ${n.cliente?.nombre || ""} ${n.cliente?.documento || ""} ${itemsTxt}`.toLowerCase();
+        if (!txt.includes(q)) return false;
+      }
+      return true;
     });
 
     if (!filtradas.length) {
       contEl.innerHTML = `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">${
         vistaEstado === "dia"
-          ? "Jornada limpia: no hay notas pendientes de cierre en este momento."
-          : "No se encontraron notas con ese criterio."
+          ? "Jornada limpia: no hay notas con esos filtros en el día actual."
+          : "No se encontraron notas en el archivo con esos filtros."
       }</div>`;
       return;
     }
@@ -185,7 +229,7 @@ export async function mount(root, state) {
     );
 
     const docCli = normalizarIdVE(nota.cliente?.documento || "");
-    let destinoAbonos = "ninguno"; // "favor" | "devolucion"
+    let destinoAbonos = "ninguno";
 
     if (totalAbonadoEfectivo > 0.01) {
       const pasarAFavor = confirm(
@@ -222,7 +266,6 @@ export async function mount(root, state) {
       actualizadoEn: serverTimestamp()
     }, { merge: true });
 
-    // Ajuste de saldo a favor del cliente (revierte uso/sobrepago + acredita abonos si eligió "favor")
     const favorUsado = Number(nota.saldoFavorAplicadoUsd || 0);
     const sobrepagoGen = Number(nota.sobrepagoUsd || 0);
     const extraFavorPorAbonos = destinoAbonos === "favor" ? totalAbonadoEfectivo : 0;
@@ -241,7 +284,6 @@ export async function mount(root, state) {
       }, { merge: true });
     }
 
-    // Si eligió devolución en efectivo/caja, registrar egreso automático en gastosCaja
     if (destinoAbonos === "devolucion" && totalAbonadoEfectivo > 0.01) {
       const gastoId = `DEV-${nota.folio || nota.id}-${now}`;
       batch.set(doc(refs.gastosCaja(), gastoId), {
@@ -258,7 +300,6 @@ export async function mount(root, state) {
       });
     }
 
-    // Devolución atómica de stock con increment()
     for (const it of (nota.items || [])) {
       if (!it.id) continue;
       if (it.origen === "almacen") {
@@ -295,7 +336,6 @@ export async function mount(root, state) {
 
     const gastosAbiertos = snapGastos.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    // Unir notas abiertas + notas con deuda para detectar abonos sin cierreId
     const mapaRev = new Map();
     for (const d of [...snapAbiertas.docs, ...snapDeudas.docs]) {
       mapaRev.set(d.id, { id: d.id, ...d.data() });
@@ -462,8 +502,19 @@ export async function mount(root, state) {
     }
   });
 
+  root.querySelector("#btnLimpiarFiltrosHist").addEventListener("click", () => {
+    busqEl.value = "";
+    desdeEl.value = "";
+    hastaEl.value = "";
+    condEl.value = "todas";
+    renderNotas();
+  });
+
   root.querySelector("#btnCerrarCajaHist").addEventListener("click", cerrarCajaDia);
   busqEl.addEventListener("input", renderNotas);
+  desdeEl.addEventListener("change", renderNotas);
+  hastaEl.addEventListener("change", renderNotas);
+  condEl.addEventListener("change", renderNotas);
 
   async function cargarDatos(cargarTodo = false) {
     if (cargarTodo) {
