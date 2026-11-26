@@ -80,9 +80,6 @@ function parseNumero(val) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// ============================================================
-// MOTOR INTELIGENTE DE CRUCE (CÓDIGO + MEDIDAS + PARECIDO)
-// ============================================================
 const STOPWORDS = new Set([
   "de", "del", "la", "el", "los", "las", "para", "con", "sin", "en", "por", "tipo", "und", "pza", "unidad"
 ]);
@@ -199,7 +196,7 @@ function crearIndiceExistentes(productosExistentes) {
       const simBigramas = similitudConjuntos(firmaNuevo.bigramas, firmaCand.bigramas);
       const score = simPalabras * 0.65 + simBigramas * 0.35;
 
-      const umbral = firmaNuevo.medidas.length > 0 ? 0.72 : 0.85;
+      const umbral = firmaNuevo.medidas.length > 0 ? 0.78 : 0.9;
       if (score >= umbral && score > mejorScore) {
         mejorScore = score;
         mejorProd = cand;
@@ -342,7 +339,6 @@ export async function mount(root, state) {
 
   root.innerHTML = `
     <div class="space-y-4 max-w-6xl mx-auto">
-      <!-- Inventarios: Almacén (conteo manual) vs Planta (listas por proveedor) -->
       <div class="grid grid-cols-2 gap-2">
         <button id="tabAlmacen" type="button" class="p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-slate-950 text-white border-slate-950">
           <div class="text-[10px] font-extrabold uppercase tracking-wider opacity-75">Control Manual en Conteo</div>
@@ -354,7 +350,6 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- Cabecera -->
       <div class="ve-card p-3.5 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -372,7 +367,6 @@ export async function mount(root, state) {
           </div>
         </div>
 
-        <!-- Selector Inteligente de Proveedor para subir Excel de Planta -->
         <div id="panelSelectorProveedor" class="hidden p-3 rounded-xl bg-slate-50 border border-slate-300 space-y-2.5">
           <div class="flex items-center justify-between gap-2">
             <div class="text-xs font-extrabold text-slate-900">1. Selecciona o crea el Proveedor de la lista de Planta</div>
@@ -410,7 +404,6 @@ export async function mount(root, state) {
           </div>
         </div>
 
-        <!-- Filtros -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-1">
           <input id="busqCat" type="text" placeholder="Buscar código, medida o descripción..." class="lg:col-span-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-slate-900" />
           <select id="filtroProv" class="bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
@@ -426,7 +419,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Registro de cambios inteligente SEPARADO POR PROVEEDOR -->
       <div id="panelCambiosPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -468,7 +460,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Lista clasificada por Categorías A -> Z -->
       <div id="contenedorCat" class="space-y-2">
         <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando inventario...</div>
       </div>
@@ -595,7 +586,6 @@ export async function mount(root, state) {
       : "p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-400";
 
     tituloInv.textContent = esAlm ? "Inventario Almacén Físico" : "Inventario Planta (Por Proveedor)";
-    // El Excel siempre se carga desde Planta
     btnAbrirExcel.classList.toggle("hidden", esAlm);
     if (esAlm) panelProv.classList.add("hidden");
   }
@@ -964,8 +954,6 @@ export async function mount(root, state) {
             actualizadoEn: serverTimestamp()
           };
 
-          // Si el producto no existía en Almacén, se crea en 0 para conteo manual;
-          // si ya existía, NO se toca stockAlmacen ni contado.
           if (!prev) {
             payload.stockAlmacen = 0;
             payload.contado = false;
