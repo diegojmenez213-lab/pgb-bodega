@@ -293,7 +293,6 @@
 
     window.NEXUS_VE_NAV = (route) => abrirModulo(route, { pushHistory: true });
 
-    // Intercepta el botón Atrás del navegador/móvil para navegar dentro de Venezuela
     window.addEventListener("popstate", (e) => {
       const drawer = document.getElementById("mobDrawer");
       if (drawer.classList.contains("open")) {
@@ -308,7 +307,6 @@
       } else if (state.rutaActual !== "caja-pos") {
         abrirModulo("caja-pos", { pushHistory: false });
       } else {
-        // Mantiene al usuario dentro del panel en vez de retroceder a index.html
         try { history.pushState({ veRoute: "caja-pos" }, "", "#caja-pos"); } catch {}
       }
     });
@@ -322,7 +320,7 @@
 
       const nombre = acceso.empresa.nombre || acceso.sesion.nombreEmpresa;
       const rif = acceso.empresa.rif || acceso.sesion.tenantId;
-      const logo = acceso.empresa.logoBase64 || acceso.empresa.logoUrl || "";
+      const logoPlat = acceso.empresa.logoPlataformaBase64 || acceso.empresa.logoBase64 || acceso.empresa.logoUrl || "";
 
       document.getElementById("brandName").textContent = nombre;
       document.getElementById("brandRif").textContent = rif;
@@ -330,8 +328,8 @@
       document.getElementById("mobBrandRif").textContent = rif;
       document.getElementById("userLabel").textContent = acceso.sesion.usuario || "Administrador";
 
-      if (logo) {
-        document.getElementById("brandLogoWrap").outerHTML = `<img src="${logo}" alt="Logo" class="ve-brand-logo" />`;
+      if (logoPlat) {
+        document.getElementById("brandLogoWrap").outerHTML = `<img src="${logoPlat}" alt="Logo Plataforma" class="ve-brand-logo" />`;
       }
 
       document.querySelectorAll("[data-route]").forEach((btn) => {
