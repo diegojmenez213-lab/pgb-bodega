@@ -39,6 +39,17 @@ function normalizarCodigoClave(cod) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizarIdProveedor(nombre) {
+  return String(nombre || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
 function limpiarDocId(codigo) {
   return String(codigo || "")
     .trim()
@@ -202,7 +213,7 @@ function crearIndiceExistentes(productosExistentes) {
   return { buscarCoincidencia };
 }
 
-function mapearFilaExcel(row) {
+function mapearFilaExcel(row, proveedorForzado = "") {
   const keys = Object.keys(row);
   const buscar = (patrones) => {
     const k = keys.find((key) => {
@@ -224,8 +235,33 @@ function mapearFilaExcel(row) {
 
   if (!codigoRaw && !descripcion) return null;
 
+  const costoUsd = Number(
+    parseNumero(
+      buscar(["costo", "precio", "valor", "usd", "pvp", "neto", "unitario", "monto"])
+    ).toFixed(2)
+  );
+
+  const stockPlanta = Math.max(
+    0,
+    Math.round(
+      parseNumero(
+        buscar(["stock", "cant", "cantidad", "existencia", "disponible", "planta", "inv", "und"])
+      )
+    )
+  );
+
+  // Filtro anti-encabezados: descarta filas separadoras de sección (sin precio ni stock)
+  if (costoUsd <= 0 && stockPlanta <= 0 && (!codigoRaw || codigoRaw.endsWith(":") || codigoRaw.length > 28)) {
+    return null;
+  }
+
   const sinCodigo = !codigoRaw;
   const codigo = codigoRaw || limpiarDocId(descripcion);
+  const provFinal = String(
+    proveedorForzado || buscar(["proveedor", "planta", "suplidor", "origen"]) || "GENERAL"
+  )
+    .trim()
+    .toUpperCase();
 
   return {
     id: limpiarDocId(codigo),
@@ -242,28 +278,14 @@ function mapearFilaExcel(row) {
     )
       .trim()
       .toUpperCase(),
-    proveedor: String(
-      buscar(["proveedor", "planta", "suplidor", "origen"]) || "RTC DIESEL PARTS"
-    )
-      .trim()
-      .toUpperCase(),
-    costoUsd: Number(
-      parseNumero(
-        buscar(["costo", "precio", "valor", "usd", "pvp", "neto", "unitario", "monto"])
-      ).toFixed(2)
-    ),
-    stockPlanta: Math.max(
-      0,
-      Math.round(
-        parseNumero(
-          buscar(["stock", "cant", "cantidad", "existencia", "disponible", "planta", "inv", "und"])
-        )
-      )
-    )
+    proveedor: provFinal,
+    proveedorId: normalizarIdProveedor(provFinal),
+    costoUsd,
+    stockPlanta
   };
 }
 
-function extraerFilasDesdeHoja(XLSX, sheet) {
+function extraerFilasDesdeHoja(XLSX, sheet, proveedorForzado = "") {
   const matriz = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
   if (!matriz.length) return [];
 
@@ -304,7 +326,7 @@ function extraerFilasDesdeHoja(XLSX, sheet) {
       obj[h] = fila[cIdx];
     });
 
-    const item = mapearFilaExcel(obj);
+    const item = mapearFilaExcel(obj, proveedorForzado);
     if (item && item.id) items.push(item);
   }
 
@@ -325,7 +347,7 @@ export async function mount(root, state) {
           <div class="text-sm font-extrabold">Almacén Físico</div>
         </button>
         <button id="tabPlanta" type="button" class="p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-400">
-          <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Lista Proveedor</div>
+          <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Listas por Proveedor</div>
           <div class="text-sm font-extrabold">Planta</div>
         </button>
       </div>
@@ -339,12 +361,40 @@ export async function mount(root, state) {
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <input id="fileExcelCat" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
-            <button id="btnActualizarExcel" type="button" class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
+            <button id="btnAbrirPanelExcel" type="button" class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
               ↑ Actualizar Excel
             </button>
             <button id="btnRecargarCat" type="button" class="px-2.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold cursor-pointer">
               ↻
             </button>
+          </div>
+        </div>
+
+        <!-- Selector Inteligente de Proveedor para subir Excel -->
+        <div id="panelSelectorProveedor" class="hidden p-3 rounded-xl bg-slate-50 border border-slate-300 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-extrabold text-slate-900">1. Selecciona o crea el Proveedor de este Excel</div>
+            <button id="btnCerrarPanelExcel" type="button" class="text-xs font-bold text-slate-500 cursor-pointer">✕</button>
+          </div>
+
+          <div class="flex flex-col sm:flex-row gap-2">
+            <div class="relative flex-1">
+              <input
+                id="inpProveedorExcel"
+                type="text"
+                autocomplete="off"
+                placeholder="Escribe el nombre del proveedor (ej. RTC DIESEL)..."
+                class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-extrabold uppercase outline-none focus:border-slate-950"
+              />
+              <div id="sugerenciasProv" class="hidden mt-1 bg-white border border-slate-300 rounded-xl shadow-lg max-h-40 overflow-y-auto divide-y divide-slate-100"></div>
+            </div>
+            <button id="btnConfirmarSubirExcel" type="button" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer shrink-0">
+              2. Elegir archivo Excel →
+            </button>
+          </div>
+
+          <div id="estadoProvBadge" class="text-[11px] font-bold text-slate-500">
+            Escribe la primera letra para ver proveedores registrados y evitar duplicados.
           </div>
         </div>
 
@@ -359,8 +409,11 @@ export async function mount(root, state) {
         </div>
 
         <!-- Filtros -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-1">
           <input id="busqCat" type="text" placeholder="Buscar código, medida o descripción..." class="lg:col-span-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-slate-900" />
+          <select id="filtroProv" class="bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
+            <option value="">Todos los Proveedores</option>
+          </select>
           <select id="filtroCat" class="bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
             <option value="">Todas las Categorías</option>
           </select>
@@ -417,19 +470,115 @@ export async function mount(root, state) {
   `;
 
   let productos = [];
+  let proveedores = [];
   let ultimoReportePlanta = null;
   let origen = "almacen";
+  let proveedorActivoSubida = "";
 
   const tabAlm = root.querySelector("#tabAlmacen");
   const tabPla = root.querySelector("#tabPlanta");
   const tituloInv = root.querySelector("#tituloInv");
-  const btnAct = root.querySelector("#btnActualizarExcel");
+  const btnAbrirExcel = root.querySelector("#btnAbrirPanelExcel");
+  const panelProv = root.querySelector("#panelSelectorProveedor");
+  const inpProv = root.querySelector("#inpProveedorExcel");
+  const sugProv = root.querySelector("#sugerenciasProv");
+  const estadoProv = root.querySelector("#estadoProvBadge");
   const fileInput = root.querySelector("#fileExcelCat");
   const busqEl = root.querySelector("#busqCat");
+  const provFilterEl = root.querySelector("#filtroProv");
   const catEl = root.querySelector("#filtroCat");
   const soloStockEl = root.querySelector("#chkSoloStock");
   const contEl = root.querySelector("#contenedorCat");
   const panelCambios = root.querySelector("#panelCambiosPlanta");
+
+  function renderSugerenciasProveedor() {
+    const raw = inpProv.value.trim();
+    const norm = normalizarTexto(raw);
+
+    const exacto = proveedores.find((p) => normalizarTexto(p.nombre) === norm);
+    const coincidencias = norm
+      ? proveedores.filter((p) => normalizarTexto(p.nombre).includes(norm))
+      : proveedores;
+
+    if (!raw) {
+      estadoProv.textContent = proveedores.length
+        ? `Tienes ${proveedores.length} proveedor(es) registrado(s). Escribe o selecciona uno.`
+        : "No hay proveedores aún. Escribe el nombre para crear el primero.";
+      estadoProv.className = "text-[11px] font-bold text-slate-500";
+    } else if (exacto) {
+      estadoProv.textContent = `✓ Proveedor registrado: ${exacto.nombre}. Se actualizará y comparará su lista.`;
+      estadoProv.className = "text-[11px] font-extrabold text-emerald-700";
+    } else {
+      estadoProv.textContent = `✦ Nuevo proveedor: "${raw.toUpperCase()}". Se creará automáticamente al subir el Excel.`;
+      estadoProv.className = "text-[11px] font-extrabold text-sky-700";
+    }
+
+    if (!coincidencias.length) {
+      sugProv.classList.add("hidden");
+      return;
+    }
+
+    sugProv.innerHTML = coincidencias.slice(0, 12).map((p) => `
+      <button type="button" class="btn-pick-prov w-full text-left px-3 py-2 text-xs font-extrabold text-slate-800 hover:bg-slate-100 flex items-center justify-between cursor-pointer" data-nombre="${encodeURIComponent(p.nombre)}">
+        <span>${p.nombre}</span>
+        <span class="text-[10px] font-bold text-emerald-700">Registrado</span>
+      </button>
+    `).join("");
+    sugProv.classList.remove("hidden");
+  }
+
+  btnAbrirExcel.addEventListener("click", () => {
+    panelProv.classList.toggle("hidden");
+    if (!panelProv.classList.contains("hidden")) {
+      inpProv.focus();
+      renderSugerenciasProveedor();
+    }
+  });
+
+  root.querySelector("#btnCerrarPanelExcel").addEventListener("click", () => {
+    panelProv.classList.add("hidden");
+  });
+
+  inpProv.addEventListener("input", renderSugerenciasProveedor);
+  inpProv.addEventListener("focus", renderSugerenciasProveedor);
+
+  sugProv.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-pick-prov");
+    if (!btn) return;
+    inpProv.value = decodeURIComponent(btn.dataset.nombre || "");
+    sugProv.classList.add("hidden");
+    renderSugerenciasProveedor();
+    sugProv.classList.add("hidden");
+  });
+
+  root.querySelector("#btnConfirmarSubirExcel").addEventListener("click", async () => {
+    const nombreLimpio = inpProv.value.trim().toUpperCase();
+    if (!nombreLimpio || nombreLimpio.length < 2) {
+      return alert("Escribe o selecciona el nombre del proveedor antes de cargar el Excel.");
+    }
+
+    const norm = normalizarTexto(nombreLimpio);
+    const existente = proveedores.find((p) => normalizarTexto(p.nombre) === norm);
+
+    // Si hay un proveedor muy parecido, pregunta para evitar duplicados
+    if (!existente) {
+      const parecido = proveedores.find((p) => {
+        const np = normalizarTexto(p.nombre);
+        return np.includes(norm) || norm.includes(np);
+      });
+      if (parecido) {
+        if (confirm(`¿Te refieres al proveedor ya registrado "${parecido.nombre}"?\n\nPulsa ACEPTAR para usar "${parecido.nombre}" o CANCELAR para crear "${nombreLimpio}" como nuevo.`)) {
+          inpProv.value = parecido.nombre;
+          proveedorActivoSubida = parecido.nombre;
+          fileInput.click();
+          return;
+        }
+      }
+    }
+
+    proveedorActivoSubida = existente ? existente.nombre : nombreLimpio;
+    fileInput.click();
+  });
 
   function actualizarTabsUI() {
     const esAlm = origen === "almacen";
@@ -440,8 +589,8 @@ export async function mount(root, state) {
       ? "p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-sky-900 text-white border-sky-900"
       : "p-3.5 rounded-2xl border-2 text-left transition cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-400";
 
-    tituloInv.textContent = esAlm ? "Inventario Almacén Físico" : "Inventario Planta (Proveedor)";
-    btnAct.textContent = esAlm ? "↑ Actualizar Excel Almacén (En 0)" : "↑ Actualizar Excel Planta";
+    tituloInv.textContent = esAlm ? "Inventario Almacén Físico" : "Inventario Planta (Por Proveedor)";
+    btnAbrirExcel.textContent = esAlm ? "↑ Actualizar Excel Almacén (En 0)" : "↑ Actualizar Excel Planta";
     panelCambios.classList.toggle("hidden", !ultimoReportePlanta);
   }
 
@@ -458,14 +607,19 @@ export async function mount(root, state) {
     const subieronPrecio = r.subieronPrecio || [];
     const crucesInteligentes = Number(r.crucesInteligentes || 0);
 
+    const cntSub = r.totalSubieronPrecio ?? subieronPrecio.length;
+    const cntNue = r.totalNuevos ?? nuevos.length;
+    const cntLle = r.totalLlegaron ?? llegaron.length;
+    const cntAgo = r.totalAgotados ?? agotados.length;
+
     root.querySelector("#metaUltimaAct").textContent =
-      `Archivo: ${r.archivo || "Excel"} • Fecha: ${r.fechaIso || "---"}${crucesInteligentes > 0 ? ` • ${crucesInteligentes} cruce(s) inteligente(s) por medidas/nombre` : ""}`;
+      `Proveedor: ${r.proveedor || "GENERAL"} • Archivo: ${r.archivo || "Excel"} • Fecha: ${r.fechaIso || "---"}${crucesInteligentes > 0 ? ` • ${crucesInteligentes} cruce(s) inteligente(s)` : ""}`;
 
     root.querySelector("#resumenBadgesCambios").innerHTML = `
-      <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900">Subió precio: ${subieronPrecio.length}</span>
-      <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900">Nuevos: ${nuevos.length}</span>
-      <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-900">Reingresos: ${llegaron.length}</span>
-      <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900">Agotados: ${agotados.length}</span>
+      <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900">Subió precio: ${cntSub}</span>
+      <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900">Nuevos: ${cntNue}</span>
+      <span class="px-2.5 py-1 rounded-full bg-sky-100 text-sky-900">Reingresos: ${cntLle}</span>
+      <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-900">Agotados: ${cntAgo}</span>
     `;
 
     root.querySelector("#listSubieronPrecio").innerHTML = subieronPrecio.length
@@ -496,24 +650,33 @@ export async function mount(root, state) {
     root.querySelector("#listAgotadosPlanta").innerHTML = pintLista(agotados, "Ningún producto pasó a sin existencia.", false);
   }
 
-  function poblarCategorias() {
+  function poblarFiltros() {
     const cats = Array.from(new Set(productos.map((p) => p.categoria || "SIN CATEGORÍA"))).sort((a, b) => a.localeCompare(b, "es"));
     catEl.innerHTML = `<option value="">Todas las Categorías (${cats.length})</option>` +
       cats.map((c) => `<option value="${c}">${c}</option>`).join("");
+
+    const provs = Array.from(new Set([
+      ...proveedores.map((pr) => pr.nombre),
+      ...productos.map((p) => p.proveedor).filter(Boolean)
+    ])).sort((a, b) => a.localeCompare(b, "es"));
+    provFilterEl.innerHTML = `<option value="">Todos los Proveedores (${provs.length})</option>` +
+      provs.map((pr) => `<option value="${pr}">${pr}</option>`).join("");
   }
 
   function obtenerFiltrados() {
     const q = busqEl.value.trim().toLowerCase();
     const cat = catEl.value;
+    const prov = provFilterEl.value;
     const soloConStock = soloStockEl.checked;
 
     return productos
       .filter((p) => {
         if (cat && (p.categoria || "SIN CATEGORÍA") !== cat) return false;
+        if (prov && (p.proveedor || "") !== prov) return false;
         const stockActual = origen === "almacen" ? (p.stockAlmacen ?? 0) : (p.stockPlanta ?? 0);
         if (soloConStock && stockActual <= 0) return false;
         if (q) {
-          const txt = `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""} ${p.categoria || ""}`.toLowerCase();
+          const txt = `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""} ${p.categoria || ""} ${p.proveedor || ""}`.toLowerCase();
           if (!txt.includes(q)) return false;
         }
         return true;
@@ -533,9 +696,10 @@ export async function mount(root, state) {
     return `
       <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
+          <div class="flex items-center gap-1.5 flex-wrap">
             <span class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo || p.id}</span>
             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600">${p.marca || "GENÉRICO"}</span>
+            ${p.proveedor ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-900">${p.proveedor}</span>` : ""}
             <span class="text-[10px] font-mono-ve font-extrabold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900">Costo: $${costo.toFixed(2)}</span>
           </div>
           <div class="text-xs font-semibold text-slate-800 mt-0.5">${p.descripcion || ""}</div>
@@ -560,7 +724,7 @@ export async function mount(root, state) {
 
     const filtrados = obtenerFiltrados();
     root.querySelector("#subResumenCat").textContent =
-      `${filtrados.length} productos en ${origen === "almacen" ? "Almacén Físico" : "Planta"} • Clasificados por Categoría (A → Z)`;
+      `${filtrados.length} productos en ${origen === "almacen" ? "Almacén Físico" : "Planta"} • ${proveedores.length} proveedor(es)`;
 
     if (!filtrados.length) {
       contEl.innerHTML = `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">No hay productos cargados. Toca "↑ Actualizar Excel" arriba.</div>`;
@@ -592,19 +756,20 @@ export async function mount(root, state) {
     }).join("");
   }
 
-  btnAct.addEventListener("click", () => fileInput.click());
-
   fileInput.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     fileInput.value = "";
+
+    const provNombre = (proveedorActivoSubida || inpProv.value.trim() || "GENERAL").toUpperCase();
+    const provId = normalizarIdProveedor(provNombre);
 
     const progWrap = root.querySelector("#progExcelWrap");
     const progBar = root.querySelector("#progExcelBar");
     const progPct = root.querySelector("#progExcelPct");
     const progTxt = root.querySelector("#progExcelTxt");
     progWrap.classList.remove("hidden");
-    progTxt.textContent = `Analizando ${file.name} con motor inteligente...`;
+    progTxt.textContent = `Analizando ${file.name} para ${provNombre}...`;
 
     try {
       const XLSX = await cargarSheetJS();
@@ -613,7 +778,7 @@ export async function mount(root, state) {
 
       const mapaExcel = new Map();
       for (const nombreHoja of wb.SheetNames) {
-        const extraidos = extraerFilasDesdeHoja(XLSX, wb.Sheets[nombreHoja]);
+        const extraidos = extraerFilasDesdeHoja(XLSX, wb.Sheets[nombreHoja], provNombre);
         for (const it of extraidos) {
           if (it && it.id) mapaExcel.set(it.id, it);
         }
@@ -622,20 +787,32 @@ export async function mount(root, state) {
       const itemsExcel = Array.from(mapaExcel.values());
       if (!itemsExcel.length) {
         progWrap.classList.add("hidden");
-        return alert("No se encontraron filas válidas en el Excel.");
+        return alert("No se encontraron productos válidos en el Excel.");
       }
 
       const esAlmacen = origen === "almacen";
       const msg = esAlmacen
-        ? `Se procesarán ${itemsExcel.length} productos con cruce inteligente (Almacén en 0 para conteo físico). ¿Continuar?`
-        : `Se actualizará Planta con ${itemsExcel.length} productos usando cruce inteligente (código, medidas y nombre) sin alterar tu stock de Almacén. ¿Continuar?`;
+        ? `Proveedor: ${provNombre}\nSe cargarán ${itemsExcel.length} productos en Almacén (en 0 para conteo físico). ¿Continuar?`
+        : `Proveedor: ${provNombre}\nSe actualizará Planta con ${itemsExcel.length} productos (sin afectar a otros proveedores ni tu stock de Almacén). ¿Continuar?`;
 
       if (!confirm(msg)) {
         progWrap.classList.add("hidden");
         return;
       }
 
-      const indice = crearIndiceExistentes(productos);
+      // Guardar/actualizar proveedor en colección proveedores
+      await setDoc(doc(refs.proveedores(), provId), {
+        id: provId,
+        nombre: provNombre,
+        ultimaActualizacionIso: new Date().toISOString().slice(0, 10),
+        actualizadoEn: serverTimestamp()
+      }, { merge: true });
+
+      // Cruce inteligente aislado a los productos de este proveedor (evita tocar otros proveedores)
+      const productosDelProveedor = productos.filter(
+        (p) => normalizarIdProveedor(p.proveedor || "") === provId || p.proveedorId === provId
+      );
+      const indice = crearIndiceExistentes(productosDelProveedor);
       const idsVistosEnExcel = new Set();
       const operaciones = [];
 
@@ -696,9 +873,10 @@ export async function mount(root, state) {
         operaciones.push({ targetId, prev, it });
       }
 
+      // Solo marca agotados los productos faltantes DE ESTE MISMO PROVEEDOR
       const faltantesEnExcel = [];
       if (!esAlmacen) {
-        for (const prev of productos) {
+        for (const prev of productosDelProveedor) {
           if (!idsVistosEnExcel.has(prev.id) && Number(prev.stockPlanta || 0) > 0) {
             faltantesEnExcel.push(prev);
             agotados.push({
@@ -725,7 +903,8 @@ export async function mount(root, state) {
             descripcion: it.descripcion,
             categoria: it.categoria,
             marca: it.marca,
-            proveedor: it.proveedor,
+            proveedor: provNombre,
+            proveedorId: provId,
             costoUsd: it.costoUsd,
             actualizadoEn: serverTimestamp()
           };
@@ -764,23 +943,31 @@ export async function mount(root, state) {
         }
       }
 
+      // Protección límite 1MB de Firestore: guarda totales reales y máx 250 ítems por bloque
       const reportePayload = {
         archivo: file.name,
+        proveedor: provNombre,
+        proveedorId: provId,
         fechaIso: new Date().toISOString().slice(0, 10),
         origenActualizado: origen,
         crucesInteligentes,
-        nuevos,
-        llegaron,
-        agotados,
-        subieronPrecio,
+        totalNuevos: nuevos.length,
+        totalLlegaron: llegaron.length,
+        totalAgotados: agotados.length,
+        totalSubieronPrecio: subieronPrecio.length,
+        nuevos: nuevos.slice(0, 250),
+        llegaron: llegaron.slice(0, 250),
+        agotados: agotados.slice(0, 250),
+        subieronPrecio: subieronPrecio.slice(0, 250),
         actualizadoEn: serverTimestamp()
       };
       await setDoc(doc(refs.historialNovedades(), "ultimo_planta"), reportePayload);
       ultimoReportePlanta = reportePayload;
 
+      panelProv.classList.add("hidden");
       progWrap.classList.add("hidden");
       alert(
-        `¡Actualización completada!\n` +
+        `¡Actualización de ${provNombre} completada!\n` +
         `• Nuevos: ${nuevos.length}\n` +
         `• Subieron de precio costo: ${subieronPrecio.length}\n` +
         `• No había y ahora sí: ${llegaron.length}\n` +
@@ -802,17 +989,25 @@ export async function mount(root, state) {
   });
 
   async function cargarCatalogo() {
-    const [snapCat, snapNov] = await Promise.all([getDocs(refs.catalogo()), getDocs(refs.historialNovedades())]);
+    const [snapCat, snapNov, snapProv] = await Promise.all([
+      getDocs(refs.catalogo()),
+      getDocs(refs.historialNovedades()),
+      getDocs(refs.proveedores())
+    ]);
     productos = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
+    proveedores = snapProv.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
     const docUltimo = snapNov.docs.find((d) => d.id === "ultimo_planta");
     ultimoReportePlanta = docUltimo ? docUltimo.data() : null;
-    poblarCategorias();
+    poblarFiltros();
     render();
   }
 
   tabAlm.addEventListener("click", () => { origen = "almacen"; render(); });
   tabPla.addEventListener("click", () => { origen = "planta"; render(); });
   busqEl.addEventListener("input", render);
+  provFilterEl.addEventListener("change", render);
   catEl.addEventListener("change", render);
   soloStockEl.addEventListener("change", render);
   root.querySelector("#btnRecargarCat").addEventListener("click", cargarCatalogo);
