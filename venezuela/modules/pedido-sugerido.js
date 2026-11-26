@@ -40,7 +40,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Parámetros y Resumen Ejecutivo -->
       <div class="ve-card p-3.5 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-3">
@@ -78,7 +77,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Explicación breve general de por qué se está moviendo y por qué se pide -->
       <div id="cajaExplicacionGeneral" class="hidden ve-card p-3.5 border-sky-200 bg-sky-50/50 space-y-1.5">
         <div class="text-[11px] font-extrabold uppercase tracking-wider text-sky-950">
           Por qué se está moviendo y por qué se sugiere pedir esto
@@ -86,7 +84,6 @@ export async function mount(root, state) {
         <p id="txtExplicacionGeneral" class="text-xs text-slate-700 leading-relaxed"></p>
       </div>
 
-      <!-- Tabs de clasificación -->
       <div class="flex flex-wrap gap-1.5">
         <button type="button" data-tab="aumentar" class="tab-sug px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">
           Aumentar / Pedir (<span id="cntAumentar">0</span>)
@@ -110,7 +107,7 @@ export async function mount(root, state) {
   let catalogo = [];
   let ventas30d = new Map();
   let pedidosPlanta30d = new Map();
-  let plantaRealOverride = new Map(); // prodId -> cantidad real confirmada en Planta
+  let plantaRealOverride = new Map();
   let tabActiva = "aumentar";
   let listaAumentar = [];
   let listaMantener = [];
