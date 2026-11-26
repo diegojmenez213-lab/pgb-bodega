@@ -3,9 +3,12 @@ import {
   db,
   getTenantRefs,
   doc,
-  getDoc,
   getDocs,
-  writeBatch,
+  setDoc,
+  query,
+  where,
+  runTransaction,
+  increment,
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
@@ -99,6 +102,7 @@ export async function mount(root, state) {
         </div>
       </div>
 
+      <!-- Alerta automática de deuda acumulada del cliente -->
       <div id="alertaDeudaCliente" class="hidden ve-card border-rose-300 bg-rose-50/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2.5 text-xs">
           <span class="text-lg">⚠️</span>
@@ -112,6 +116,27 @@ export async function mount(root, state) {
         </button>
       </div>
 
+      <!-- Panel de Límite de Crédito configurable del cliente -->
+      <div id="panelLimiteCredito" class="hidden ve-card border-amber-300 bg-amber-50/60 p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="font-extrabold text-amber-950">Límite de Crédito:</span>
+          <span id="txtLimiteActual" class="font-mono-ve font-extrabold text-amber-900">Sin límite</span>
+          <span id="txtCupoDisponible" class="text-[11px] font-bold text-slate-600"></span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button id="btnEditarLimitePos" type="button" class="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-900 text-[11px] font-extrabold cursor-pointer">
+            Configurar límite
+          </button>
+          <div id="wrapEditLimitePos" class="hidden flex items-center gap-1.5">
+            <input id="inpLimitePos" type="text" inputmode="numeric" value="0.00" class="w-24 bg-white border border-amber-400 rounded-lg px-2 py-1 text-xs font-mono-ve font-bold text-right" title="0.00 = Sin límite" />
+            <button id="btnGuardarLimitePos" type="button" class="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-[11px] font-extrabold cursor-pointer">
+              Guardar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Saldo a favor disponible del cliente -->
       <div id="panelSaldoFavor" class="hidden ve-card border-emerald-300 bg-emerald-50/80 p-3.5 space-y-2.5">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="text-xs space-y-1">
@@ -232,6 +257,7 @@ export async function mount(root, state) {
                   <label class="text-[11px] font-bold text-amber-900">Días exactos:</label>
                   <input id="inpDiasManual" type="number" min="1" max="365" value="10" class="w-24 bg-white border border-amber-300 rounded-lg px-2.5 py-1 text-xs font-mono-ve font-extrabold" />
                 </div>
+                <div id="alertaExcesoLimite" class="hidden p-2 rounded-lg bg-rose-100 border border-rose-300 text-[11px] font-extrabold text-rose-900"></div>
               </div>
             </div>
 
@@ -276,17 +302,20 @@ export async function mount(root, state) {
 
   let catalogo = [];
   let clientes = [];
-  let todasNotas = [];
+  let deudasActivas = [];
   let carrito = [];
-  let pagos = [{ metodo: "Efectivo USD", montoUsd: 0 }];
+  let pagos = [{ metodo: "Efectivo USD", montoUsd: 0, referencia: "" }];
   let factorActual = fDetal;
   let ultimoFolio = Number(state.empresa?.correlativos?.notaEntregaActual || 0);
   let esCredito = false;
   let diasCredito = 15;
   let busqAbierta = false;
   let saldoFavorDisponible = 0;
+  let deudaActualCliente = 0;
+  let limiteCreditoCliente = 0;
   let usarSaldoFavorEnNota = true;
   let monedaVistaFavor = "USD";
+  let cotizacionOrigenId = null;
   let emitiendo = false;
 
   const docEl = root.querySelector("#posCliDoc");
@@ -298,8 +327,10 @@ export async function mount(root, state) {
   const cartEl = root.querySelector("#posCarrito");
   const pagosEl = root.querySelector("#posPagos");
   const alertaBox = root.querySelector("#alertaDeudaCliente");
+  const limiteBox = root.querySelector("#panelLimiteCredito");
   const favorBox = root.querySelector("#panelSaldoFavor");
   const selMonFavor = root.querySelector("#selMonedaFavor");
+  const inpLimitePos = root.querySelector("#inpLimitePos");
 
   function aplicarFactorPos(nuevoFactor, sincronizarInput = false) {
     const val = parseMultiplicadorTexto(nuevoFactor);
@@ -349,15 +380,44 @@ export async function mount(root, state) {
     const docId = normalizarIdVE(docEl.value);
     if (!docId || docId.length < 5 || docId === "V-00000000") {
       alertaBox.classList.add("hidden");
+      limiteBox.classList.add("hidden");
       favorBox.classList.add("hidden");
       saldoFavorDisponible = 0;
+      deudaActualCliente = 0;
+      limiteCreditoCliente = 0;
       renderTotalesYRestante();
       return;
     }
 
     const cli = clientes.find((c) => c.id === docId);
     saldoFavorDisponible = Number(cli?.saldoAFavorUsd || 0);
+    limiteCreditoCliente = Number(cli?.limiteCreditoUsd || 0);
 
+    const pendientes = deudasActivas.filter((n) => {
+      if (n.anulada) return false;
+      if (normalizarIdVE(n.cliente?.documento || "") !== docId) return false;
+      return Number(n.saldoPendienteUsd || 0) > 0.01;
+    });
+
+    deudaActualCliente = Number(
+      pendientes.reduce((acc, n) => acc + Number(n.saldoPendienteUsd || 0), 0).toFixed(2)
+    );
+
+    // Panel de límite de crédito editable
+    limiteBox.classList.remove("hidden");
+    if (limiteCreditoCliente > 0) {
+      const cupo = Number((limiteCreditoCliente - deudaActualCliente).toFixed(2));
+      root.querySelector("#txtLimiteActual").textContent = `$${limiteCreditoCliente.toFixed(2)}`;
+      root.querySelector("#txtCupoDisponible").textContent = cupo >= 0
+        ? `(Cupo disponible: $${cupo.toFixed(2)})`
+        : `(Excedido en $${Math.abs(cupo).toFixed(2)})`;
+    } else {
+      root.querySelector("#txtLimiteActual").textContent = "Sin límite";
+      root.querySelector("#txtCupoDisponible").textContent = "";
+    }
+    inpLimitePos.value = limiteCreditoCliente.toFixed(2);
+
+    // Panel saldo a favor
     if (saldoFavorDisponible > 0.01) {
       const cliNombre = nomEl.value.trim() || cli?.nombre || docId;
       const tasas = getTasaActiva(state);
@@ -379,33 +439,54 @@ export async function mount(root, state) {
       favorBox.classList.add("hidden");
     }
 
-    const pendientes = todasNotas.filter((n) => {
-      if (n.anulada) return false;
-      if (normalizarIdVE(n.cliente?.documento || "") !== docId) return false;
-      const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
-      return saldo > 0.01;
-    });
-
+    // Alerta deuda acumulada
     if (!pendientes.length) {
       alertaBox.classList.add("hidden");
-      renderTotalesYRestante();
-      return;
+    } else {
+      const nombreCli = nomEl.value.trim() || pendientes[0]?.cliente?.nombre || docId;
+      root.querySelector("#txtAlertaDeuda").textContent =
+        `${nombreCli} (${docId}) tiene una deuda total de $${deudaActualCliente.toFixed(2)}.`;
+      root.querySelector("#subAlertaDeuda").textContent = pendientes.length === 1
+        ? `Corresponde a 1 nota pendiente por $${deudaActualCliente.toFixed(2)}.`
+        : `Suma de ${pendientes.length} notas pendientes: $${deudaActualCliente.toFixed(2)}.`;
+      alertaBox.classList.remove("hidden");
     }
 
-    const totalDeuda = pendientes.reduce(
-      (acc, n) => acc + Number(n.saldoPendienteUsd ?? n.totalUsd ?? 0),
-      0
-    );
-    const nombreCli = nomEl.value.trim() || pendientes[0]?.cliente?.nombre || docId;
-
-    root.querySelector("#txtAlertaDeuda").textContent =
-      `${nombreCli} (${docId}) tiene una deuda total de $${totalDeuda.toFixed(2)}.`;
-    root.querySelector("#subAlertaDeuda").textContent = pendientes.length === 1
-      ? `Corresponde a 1 nota pendiente por $${totalDeuda.toFixed(2)}.`
-      : `Suma de ${pendientes.length} notas pendientes: $${totalDeuda.toFixed(2)}.`;
-    alertaBox.classList.remove("hidden");
     renderTotalesYRestante();
   }
+
+  root.querySelector("#btnEditarLimitePos").addEventListener("click", () => {
+    const wrap = root.querySelector("#wrapEditLimitePos");
+    wrap.classList.toggle("hidden");
+    if (!wrap.classList.contains("hidden")) {
+      inpLimitePos.focus();
+      fijarCursorAlFinal(inpLimitePos);
+    }
+  });
+
+  inpLimitePos.addEventListener("input", () => formatearEntradaMoneda(inpLimitePos));
+  inpLimitePos.addEventListener("click", () => fijarCursorAlFinal(inpLimitePos));
+
+  root.querySelector("#btnGuardarLimitePos").addEventListener("click", async () => {
+    const docId = normalizarIdVE(docEl.value);
+    if (!docId || docId === "V-00000000") return;
+    const nuevoLim = Math.max(0, parseFloat(inpLimitePos.value) || 0);
+    const nomCli = nomEl.value.trim() || clientes.find((c) => c.id === docId)?.nombre || docId;
+
+    await setDoc(doc(refs.clientes(), docId), {
+      documento: docId,
+      nombre: nomCli,
+      limiteCreditoUsd: nuevoLim,
+      actualizadoEn: serverTimestamp()
+    }, { merge: true });
+
+    const ex = clientes.find((c) => c.id === docId);
+    if (ex) ex.limiteCreditoUsd = nuevoLim;
+    else clientes.push({ id: docId, documento: docId, nombre: nomCli, limiteCreditoUsd: nuevoLim });
+
+    root.querySelector("#wrapEditLimitePos").classList.add("hidden");
+    refrescarEstadoClienteActual();
+  });
 
   selMonFavor.addEventListener("change", () => {
     monedaVistaFavor = selMonFavor.value;
@@ -467,6 +548,16 @@ export async function mount(root, state) {
       root.querySelector("#posSobrepago").textContent = `+$${sobrepago.toFixed(2)}`;
     } else {
       filaSobre.classList.add("hidden");
+    }
+
+    // Alerta visual si el crédito supera el límite configurado
+    const alertaLim = root.querySelector("#alertaExcesoLimite");
+    if (esCredito && limiteCreditoCliente > 0 && (deudaActualCliente + restante) > limiteCreditoCliente + 0.01) {
+      const proyectada = Number((deudaActualCliente + restante).toFixed(2));
+      alertaLim.textContent = `⚠️ Supera el límite de crédito ($${limiteCreditoCliente.toFixed(2)}). La deuda total quedaría en $${proyectada.toFixed(2)}.`;
+      alertaLim.classList.remove("hidden");
+    } else {
+      alertaLim.classList.add("hidden");
     }
   }
 
@@ -550,9 +641,10 @@ export async function mount(root, state) {
 
     pagosEl.innerHTML = pagos.map((p, idx) => `
       <div class="flex items-center gap-1.5" data-pidx="${idx}">
-        <select class="sel-met flex-1 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold">
+        <select class="sel-met flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold">
           ${METODOS_PAGO.map((m) => `<option value="${m}" ${p.metodo === m ? "selected" : ""}>${m}</option>`).join("")}
         </select>
+        <input type="text" value="${p.referencia || ""}" placeholder="Ref." class="inp-pref w-16 bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-1.5 text-[11px] font-mono-ve font-bold" title="Últimos dígitos de referencia (opcional)" />
         <input type="text" inputmode="numeric" value="${Number(p.montoUsd || 0).toFixed(2)}" class="inp-pmonto w-24 bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono-ve font-bold text-right" />
         ${pagos.length > 1 ? `<button type="button" class="btn-rm-pago text-xs font-bold text-rose-600 px-1 cursor-pointer">✕</button>` : ""}
       </div>
@@ -747,6 +839,8 @@ export async function mount(root, state) {
       pagos[idx].auto = false;
       pagos[idx].montoUsd = formatearEntradaMoneda(e.target);
       renderTotalesYRestante();
+    } else if (e.target.classList.contains("inp-pref")) {
+      pagos[idx].referencia = e.target.value.trim();
     }
   });
 
@@ -765,7 +859,7 @@ export async function mount(root, state) {
     if (pagos.length >= 4) return alert("Máximo 4 formas de pago por documento.");
     const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
     const rest = Math.max(0, Number((montoObjetivoHoy() - cubierto).toFixed(2)));
-    pagos.push({ metodo: "Pago Móvil Bs.", montoUsd: rest, auto: false });
+    pagos.push({ metodo: "Pago Móvil Bs.", montoUsd: rest, referencia: "", auto: false });
     renderPagos();
   });
 
@@ -810,7 +904,8 @@ export async function mount(root, state) {
     esCredito = false;
     diasCredito = 15;
     usarSaldoFavorEnNota = true;
-    pagos = [{ metodo: "Efectivo USD", montoUsd: 0 }];
+    cotizacionOrigenId = null;
+    pagos = [{ metodo: "Efectivo USD", montoUsd: 0, referencia: "" }];
     actualizarEstadoCreditoUI();
     renderCarrito();
   }
@@ -824,26 +919,39 @@ export async function mount(root, state) {
     const totalUsd = Number(totalVenta().toFixed(2));
     const usadoFavor = montoDescuentoFavorActual();
     const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
-    const pagosValidos = pagos.filter((p) => Number(p.montoUsd) > 0);
-    const totalPagadoHoy = Number(pagosValidos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0).toFixed(2));
+    const tasas = getTasaActiva(state);
+
+    const pagosValidos = pagos
+      .filter((p) => Number(p.montoUsd) > 0)
+      .map((p) => ({
+        metodo: p.metodo,
+        montoUsd: Number(Number(p.montoUsd).toFixed(2)),
+        montoBs: tasas.bcvActiva ? Number((Number(p.montoUsd) * tasas.bcvActiva).toFixed(2)) : 0,
+        referencia: String(p.referencia || "").trim()
+      }));
+
+    const totalPagadoHoy = Number(pagosValidos.reduce((acc, p) => acc + p.montoUsd, 0).toFixed(2));
     const restanteHoy = Math.max(0, Number((objetivoHoy - totalPagadoHoy).toFixed(2)));
     const sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
     const docCli = normalizarIdVE(docEl.value) || "V-00000000";
     const nomCli = nomEl.value.trim() || "Consumidor Final";
 
-    // Validación 1: En Contado no permitir emitir si falta cubrir el monto
     if (!esCredito && restanteHoy > 0.01) {
       return alert(`Faltan $${restanteHoy.toFixed(2)} por cubrir en Formas de Pago. Completa el pago o cambia la condición a Crédito.`);
     }
-
-    // Validación 2: No acumular saldo a favor en Consumidor Final genérico
     if (sobrepagoGenerado > 0.01 && docCli === "V-00000000") {
       return alert(`Hay un sobrepago de +$${sobrepagoGenerado.toFixed(2)}. Ingresa la Cédula/RIF real del cliente para guardarle el saldo a favor, o ajusta el monto pagado.`);
     }
-
-    // Validación 3: Si es crédito con saldo pendiente, pedir cédula real
     if (esCredito && restanteHoy > 0.01 && docCli === "V-00000000") {
       return alert("Para emitir una nota a Crédito debes ingresar la Cédula o RIF del cliente.");
+    }
+
+    // Confirmación editable si supera el límite de crédito configurado
+    if (esCredito && limiteCreditoCliente > 0 && (deudaActualCliente + restanteHoy) > limiteCreditoCliente + 0.01) {
+      const proyectada = Number((deudaActualCliente + restanteHoy).toFixed(2));
+      if (!confirm(`⚠️ ${nomCli} supera su límite de crédito ($${limiteCreditoCliente.toFixed(2)}).\nSu deuda total quedaría en $${proyectada.toFixed(2)}.\n\n¿Autorizar y emitir esta nota de todas formas?`)) {
+        return;
+      }
     }
 
     emitiendo = true;
@@ -852,95 +960,112 @@ export async function mount(root, state) {
     btn.textContent = "Emitiendo...";
 
     try {
-      const empSnap = await getDoc(refs.empresaRef);
-      const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || ultimoFolio || 0);
-      const nuevoNum = actual + 1;
-      const folio = String(nuevoNum).padStart(5, "0");
-
       const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
       const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
       const saldoPendienteUsd = esCredito ? restanteHoy : 0;
-
-      const tasas = getTasaActiva(state);
       const monedas = Array.from(root.querySelectorAll(".pos-mon:checked")).map((el) => el.value);
       const now = Date.now();
       const jornadaId = state.empresa?.jornadaActivaId || new Date().toISOString().slice(0, 10);
+      const cotIdAEliminar = cotizacionOrigenId;
 
-      const batch = writeBatch(db);
+      // Transacción atómica: folio único + stock atómico + saldo a favor + eliminación de cotización
+      const { folio, nuevoNum } = await runTransaction(db, async (tx) => {
+        const empSnap = await tx.get(refs.empresaRef);
+        const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || 0);
+        const sigNum = actual + 1;
+        const sigFolio = String(sigNum).padStart(5, "0");
 
-      batch.set(doc(refs.notasEntrega(), folio), {
-        folio,
-        numero: nuevoNum,
-        fechaIso: new Date().toISOString().slice(0, 10),
-        jornadaId,
-        cierreId: null,
-        anulada: false,
-        creadoTs: now,
-        cliente: { documento: docCli, nombre: nomCli },
-        items: carrito,
-        pagos: pagosValidos,
-        saldoFavorAplicadoUsd: usadoFavor,
-        saldoFavorDejadoAparte: !usarSaldoFavorEnNota && saldoFavorDisponible > 0.01,
-        sobrepagoUsd: sobrepagoGenerado,
-        esCredito: esCredito && saldoPendienteUsd > 0.01,
-        diasCredito: esCredito ? diasCredito : 0,
-        venceTs: esCredito ? now + diasCredito * 86400000 : now,
-        saldoPendienteUsd,
-        totalUsd,
-        costoTotalUsd,
-        utilidadUsd,
-        multiplicador: factorActual,
-        tasaBcvUsada: tasas.bcvActiva,
-        monedas: monedas.length ? monedas : ["USD", "BS"],
-        usuario: state.sesion.usuario || "Administrador",
-        creadoEn: serverTimestamp()
+        let cliFavorActual = 0;
+        if (docCli !== "V-00000000") {
+          const cliSnap = await tx.get(doc(refs.clientes(), docCli));
+          cliFavorActual = Number(cliSnap.data()?.saldoAFavorUsd || 0);
+        }
+
+        tx.set(doc(refs.notasEntrega(), sigFolio), {
+          folio: sigFolio,
+          numero: sigNum,
+          fechaIso: new Date(now).toISOString().slice(0, 10),
+          jornadaId,
+          cierreId: null,
+          anulada: false,
+          creadoTs: now,
+          cliente: { documento: docCli, nombre: nomCli },
+          items: carrito,
+          pagos: pagosValidos,
+          saldoFavorAplicadoUsd: usadoFavor,
+          saldoFavorDejadoAparte: !usarSaldoFavorEnNota && saldoFavorDisponible > 0.01,
+          sobrepagoUsd: sobrepagoGenerado,
+          esCredito: esCredito && saldoPendienteUsd > 0.01,
+          diasCredito: esCredito ? diasCredito : 0,
+          venceTs: esCredito ? now + diasCredito * 86400000 : now,
+          saldoPendienteUsd,
+          totalUsd,
+          costoTotalUsd,
+          utilidadUsd,
+          multiplicador: factorActual,
+          tasaBcvUsada: tasas.bcvActiva,
+          monedas: monedas.length ? monedas : ["USD", "BS"],
+          usuario: state.sesion.usuario || "Administrador",
+          creadoEn: serverTimestamp()
+        });
+
+        tx.set(refs.empresaRef, { correlativos: { notaEntregaActual: sigNum } }, { merge: true });
+
+        if (docCli !== "V-00000000") {
+          const nuevoSaldoFavorCli = Math.max(
+            0,
+            Number((cliFavorActual - usadoFavor + sobrepagoGenerado).toFixed(2))
+          );
+          tx.set(
+            doc(refs.clientes(), docCli),
+            {
+              documento: docCli,
+              nombre: nomCli,
+              saldoAFavorUsd: nuevoSaldoFavorCli,
+              actualizadoEn: serverTimestamp()
+            },
+            { merge: true }
+          );
+        }
+
+        for (const it of carrito) {
+          if (it.origen === "almacen") {
+            tx.set(doc(refs.catalogo(), it.id), {
+              stockAlmacen: increment(-Number(it.cantidad || 1)),
+              ultimaVentaTs: now
+            }, { merge: true });
+          } else {
+            tx.set(doc(refs.catalogo(), it.id), {
+              pedidosPlantaCount: increment(Number(it.cantidad || 1)),
+              ultimaVentaTs: now
+            }, { merge: true });
+          }
+        }
+
+        if (cotIdAEliminar) {
+          tx.delete(doc(refs.cotizaciones(), cotIdAEliminar));
+        }
+
+        return { folio: sigFolio, nuevoNum: sigNum };
       });
 
-      batch.set(refs.empresaRef, { correlativos: { notaEntregaActual: nuevoNum } }, { merge: true });
-
-      const cliExistente = clientes.find((c) => c.id === docCli);
-      const nuevoSaldoFavorCli = Math.max(
-        0,
-        Number(((cliExistente?.saldoAFavorUsd || 0) - usadoFavor + sobrepagoGenerado).toFixed(2))
-      );
-
-      if (docCli !== "V-00000000") {
-        batch.set(
-          doc(refs.clientes(), docCli),
-          {
-            documento: docCli,
-            nombre: nomCli,
-            saldoAFavorUsd: nuevoSaldoFavorCli,
-            actualizadoEn: serverTimestamp()
-          },
-          { merge: true }
-        );
-      }
-
-      for (const it of carrito) {
-        if (it.origen === "almacen") {
-          const prod = catalogo.find((p) => p.id === it.id);
-          const nuevoStock = Math.max(0, (prod?.stockAlmacen || 0) - it.cantidad);
-          if (prod) prod.stockAlmacen = nuevoStock;
-          batch.set(doc(refs.catalogo(), it.id), {
-            stockAlmacen: nuevoStock,
-            ultimaVentaTs: now
-          }, { merge: true });
-        } else {
-          batch.set(doc(refs.catalogo(), it.id), {
-            pedidosPlantaCount: (catalogo.find((p) => p.id === it.id)?.pedidosPlantaCount || 0) + Number(it.cantidad || 1),
-            ultimaVentaTs: now
-          }, { merge: true });
-        }
-      }
-
-      await batch.commit();
       ultimoFolio = nuevoNum;
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
       actualizarFolioUI();
 
-      const [snapNotas, snapCli] = await Promise.all([getDocs(refs.notasEntrega()), getDocs(refs.clientes())]);
-      todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Refresco local optimista de stock y recarga ligera solo de deudas activas y clientes
+      for (const it of carrito) {
+        const prod = catalogo.find((p) => p.id === it.id);
+        if (prod && it.origen === "almacen") {
+          prod.stockAlmacen = (Number(prod.stockAlmacen) || 0) - Number(it.cantidad || 1);
+        }
+      }
+
+      const [snapDeudas, snapCli] = await Promise.all([
+        getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
+        getDocs(refs.clientes())
+      ]);
+      deudasActivas = snapDeudas.docs.map((d) => ({ id: d.id, ...d.data() }));
       clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
 
       if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
@@ -986,7 +1111,6 @@ export async function mount(root, state) {
 
   root.querySelector("#btnEmitirNota").addEventListener("click", emitirNota);
 
-  // Limpia cualquier listener anterior para que F9 nunca se dispare doble
   if (window.__vePosKeyHandler) {
     window.removeEventListener("keydown", window.__vePosKeyHandler);
   }
@@ -1010,18 +1134,19 @@ export async function mount(root, state) {
   });
 
   actualizarFolioUI();
-  const [snapCat, snapCli, snapNotas] = await Promise.all([
+  const [snapCat, snapCli, snapDeudas] = await Promise.all([
     getDocs(refs.catalogo()),
     getDocs(refs.clientes()),
-    getDocs(refs.notasEntrega())
+    getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0)))
   ]);
   catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
   clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
-  todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+  deudasActivas = snapDeudas.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   if (state.cotizacionPendiente) {
     const cot = state.cotizacionPendiente;
     state.cotizacionPendiente = null;
+    cotizacionOrigenId = cot.id || cot.folio || null;
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
     if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
