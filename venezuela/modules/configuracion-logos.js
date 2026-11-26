@@ -50,10 +50,31 @@ const TEMAS_PRO = [
   }
 ];
 
+function claveTemaDispositivo(tenantId) {
+  return `nexus_ve_tema_${tenantId || "default"}`;
+}
+
+function leerTemaDispositivo(tenantId) {
+  try {
+    return localStorage.getItem(claveTemaDispositivo(tenantId)) || TEMA_PREDETERMINADO;
+  } catch {
+    return TEMA_PREDETERMINADO;
+  }
+}
+
+function guardarTemaDispositivo(tenantId, temaId) {
+  try {
+    localStorage.setItem(claveTemaDispositivo(tenantId), temaId);
+  } catch {}
+}
+
 function aplicarTemaVisual(temaId, state = null) {
   const tema = TEMAS_PRO.find((t) => t.id === temaId) || TEMAS_PRO[0];
   if (state?.empresa) {
     state.empresa.temaColor = tema.id;
+  }
+  if (state?.sesion?.tenantId) {
+    guardarTemaDispositivo(state.sesion.tenantId, tema.id);
   }
 
   const rootEl = document.documentElement;
@@ -140,7 +161,7 @@ function leerPngComoBase64(file) {
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
-  let temaSeleccionado = state.empresa?.temaColor || TEMA_PREDETERMINADO;
+  let temaSeleccionado = leerTemaDispositivo(state.sesion.tenantId);
   let logoPlataforma =
     state.empresa?.logoPlataformaBase64 || state.empresa?.logoBase64 || state.empresa?.logoUrl || "";
   let logoDocumento = state.empresa?.logoDocumentoBase64 || "";
@@ -153,7 +174,7 @@ export async function mount(root, state) {
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Configuración y Personalización</h1>
           <p class="text-xs text-slate-500">
-            Ajusta el tema de color, sube o quita tus logos PNG y define el respaldo automático para documentos PDF.
+            El tema aplica solo en este dispositivo; los logos PNG se guardan para toda la empresa.
           </p>
         </div>
         <button id="btnRestablecerTema" type="button" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer">
@@ -161,14 +182,13 @@ export async function mount(root, state) {
         </button>
       </div>
 
-      <!-- 1. Temas profesionales de la plataforma -->
       <div class="ve-card space-y-3">
         <div class="flex items-center justify-between gap-2">
           <div>
             <h2 class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
-              Tema de Color de la Plataforma
+              Tema de Color (Solo Este Dispositivo)
             </h2>
-            <p class="text-[11px] text-slate-500">Toca una paleta para previsualizarla al instante y luego guarda los cambios.</p>
+            <p class="text-[11px] text-slate-500">Cada teléfono o PC conserva su propio color elegido.</p>
           </div>
           <span id="badgeTemaActivo" class="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-800"></span>
         </div>
@@ -192,12 +212,11 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- 2. Logos PNG independientes: Plataforma vs Documento PDF -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="ve-card space-y-3">
           <div class="flex items-center justify-between gap-2">
             <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
-              Logo de la Plataforma
+              Logo de la Plataforma (Empresa)
             </div>
             <button id="btnQuitarLogoPlat" type="button" class="text-[11px] font-extrabold text-rose-600 hover:underline cursor-pointer">
               Quitar logo
@@ -213,7 +232,7 @@ export async function mount(root, state) {
         <div class="ve-card space-y-3">
           <div class="flex items-center justify-between gap-2">
             <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
-              Logo Nota de Entrega / Cotización
+              Logo Nota de Entrega / Cotización (PDF)
             </div>
             <button id="btnQuitarLogoDoc" type="button" class="text-[11px] font-extrabold text-rose-600 hover:underline cursor-pointer">
               Quitar logo
@@ -332,10 +351,11 @@ export async function mount(root, state) {
     btn.textContent = "Guardando...";
 
     try {
+      guardarTemaDispositivo(state.sesion.tenantId, temaSeleccionado);
+
       await setDoc(
         refs.empresaRef,
         {
-          temaColor: temaSeleccionado,
           logoPlataformaBase64: logoPlataforma,
           logoDocumentoBase64: logoDocumento,
           logoBase64: logoPlataforma,
@@ -355,7 +375,7 @@ export async function mount(root, state) {
       sincronizarLogoBarraLateral(logoPlataforma, state.empresa?.nombre || state.sesion?.nombreEmpresa);
       renderVistasLogos();
 
-      alert("Personalización guardada correctamente.");
+      alert("Guardado: el tema quedó aplicado en este dispositivo y los logos quedaron actualizados para la empresa.");
     } catch (err) {
       alert("Error guardando configuración: " + err.message);
     } finally {
