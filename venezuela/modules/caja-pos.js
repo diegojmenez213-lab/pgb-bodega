@@ -5,7 +5,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  setDoc,
   writeBatch,
   normalizarIdVE,
   serverTimestamp
@@ -47,6 +46,20 @@ export async function mount(root, state) {
         </div>
       </div>
 
+      <!-- Alerta automática de deuda acumulada del cliente -->
+      <div id="alertaDeudaCliente" class="hidden ve-card border-rose-300 bg-rose-50/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5 text-xs">
+          <span class="text-lg">⚠️</span>
+          <div>
+            <div id="txtAlertaDeuda" class="font-extrabold text-rose-900"></div>
+            <div id="subAlertaDeuda" class="text-[11px] text-rose-700 font-semibold"></div>
+          </div>
+        </div>
+        <button id="btnVerDeudaCliente" type="button" class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer">
+          Ver deuda →
+        </button>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <!-- Izquierda: Cliente y Buscador -->
         <div class="lg:col-span-7 space-y-3">
@@ -69,12 +82,12 @@ export async function mount(root, state) {
           </div>
         </div>
 
-        <!-- Derecha: Carrito, Pagos y Emisión -->
+        <!-- Derecha: Carrito, Condición Contado/Crédito, Pagos y Emisión -->
         <div class="lg:col-span-5 space-y-3">
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
               <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota</h2>
-              <button id="btnLimpiarPos" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
+              <button id="btnLimpiarPos" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
             </div>
 
             <div id="posCarrito" class="space-y-2 max-h-64 overflow-y-auto">
@@ -93,15 +106,45 @@ export async function mount(root, state) {
               </div>
             </div>
 
-            <!-- Hasta 4 Formas de Pago -->
+            <!-- Condición de Venta: Contado vs Crédito -->
+            <div class="pt-2 border-t border-slate-200 space-y-2">
+              <div class="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
+                <button type="button" id="btnModoContado" class="py-2 rounded-lg text-xs font-extrabold bg-slate-950 text-white cursor-pointer">
+                  Contado
+                </button>
+                <button type="button" id="btnModoCredito" class="py-2 rounded-lg text-xs font-extrabold text-slate-700 cursor-pointer">
+                  Crédito
+                </button>
+              </div>
+
+              <!-- Plazo de Crédito: 7, 15, 30 o Manual -->
+              <div id="panelCredito" class="hidden p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] font-extrabold text-amber-900">Plazo del Crédito</span>
+                  <span id="resumenPlazoTxt" class="text-[11px] font-mono-ve font-extrabold text-amber-800">15 días</span>
+                </div>
+                <div class="grid grid-cols-4 gap-1.5">
+                  <button type="button" data-dias="7" class="btn-dias py-1.5 rounded-lg text-xs font-extrabold bg-white border border-amber-300 text-amber-900 cursor-pointer">7d</button>
+                  <button type="button" data-dias="15" class="btn-dias py-1.5 rounded-lg text-xs font-extrabold bg-amber-600 text-white border border-amber-600 cursor-pointer">15d</button>
+                  <button type="button" data-dias="30" class="btn-dias py-1.5 rounded-lg text-xs font-extrabold bg-white border border-amber-300 text-amber-900 cursor-pointer">30d</button>
+                  <button type="button" id="btnDiasManual" class="py-1.5 rounded-lg text-xs font-extrabold bg-white border border-slate-300 text-slate-800 cursor-pointer">Manual</button>
+                </div>
+                <div id="wrapDiasManual" class="hidden flex items-center gap-2 pt-1">
+                  <label class="text-[11px] font-bold text-amber-900">Días exactos:</label>
+                  <input id="inpDiasManual" type="number" min="1" max="365" value="10" class="w-24 bg-white border border-amber-300 rounded-lg px-2.5 py-1 text-xs font-mono-ve font-extrabold" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Hasta 4 Formas de Pago / Abono inicial -->
             <div class="pt-2 border-t border-slate-200 space-y-2">
               <div class="flex items-center justify-between">
-                <span class="text-[11px] font-extrabold uppercase text-slate-500">Formas de Pago (máx 4)</span>
+                <span id="tituloPagosLbl" class="text-[11px] font-extrabold uppercase text-slate-500">Formas de Pago (máx 4)</span>
                 <button id="btnAddPago" type="button" class="text-[11px] font-extrabold text-slate-900 hover:underline cursor-pointer">+ Agregar pago</button>
               </div>
               <div id="posPagos" class="space-y-1.5"></div>
-              <div class="flex justify-between text-[11px] font-bold">
-                <span class="text-slate-500">Restante por cubrir:</span>
+              <div id="filaRestante" class="flex justify-between text-[11px] font-bold">
+                <span id="lblRestante" class="text-slate-500">Restante por cubrir:</span>
                 <span id="posRestante" class="font-mono-ve text-rose-600">$0.00</span>
               </div>
             </div>
@@ -121,7 +164,7 @@ export async function mount(root, state) {
               </select>
             </div>
 
-            <button id="btnEmitirNota" class="w-full py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold uppercase tracking-wider cursor-pointer">
+            <button id="btnEmitirNota" type="button" class="w-full py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold uppercase tracking-wider cursor-pointer">
               Emitir Nota de Entrega (F9)
             </button>
           </div>
@@ -132,10 +175,13 @@ export async function mount(root, state) {
 
   let catalogo = [];
   let clientes = [];
+  let todasNotas = [];
   let carrito = [];
   let pagos = [{ metodo: "Efectivo USD", montoUsd: 0 }];
   let factorActual = fDetal;
   let ultimoFolio = Number(state.empresa?.correlativos?.notaEntregaActual || 0);
+  let esCredito = false;
+  let diasCredito = 15;
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
@@ -144,6 +190,7 @@ export async function mount(root, state) {
   const resEl = root.querySelector("#posResultados");
   const cartEl = root.querySelector("#posCarrito");
   const pagosEl = root.querySelector("#posPagos");
+  const alertaBox = root.querySelector("#alertaDeudaCliente");
 
   function actualizarFolioUI() {
     root.querySelector("#nextFolioTxt").textContent = String(ultimoFolio + 1).padStart(5, "0");
@@ -153,9 +200,119 @@ export async function mount(root, state) {
     return carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
   }
 
+  function chequearDeudaClienteActual() {
+    const docId = normalizarIdVE(docEl.value);
+    if (!docId || docId.length < 5) {
+      alertaBox.classList.add("hidden");
+      return;
+    }
+
+    const pendientes = todasNotas.filter((n) => {
+      if (normalizarIdVE(n.cliente?.documento || "") !== docId) return false;
+      const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
+      return saldo > 0.01;
+    });
+
+    if (!pendientes.length) {
+      alertaBox.classList.add("hidden");
+      return;
+    }
+
+    const totalDeuda = pendientes.reduce(
+      (acc, n) => acc + Number(n.saldoPendienteUsd ?? n.totalUsd ?? 0),
+      0
+    );
+    const nombreCli = nomEl.value.trim() || pendientes[0]?.cliente?.nombre || docId;
+
+    root.querySelector("#txtAlertaDeuda").textContent =
+      `${nombreCli} (${docId}) tiene una deuda total de $${totalDeuda.toFixed(2)}.`;
+    root.querySelector("#subAlertaDeuda").textContent = pendientes.length === 1
+      ? `Corresponde a 1 factura/nota pendiente por $${totalDeuda.toFixed(2)}.`
+      : `Suma de ${pendientes.length} facturas/notas pendientes: $${totalDeuda.toFixed(2)}.`;
+    alertaBox.classList.remove("hidden");
+  }
+
+  root.querySelector("#btnVerDeudaCliente").addEventListener("click", () => {
+    if (typeof window.NEXUS_VE_NAV === "function") {
+      window.NEXUS_VE_NAV("deudores");
+    }
+  });
+
+  function actualizarEstadoCreditoUI() {
+    const btnCon = root.querySelector("#btnModoContado");
+    const btnCre = root.querySelector("#btnModoCredito");
+    const panelCre = root.querySelector("#panelCredito");
+    const lblRest = root.querySelector("#lblRestante");
+    const titPag = root.querySelector("#tituloPagosLbl");
+
+    if (!esCredito) {
+      btnCon.className = "py-2 rounded-lg text-xs font-extrabold bg-slate-950 text-white cursor-pointer";
+      btnCre.className = "py-2 rounded-lg text-xs font-extrabold text-slate-700 cursor-pointer";
+      panelCre.classList.add("hidden");
+      titPag.textContent = "Formas de Pago (máx 4)";
+      lblRest.textContent = "Restante por cubrir:";
+    } else {
+      btnCre.className = "py-2 rounded-lg text-xs font-extrabold bg-amber-600 text-white cursor-pointer";
+      btnCon.className = "py-2 rounded-lg text-xs font-extrabold text-slate-700 cursor-pointer";
+      panelCre.classList.remove("hidden");
+      titPag.textContent = "Abono Inicial / Pagos (opcional)";
+      lblRest.textContent = "Quedará a crédito:";
+      if (pagos.length === 1 && pagos[0].auto !== false) {
+        pagos[0].montoUsd = 0;
+        pagos[0].auto = false;
+      }
+    }
+    renderPagos();
+  }
+
+  function seleccionarDiasCredito(dias, esManual = false) {
+    diasCredito = Math.max(1, parseInt(dias, 10) || 15);
+    root.querySelector("#resumenPlazoTxt").textContent = `${diasCredito} días`;
+    root.querySelectorAll(".btn-dias").forEach((b) => {
+      const activo = !esManual && Number(b.dataset.dias) === diasCredito;
+      b.className = activo
+        ? "btn-dias py-1.5 rounded-lg text-xs font-extrabold bg-amber-600 text-white border border-amber-600 cursor-pointer"
+        : "btn-dias py-1.5 rounded-lg text-xs font-extrabold bg-white border border-amber-300 text-amber-900 cursor-pointer";
+    });
+    const btnMan = root.querySelector("#btnDiasManual");
+    btnMan.className = esManual
+      ? "py-1.5 rounded-lg text-xs font-extrabold bg-slate-950 text-white border border-slate-950 cursor-pointer"
+      : "py-1.5 rounded-lg text-xs font-extrabold bg-white border border-slate-300 text-slate-800 cursor-pointer";
+  }
+
+  root.querySelector("#btnModoContado").addEventListener("click", () => {
+    esCredito = false;
+    if (pagos.length === 1) pagos[0].auto = true;
+    actualizarEstadoCreditoUI();
+  });
+
+  root.querySelector("#btnModoCredito").addEventListener("click", () => {
+    esCredito = true;
+    actualizarEstadoCreditoUI();
+  });
+
+  root.querySelectorAll(".btn-dias").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      root.querySelector("#wrapDiasManual").classList.add("hidden");
+      seleccionarDiasCredito(Number(btn.dataset.dias), false);
+    });
+  });
+
+  root.querySelector("#btnDiasManual").addEventListener("click", () => {
+    const wrap = root.querySelector("#wrapDiasManual");
+    wrap.classList.toggle("hidden");
+    const inp = root.querySelector("#inpDiasManual");
+    inp.focus();
+    seleccionarDiasCredito(Number(inp.value) || 10, true);
+  });
+
+  root.querySelector("#inpDiasManual").addEventListener("input", (e) => {
+    seleccionarDiasCredito(Number(e.target.value) || 1, true);
+  });
+
   function renderPagos() {
     const total = totalVenta();
-    if (pagos.length === 1 && pagos[0].auto !== false) {
+    if (!esCredito && pagos.length === 1 && pagos[0].auto !== false) {
       pagos[0].montoUsd = Number(total.toFixed(2));
     }
 
@@ -173,7 +330,9 @@ export async function mount(root, state) {
     const restante = Math.max(0, total - cubierto);
     const restEl = root.querySelector("#posRestante");
     restEl.textContent = `$${restante.toFixed(2)}`;
-    restEl.className = restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600";
+    restEl.className = esCredito
+      ? "font-mono-ve text-amber-800"
+      : (restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
   }
 
   function renderCarrito() {
@@ -312,7 +471,9 @@ export async function mount(root, state) {
       const rest = Math.max(0, totalVenta() - cubierto);
       const restEl = root.querySelector("#posRestante");
       restEl.textContent = `$${rest.toFixed(2)}`;
-      restEl.className = rest <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600";
+      restEl.className = esCredito
+        ? "font-mono-ve text-amber-800"
+        : (rest <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
     }
   });
 
@@ -331,15 +492,17 @@ export async function mount(root, state) {
     renderPagos();
   });
 
+  docEl.addEventListener("input", chequearDeudaClienteActual);
   docEl.addEventListener("blur", () => {
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
     if (cli) {
       docEl.value = cli.id;
-      nomEl.value = cli.nombre || "";
+      if (!nomEl.value.trim()) nomEl.value = cli.nombre || "";
       factorActual = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
       renderBusqueda();
     }
+    chequearDeudaClienteActual();
   });
 
   tarifaEl.addEventListener("change", () => {
@@ -349,7 +512,10 @@ export async function mount(root, state) {
 
   function limpiarCaja() {
     carrito = [];
+    esCredito = false;
+    diasCredito = 15;
     pagos = [{ metodo: "Efectivo USD", montoUsd: 0 }];
+    actualizarEstadoCreditoUI();
     renderCarrito();
   }
 
@@ -362,33 +528,38 @@ export async function mount(root, state) {
     btn.textContent = "Emitiendo...";
 
     try {
-      // Leer correlativo actualizado
       const empSnap = await getDoc(refs.empresaRef);
       const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || ultimoFolio || 0);
       const nuevoNum = actual + 1;
       const folio = String(nuevoNum).padStart(5, "0");
 
-      const totalUsd = totalVenta();
-      const costoTotalUsd = carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0);
-      const utilidadUsd = totalUsd - costoTotalUsd;
+      const totalUsd = Number(totalVenta().toFixed(2));
+      const costoTotalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * (it.costoUsd || 0), 0).toFixed(2));
+      const utilidadUsd = Number((totalUsd - costoTotalUsd).toFixed(2));
+      const pagosValidos = pagos.filter((p) => Number(p.montoUsd) > 0);
+      const abonoInicial = Number(pagosValidos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0).toFixed(2));
+      const saldoPendienteUsd = esCredito ? Math.max(0, Number((totalUsd - abonoInicial).toFixed(2))) : 0;
+
       const tasas = getTasaActiva(state);
       const monedas = Array.from(root.querySelectorAll(".pos-mon:checked")).map((el) => el.value);
-      const cliente = {
-        documento: normalizarIdVE(docEl.value) || "V-00000000",
-        nombre: nomEl.value.trim() || "Consumidor Final"
-      };
+      const docCli = normalizarIdVE(docEl.value) || "V-00000000";
+      const nomCli = nomEl.value.trim() || "Consumidor Final";
+      const now = Date.now();
 
       const batch = writeBatch(db);
 
-      // 1. Guardar Nota de Entrega
       batch.set(doc(refs.notasEntrega(), folio), {
         folio,
         numero: nuevoNum,
         fechaIso: new Date().toISOString().slice(0, 10),
-        creadoTs: Date.now(),
-        cliente,
+        creadoTs: now,
+        cliente: { documento: docCli, nombre: nomCli },
         items: carrito,
-        pagos: pagos.filter((p) => Number(p.montoUsd) > 0),
+        pagos: pagosValidos,
+        esCredito: esCredito && saldoPendienteUsd > 0.01,
+        diasCredito: esCredito ? diasCredito : 0,
+        venceTs: esCredito ? now + diasCredito * 86400000 : now,
+        saldoPendienteUsd,
         totalUsd,
         costoTotalUsd,
         utilidadUsd,
@@ -398,10 +569,8 @@ export async function mount(root, state) {
         creadoEn: serverTimestamp()
       });
 
-      // 2. Actualizar correlativo en empresa
       batch.set(refs.empresaRef, { correlativos: { notaEntregaActual: nuevoNum } }, { merge: true });
 
-      // 3. Descontar stock de Almacén (solo ítems de origen "almacen")
       for (const it of carrito) {
         if (it.origen === "almacen") {
           const prod = catalogo.find((p) => p.id === it.id);
@@ -409,7 +578,7 @@ export async function mount(root, state) {
           if (prod) prod.stockAlmacen = nuevoStock;
           batch.set(doc(refs.catalogo(), it.id), {
             stockAlmacen: nuevoStock,
-            ultimaVentaTs: Date.now()
+            ultimaVentaTs: now
           }, { merge: true });
         }
       }
@@ -419,17 +588,29 @@ export async function mount(root, state) {
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
       actualizarFolioUI();
 
+      // Refrescar caché de notas y alertas
+      const snapNotas = await getDocs(refs.notasEntrega());
+      todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
+        await window.NEXUS_VE_REFRESH_ALERTAS();
+      }
+
       const formato = root.querySelector("#posFormatoPrint").value;
+      const obsCredito = esCredito && saldoPendienteUsd > 0.01
+        ? `Venta a crédito (${diasCredito} días). Saldo pendiente: $${saldoPendienteUsd.toFixed(2)}.`
+        : "";
+
       const docData = {
         tipo: "NOTA DE ENTREGA",
         folio,
         empresa: state.empresa,
-        cliente,
+        cliente: { documento: docCli, nombre: nomCli },
         items: carrito,
         totalUsd,
         monedas: monedas.length ? monedas : ["USD", "BS"],
         tasas,
-        pagos: pagos.filter((p) => Number(p.montoUsd) > 0)
+        pagos: pagosValidos,
+        observaciones: obsCredito
       };
 
       if (formato === "carta") imprimirDocumentoCarta(docData);
@@ -437,6 +618,7 @@ export async function mount(root, state) {
       else alert(`Nota de Entrega N° ${folio} emitida correctamente.`);
 
       limpiarCaja();
+      chequearDeudaClienteActual();
       renderBusqueda();
     } catch (err) {
       alert("Error emitiendo Nota de Entrega: " + err.message);
@@ -448,7 +630,6 @@ export async function mount(root, state) {
 
   root.querySelector("#btnEmitirNota").addEventListener("click", emitirNota);
 
-  // Atajos de teclado PC (F1-F9)
   const onKeyDown = (e) => {
     if (state.rutaActual !== "caja-pos") return;
     if (e.key === "F1") { e.preventDefault(); busqEl.focus(); }
@@ -465,19 +646,23 @@ export async function mount(root, state) {
 
   busqEl.addEventListener("input", renderBusqueda);
 
-  // Cargar datos iniciales
   actualizarFolioUI();
-  const [snapCat, snapCli] = await Promise.all([getDocs(refs.catalogo()), getDocs(refs.clientes())]);
+  const [snapCat, snapCli, snapNotas] = await Promise.all([
+    getDocs(refs.catalogo()),
+    getDocs(refs.clientes()),
+    getDocs(refs.notasEntrega())
+  ]);
   catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
   clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
+  todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  // Si viene desde una Cotización, precargamos cliente e ítems
   if (state.cotizacionPendiente) {
     const cot = state.cotizacionPendiente;
     state.cotizacionPendiente = null;
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
     carrito = (cot.items || []).map((it) => ({ ...it }));
+    chequearDeudaClienteActual();
   }
 
   renderCarrito();
