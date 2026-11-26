@@ -28,7 +28,7 @@ export async function mount(root, state) {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Cotizaciones (PDF • 72h)</h1>
-          <p class="text-xs text-slate-500">Genera cotizaciones en PDF sin descontar stock. Vigencia de 72 horas.</p>
+          <p class="text-xs text-slate-500">Usa tarifa Detal, Mayor o escribe cualquier multiplicador sobre costo (ej. 2.3).</p>
         </div>
         <div class="flex gap-1.5">
           <button id="tabNuevaCot" type="button" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">+ Nueva Cotización</button>
@@ -45,12 +45,15 @@ export async function mount(root, state) {
               <input id="cotCliNom" type="text" placeholder="Nombre del Cliente *" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
             </div>
             <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <div class="flex items-center gap-2 text-xs font-bold">
+              <div class="flex flex-wrap items-center gap-2 text-xs font-bold">
                 <span class="text-slate-500">Tarifa:</span>
                 <select id="cotTarifa" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold">
                   <option value="detal">Detal (×${fDetal})</option>
                   <option value="mayor">Mayor (×${fMayor})</option>
+                  <option value="custom">Personalizado</option>
                 </select>
+                <span class="text-slate-500">Mult. (×):</span>
+                <input id="cotMult" type="number" step="0.05" min="0.1" value="${fDetal}" class="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-extrabold text-center" />
               </div>
               <div id="cotCliBadge" class="text-[11px] font-bold text-emerald-700 hidden">✓ Cliente registrado</div>
             </div>
@@ -125,10 +128,26 @@ export async function mount(root, state) {
   const docEl = root.querySelector("#cotCliDoc");
   const nomEl = root.querySelector("#cotCliNom");
   const tarifaEl = root.querySelector("#cotTarifa");
+  const multEl = root.querySelector("#cotMult");
   const badgeCli = root.querySelector("#cotCliBadge");
   const busqEl = root.querySelector("#cotBusqProd");
   const resEl = root.querySelector("#cotResultados");
   const itemsEl = root.querySelector("#cotItems");
+
+  function aplicarFactor(nuevoFactor, actualizarCarrito = true) {
+    const val = Number(nuevoFactor);
+    if (isNaN(val) || val <= 0) return;
+    factorActual = val;
+    multEl.value = String(val);
+    if (actualizarCarrito && carrito.length) {
+      carrito = carrito.map((it) => ({
+        ...it,
+        precioUsd: Number(((it.costoUsd || 0) * factorActual).toFixed(2))
+      }));
+      renderCarrito();
+    }
+    renderBusqueda();
+  }
 
   function obtenerMonedas() {
     const arr = Array.from(root.querySelectorAll(".cot-mon:checked")).map((el) => el.value);
@@ -255,18 +274,25 @@ export async function mount(root, state) {
     if (cli) {
       docEl.value = cli.id;
       nomEl.value = cli.nombre || "";
-      factorActual = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
+      const fCli = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
+      tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
+      aplicarFactor(fCli, true);
       badgeCli.textContent = `✓ Cliente registrado (${cli.tarifa || "detal"})`;
       badgeCli.classList.remove("hidden");
-      renderBusqueda();
     } else {
       badgeCli.classList.add("hidden");
     }
   });
 
   tarifaEl.addEventListener("change", () => {
-    factorActual = tarifaEl.value === "mayor" ? fMayor : fDetal;
-    renderBusqueda();
+    if (tarifaEl.value === "mayor") aplicarFactor(fMayor, true);
+    else if (tarifaEl.value === "detal") aplicarFactor(fDetal, true);
+    else multEl.focus();
+  });
+
+  multEl.addEventListener("input", () => {
+    tarifaEl.value = "custom";
+    aplicarFactor(multEl.value, true);
   });
 
   root.querySelector("#btnLimpiarCot").addEventListener("click", () => {
@@ -292,6 +318,7 @@ export async function mount(root, state) {
       folio,
       cliente: { documento: docCli, nombre: nomCli },
       items: carrito,
+      multiplicador: factorActual,
       totalUsd: calcularTotal(),
       monedas: obtenerMonedas(),
       creadoTs: now,
