@@ -140,10 +140,10 @@
     import { getTenantRefs, getDocs } from "./core/db.js";
 
     const TEMAS_GUARDADOS = {
-      "ejecutivo-oscuro": { p: "#0f172a", a: "#059669", f: "#f8fafc", b: "#cbd5e1" },
-      "azul-industrial": { p: "#0c4a6e", a: "#0284c7", f: "#f0f9ff", b: "#bae6fd" },
-      "bosque-gerencial": { p: "#14532d", a: "#16a34a", f: "#f7fee7", b: "#bbf7d0" },
-      "carbon-ambar": { p: "#18181b", a: "#d97706", f: "#fafafa", b: "#e4e4e7" }
+      "ejecutivo-oscuro": { p: "#0f172a", ps: "#1e293b", a: "#059669", f: "#f8fafc", s: "#ffffff", b: "#cbd5e1" },
+      "azul-industrial": { p: "#0c4a6e", ps: "#0369a1", a: "#0284c7", f: "#f0f9ff", s: "#ffffff", b: "#bae6fd" },
+      "bosque-gerencial": { p: "#14532d", ps: "#166534", a: "#16a34a", f: "#f7fee7", s: "#ffffff", b: "#bbf7d0" },
+      "carbon-ambar": { p: "#18181b", ps: "#27272a", a: "#d97706", f: "#fafafa", s: "#ffffff", b: "#e4e4e7" }
     };
 
     const state = {
@@ -178,10 +178,47 @@
       rootEl.style.setProperty("--ve-fondo", t.f);
       rootEl.style.setProperty("--ve-borde", t.b);
 
-      document.querySelectorAll(".ve-nav-btn.active").forEach((btn) => {
-        btn.style.backgroundColor = t.p;
-        btn.style.color = "#ffffff";
-      });
+      let styleTag = document.getElementById("veTemaDinamico");
+      if (!styleTag) {
+        styleTag = document.createElement("style");
+        styleTag.id = "veTemaDinamico";
+        document.head.appendChild(styleTag);
+      }
+
+      styleTag.textContent = `
+        body, .ve-shell, .ve-main-wrap, .ve-content {
+          background-color: ${t.f} !important;
+        }
+        .ve-topbar, .ve-sidebar, .ve-bottom-nav, .ve-card {
+          background-color: ${t.s} !important;
+          border-color: ${t.b} !important;
+        }
+        .ve-rate-pill.active-bcv {
+          background-color: ${t.p} !important;
+          border-color: ${t.p} !important;
+          color: #ffffff !important;
+        }
+        .ve-nav-btn.active {
+          background-color: ${t.p} !important;
+          color: #ffffff !important;
+        }
+        .ve-mob-btn.active {
+          color: ${t.p} !important;
+          font-weight: 800 !important;
+        }
+        .bg-slate-950 {
+          background-color: ${t.p} !important;
+        }
+        .hover\\:bg-slate-800:hover {
+          background-color: ${t.ps} !important;
+        }
+        .bg-emerald-600 {
+          background-color: ${t.a} !important;
+        }
+        .text-emerald-700, .text-emerald-800 {
+          color: ${t.a} !important;
+        }
+      `;
     }
 
     async function revisarAlertasDeudores() {
@@ -277,7 +314,14 @@
     }
 
     function marcarBotonActivo(route) {
-      const tema = TEMAS_GUARDADOS[state.empresa?.temaColor] || TEMAS_GUARDADOS["ejecutivo-oscuro"];
+      const temaLocal = (() => {
+        try {
+          return localStorage.getItem(`nexus_ve_tema_${state.sesion?.tenantId || "default"}`);
+        } catch {
+          return null;
+        }
+      })();
+      const tema = TEMAS_GUARDADOS[temaLocal] || TEMAS_GUARDADOS["ejecutivo-oscuro"];
       document.querySelectorAll("[data-route]").forEach((btn) => {
         const activa = btn.dataset.route === route;
         btn.classList.toggle("active", activa);
@@ -348,7 +392,14 @@
       state.sesion = acceso.sesion;
       state.empresa = acceso.empresa;
 
-      aplicarTemaEmpresa(acceso.empresa.temaColor);
+      const temaLocal = (() => {
+        try {
+          return localStorage.getItem(`nexus_ve_tema_${acceso.sesion.tenantId}`);
+        } catch {
+          return null;
+        }
+      })();
+      aplicarTemaEmpresa(temaLocal || "ejecutivo-oscuro");
 
       const nombre = acceso.empresa.nombre || acceso.sesion.nombreEmpresa;
       const rif = acceso.empresa.rif || acceso.sesion.tenantId;
