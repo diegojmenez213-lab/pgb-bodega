@@ -1,10 +1,12 @@
 // venezuela/modules/clientes.js
 import {
+  db,
   getTenantRefs,
   doc,
   getDocs,
   setDoc,
   deleteDoc,
+  writeBatch,
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
@@ -18,10 +20,10 @@ export async function mount(root, state) {
     <div class="space-y-4 max-w-5xl mx-auto">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 class="text-lg font-extrabold text-slate-900">Clientes y Tarifas</h1>
-          <p class="text-xs text-slate-500">Asigna multiplicadores discretos por cliente para Caja y Cotizaciones.</p>
+          <h1 class="text-lg font-extrabold text-slate-900">Catálogo de Clientes</h1>
+          <p class="text-xs text-slate-500">Gestiona clientes, tarifas y control de borrado con respaldo en Deudores.</p>
         </div>
-        <button id="btnNuevoCliente" class="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
+        <button id="btnNuevoCliente" type="button" class="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
           + Nuevo Cliente
         </button>
       </div>
@@ -84,6 +86,7 @@ export async function mount(root, state) {
   `;
 
   let clientes = [];
+  let notasCache = [];
   let editId = null;
 
   const form = root.querySelector("#formCliente");
@@ -91,6 +94,21 @@ export async function mount(root, state) {
   const wrapEsp = root.querySelector("#wrapFactorEsp");
   const listaEl = root.querySelector("#listaClientes");
   const busqEl = root.querySelector("#busqCli");
+
+  function obtenerDeudaCliente(docId) {
+    let total = 0;
+    let cantidadNotas = 0;
+    for (const n of notasCache) {
+      const cliDoc = normalizarIdVE(n.cliente?.documento || "");
+      if (cliDoc !== docId) continue;
+      const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
+      if (saldo > 0.01) {
+        total += saldo;
+        cantidadNotas++;
+      }
+    }
+    return { total, cantidadNotas };
+  }
 
   tarifaEl.addEventListener("change", () => {
     wrapEsp.classList.toggle("hidden", tarifaEl.value !== "especial");
@@ -139,8 +157,20 @@ export async function mount(root, state) {
         actualizadoEn: serverTimestamp()
       }, { merge: true });
 
+      // Si editamos un cliente con deuda activa, sincronizamos el nombre en sus notas abiertas
+      const notasDeudor = notasCache.filter(
+        (n) => normalizarIdVE(n.cliente?.documento || "") === docId && Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0) > 0.01
+      );
+      if (notasDeudor.length) {
+        const batch = writeBatch(db);
+        for (const n of notasDeudor) {
+          batch.set(doc(refs.notasEntrega(), n.id), { cliente: { ...(n.cliente || {}), documento: docId, nombre } }, { merge: true });
+        }
+        await batch.commit();
+      }
+
       form.classList.add("hidden");
-      await cargarClientes();
+      await cargarDatos();
     } catch (err) {
       alert("Error guardando cliente: " + err.message);
     } finally {
@@ -161,28 +191,36 @@ export async function mount(root, state) {
       return;
     }
 
-    listaEl.innerHTML = filtrados.map((c) => `
-      <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-id="${c.id}">
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="font-mono-ve text-xs font-extrabold text-slate-900">${c.id}</span>
-            <span class="text-xs font-extrabold text-slate-800">${c.nombre || ""}</span>
-            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-              c.tarifa === "especial" ? "bg-amber-100 text-amber-800" : c.tarifa === "mayor" ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-600"
-            }">
-              ${c.tarifa === "especial" ? `Especial (×${c.factorPersonalizado})` : c.tarifa === "mayor" ? "Mayor" : "Detal"}
-            </span>
+    listaEl.innerHTML = filtrados.map((c) => {
+      const deuda = obtenerDeudaCliente(c.id);
+      return `
+        <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-id="${c.id}">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-mono-ve text-xs font-extrabold text-slate-900">${c.id}</span>
+              <span class="text-xs font-extrabold text-slate-800">${c.nombre || ""}</span>
+              <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                c.tarifa === "especial" ? "bg-amber-100 text-amber-800" : c.tarifa === "mayor" ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-600"
+              }">
+                ${c.tarifa === "especial" ? `Especial (×${c.factorPersonalizado})` : c.tarifa === "mayor" ? "Mayor" : "Detal"}
+              </span>
+              ${deuda.total > 0.01 ? `
+                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                  Debe $${deuda.total.toFixed(2)} (${deuda.cantidadNotas} ${deuda.cantidadNotas === 1 ? "nota" : "notas"})
+                </span>
+              ` : ""}
+            </div>
+            <div class="text-[11px] text-slate-500 mt-0.5">
+              ${c.telefono || "Sin teléfono"}${c.direccion ? ` • ${c.direccion}` : ""}
+            </div>
           </div>
-          <div class="text-[11px] text-slate-500 mt-0.5">
-            ${c.telefono || "Sin teléfono"}${c.direccion ? ` • ${c.direccion}` : ""}
+          <div class="flex items-center gap-1.5">
+            <button type="button" class="btn-edit px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold cursor-pointer">Editar</button>
+            <button type="button" class="btn-del px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold cursor-pointer">Borrar</button>
           </div>
         </div>
-        <div class="flex items-center gap-1.5">
-          <button type="button" class="btn-edit px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold cursor-pointer">Editar</button>
-          <button type="button" class="btn-del px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold cursor-pointer">✕</button>
-        </div>
-      </div>
-    `).join("");
+      `;
+    }).join("");
   }
 
   listaEl.addEventListener("click", async (e) => {
@@ -194,20 +232,25 @@ export async function mount(root, state) {
     if (e.target.closest(".btn-edit") && cli) {
       abrirForm(cli);
     } else if (e.target.closest(".btn-del")) {
-      if (!confirm(`¿Eliminar cliente ${cli?.nombre || id}?`)) return;
+      const deuda = obtenerDeudaCliente(id);
+      const aviso = deuda.total > 0.01
+        ? `¡Atención! ${cli?.nombre || id} tiene una deuda activa de $${deuda.total.toFixed(2)}. Su deuda se mantendrá en Deudores y, si lo registras de nuevo o entras a Deudores, podrás decidir si cambiar su nombre allí. ¿Borrar del catálogo de clientes?`
+        : `¿Borrar a ${cli?.nombre || id} (${id}) del catálogo de clientes?`;
+      if (!confirm(aviso)) return;
       await deleteDoc(doc(refs.clientes(), id));
-      await cargarClientes();
+      await cargarDatos();
     }
   });
 
-  async function cargarClientes() {
-    const snap = await getDocs(refs.clientes());
-    clientes = snap.docs
+  async function cargarDatos() {
+    const [snapCli, snapNotas] = await Promise.all([getDocs(refs.clientes()), getDocs(refs.notasEntrega())]);
+    clientes = snapCli.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+    notasCache = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
     render();
   }
 
   busqEl.addEventListener("input", render);
-  await cargarClientes();
+  await cargarDatos();
 }
