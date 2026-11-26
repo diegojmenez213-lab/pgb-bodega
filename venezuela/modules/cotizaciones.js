@@ -18,6 +18,14 @@ function getTasaActiva(state) {
   return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
+function parseMultiplicadorTexto(raw) {
+  const limpio = String(raw || "").replace(",", ".").trim();
+  if (!limpio || limpio === "." || limpio.endsWith(".")) return null;
+  const num = Number(limpio);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num;
+}
+
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
   const fMayor = Number(state.empresa?.precios?.factorMayor) || 2.0;
@@ -53,7 +61,13 @@ export async function mount(root, state) {
                   <option value="custom">Personalizado</option>
                 </select>
                 <span class="text-slate-500">Mult. (×):</span>
-                <input id="cotMult" type="number" step="0.05" min="0.1" value="${fDetal}" class="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-extrabold text-center" />
+                <input
+                  id="cotMult"
+                  type="text"
+                  inputmode="decimal"
+                  value="${fDetal}"
+                  class="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-extrabold text-center"
+                />
               </div>
               <div id="cotCliBadge" class="text-[11px] font-bold text-emerald-700 hidden">✓ Cliente registrado</div>
             </div>
@@ -134,11 +148,13 @@ export async function mount(root, state) {
   const resEl = root.querySelector("#cotResultados");
   const itemsEl = root.querySelector("#cotItems");
 
-  function aplicarFactor(nuevoFactor, actualizarCarrito = true) {
-    const val = Number(nuevoFactor);
-    if (isNaN(val) || val <= 0) return;
+  function aplicarFactor(nuevoFactor, { sincronizarInput = false, actualizarCarrito = true } = {}) {
+    const val = parseMultiplicadorTexto(nuevoFactor);
+    if (val === null) return;
     factorActual = val;
-    multEl.value = String(val);
+    if (sincronizarInput) {
+      multEl.value = String(val);
+    }
     if (actualizarCarrito && carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
@@ -276,7 +292,7 @@ export async function mount(root, state) {
       nomEl.value = cli.nombre || "";
       const fCli = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
       tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
-      aplicarFactor(fCli, true);
+      aplicarFactor(fCli, { sincronizarInput: true, actualizarCarrito: true });
       badgeCli.textContent = `✓ Cliente registrado (${cli.tarifa || "detal"})`;
       badgeCli.classList.remove("hidden");
     } else {
@@ -285,14 +301,25 @@ export async function mount(root, state) {
   });
 
   tarifaEl.addEventListener("change", () => {
-    if (tarifaEl.value === "mayor") aplicarFactor(fMayor, true);
-    else if (tarifaEl.value === "detal") aplicarFactor(fDetal, true);
+    if (tarifaEl.value === "mayor") aplicarFactor(fMayor, { sincronizarInput: true, actualizarCarrito: true });
+    else if (tarifaEl.value === "detal") aplicarFactor(fDetal, { sincronizarInput: true, actualizarCarrito: true });
     else multEl.focus();
   });
 
+  // No tocamos multEl.value mientras escribes para no interferir con el punto decimal en móvil
   multEl.addEventListener("input", () => {
     tarifaEl.value = "custom";
-    aplicarFactor(multEl.value, true);
+    aplicarFactor(multEl.value, { sincronizarInput: false, actualizarCarrito: true });
+  });
+
+  multEl.addEventListener("blur", () => {
+    const val = parseMultiplicadorTexto(multEl.value);
+    if (val !== null) {
+      multEl.value = String(val);
+      aplicarFactor(val, { sincronizarInput: false, actualizarCarrito: true });
+    } else {
+      multEl.value = String(factorActual);
+    }
   });
 
   root.querySelector("#btnLimpiarCot").addEventListener("click", () => {
