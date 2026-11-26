@@ -5,6 +5,7 @@ import {
   doc,
   getDocs,
   setDoc,
+  deleteDoc,
   writeBatch,
   serverTimestamp
 } from "../core/db.js";
@@ -80,17 +81,13 @@ function extraerFirmaTecnica(descripcion = "", marca = "") {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    // Unifica fracciones mixtas: "3.1/2" o "3 1/2" -> "3_1/2"
     .replace(/(\d+)[.\s-]+(\d+\/\d+)/g, "$1_$2")
-    // Separa operadores de medidas (*, x, ×)
     .replace(/[*×]/g, " ")
     .replace(/(\d)x(\d)/g, "$1 $2");
 
-  // Extrae medidas y números clave (ej. "5/8", "3_1/2", "16", "12mm" -> "12")
   const medidasMatch = raw.match(/\d+_\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?/g) || [];
   const medidas = Array.from(new Set(medidasMatch)).sort();
 
-  // Palabras descriptivas relevantes (sin números puros ni conectores)
   const palabras = raw
     .replace(/[^a-z0-9/_]+/g, " ")
     .split(/\s+/)
@@ -99,7 +96,6 @@ function extraerFirmaTecnica(descripcion = "", marca = "") {
   const palabrasSet = new Set(palabras);
   const textoLimpio = palabras.join(" ");
 
-  // Bigramas para similitud de cadena (coeficiente Dice)
   const bigramas = new Set();
   const plano = textoLimpio.replace(/\s+/g, "");
   for (let i = 0; i < plano.length - 1; i++) {
@@ -141,7 +137,6 @@ function crearIndiceExistentes(productosExistentes) {
     const firma = extraerFirmaTecnica(p.descripcion || "", p.marca || "");
     firmas.set(p.id, firma);
 
-    // Indexa por medidas y palabras para búsquedas instantáneas sin O(N^2)
     const claves = [...firma.medidas, ...firma.palabrasSet];
     for (const cl of claves) {
       if (!indiceTokens.has(cl)) indiceTokens.set(cl, []);
@@ -150,12 +145,10 @@ function crearIndiceExistentes(productosExistentes) {
   }
 
   function buscarCoincidencia(itemExcel, idsYaEmparejados) {
-    // Nivel 1A: ID exacto
     if (porId.has(itemExcel.id) && !idsYaEmparejados.has(itemExcel.id)) {
       return { prod: porId.get(itemExcel.id), metodo: "codigo" };
     }
 
-    // Nivel 1B: Código normalizado (sin guiones ni espacios)
     const ck = normalizarCodigoClave(itemExcel.codigo);
     if (ck && ck.length >= 3 && porCodigoClave.has(ck)) {
       const cand = porCodigoClave.get(ck);
@@ -164,7 +157,6 @@ function crearIndiceExistentes(productosExistentes) {
       }
     }
 
-    // Nivel 2 y 3: Medidas exactas + Parecido extremo de nombre
     const firmaNuevo = extraerFirmaTecnica(itemExcel.descripcion, itemExcel.marca);
     if (!firmaNuevo.palabrasSet.size) return null;
 
@@ -190,14 +182,12 @@ function crearIndiceExistentes(productosExistentes) {
       const firmaCand = firmas.get(cand.id);
       if (!firmaCand) continue;
 
-      // Seguridad técnica: si tienen medidas/números, deben coincidir exactamente
       if (!medidasCompatibles(firmaNuevo.medidas, firmaCand.medidas)) continue;
 
       const simPalabras = similitudConjuntos(firmaNuevo.palabrasSet, firmaCand.palabrasSet);
       const simBigramas = similitudConjuntos(firmaNuevo.bigramas, firmaCand.bigramas);
       const score = simPalabras * 0.65 + simBigramas * 0.35;
 
-      // Si comparten medidas técnicas exactas exigimos >= 0.72; si no hay medidas, exigimos >= 0.85
       const umbral = firmaNuevo.medidas.length > 0 ? 0.72 : 0.85;
       if (score >= umbral && score > mejorScore) {
         mejorScore = score;
@@ -388,7 +378,12 @@ export async function mount(root, state) {
             <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Novedades de la Última Actualización Excel</h2>
             <p id="metaUltimaAct" class="text-[11px] text-sky-800 font-semibold"></p>
           </div>
-          <div id="resumenBadgesCambios" class="flex flex-wrap gap-1.5 text-[11px] font-extrabold"></div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <div id="resumenBadgesCambios" class="flex flex-wrap gap-1.5 text-[11px] font-extrabold"></div>
+            <button id="btnLimpiarNovedades" type="button" class="px-2.5 py-1 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-extrabold cursor-pointer">
+              ✕ Limpiar
+            </button>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
@@ -640,7 +635,6 @@ export async function mount(root, state) {
         return;
       }
 
-      // Cruce inteligente de cada fila del Excel contra el catálogo actual
       const indice = crearIndiceExistentes(productos);
       const idsVistosEnExcel = new Set();
       const operaciones = [];
@@ -672,7 +666,6 @@ export async function mount(root, state) {
             costoUsd: nuevoCosto
           });
         } else {
-          // Alerta de aumento de precio costo
           if (prevCosto > 0 && nuevoCosto > prevCosto + 0.009) {
             const pctSubida = ((nuevoCosto - prevCosto) / prevCosto) * 100;
             subieronPrecio.push({
@@ -703,7 +696,6 @@ export async function mount(root, state) {
         operaciones.push({ targetId, prev, it });
       }
 
-      // Productos que tenían stock en Planta y desaparecieron del Excel
       const faltantesEnExcel = [];
       if (!esAlmacen) {
         for (const prev of productos) {
@@ -717,7 +709,6 @@ export async function mount(root, state) {
         }
       }
 
-      // Ordenar subidas de precio de mayor porcentaje a menor
       subieronPrecio.sort((a, b) => b.pctSubida - a.pctSubida);
 
       const colRef = refs.catalogo();
@@ -730,7 +721,6 @@ export async function mount(root, state) {
         const batch = writeBatch(db);
         for (const { targetId, prev, it } of slice) {
           const payload = {
-            // Conserva el código real anterior si el Excel vino sin código
             codigo: it.sinCodigo && prev?.codigo ? prev.codigo : it.codigo,
             descripcion: it.descripcion,
             categoria: it.categoria,
@@ -802,6 +792,13 @@ export async function mount(root, state) {
       progWrap.classList.add("hidden");
       alert("Error actualizando Excel: " + err.message);
     }
+  });
+
+  root.querySelector("#btnLimpiarNovedades").addEventListener("click", async () => {
+    if (!confirm("¿Borrar el reporte de novedades de la última actualización?")) return;
+    await deleteDoc(doc(refs.historialNovedades(), "ultimo_planta"));
+    ultimoReportePlanta = null;
+    render();
   });
 
   async function cargarCatalogo() {
