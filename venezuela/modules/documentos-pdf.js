@@ -42,8 +42,9 @@ function bloqueTotalesMonedas(totalUsd, monedas = ["USD", "BS"], tasas = {}) {
  */
 export function imprimirDocumentoCarta({ tipo = "NOTA DE ENTREGA", folio = "00001", empresa = {}, cliente = {}, items = [], totalUsd = 0, monedas = ["USD", "BS"], tasas = {}, pagos = [], observaciones = "", fecha = "" }) {
   const fechaTxt = fecha || new Date().toLocaleDateString("es-VE");
-  const logoHtml = empresa.logoBase64 || empresa.logoUrl
-    ? `<img src="${empresa.logoBase64 || empresa.logoUrl}" class="logo" alt="Logo" />`
+  const logoDoc = empresa.logoDocumentoBase64 || empresa.logoBase64 || empresa.logoUrl || "";
+  const logoHtml = logoDoc
+    ? `<img src="${logoDoc}" class="logo" alt="Logo Documento" />`
     : `<div class="logo-box">${esc((empresa.nombre || "VE").slice(0, 2).toUpperCase())}</div>`;
 
   const html = `<!DOCTYPE html>
