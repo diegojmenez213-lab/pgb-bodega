@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <title>NEXUS ERP • Venezuela</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/ve-theme.css" />
+</head>
+<body>
+  <div class="ve-shell">
+    <!-- Barra lateral (PC) -->
+    <aside class="ve-sidebar">
+      <div class="ve-brand">
+        <div id="brandLogoWrap" class="ve-brand-badge">VE</div>
+        <div class="min-w-0">
+          <div id="brandName" class="text-sm font-extrabold text-slate-900 truncate">Cargando...</div>
+          <div id="brandRif" class="text-[11px] font-mono-ve text-slate-500 truncate">---</div>
+        </div>
+      </div>
+
+      <nav class="ve-nav" id="pcNav">
+        <div class="ve-nav-group">Operación</div>
+        <button class="ve-nav-btn active" data-route="caja-pos"><span>🧾</span> Caja / Nota de Entrega</button>
+        <button class="ve-nav-btn" data-route="cotizaciones"><span>📄</span> Cotizaciones (72h)</button>
+        <button class="ve-nav-btn" data-route="clientes"><span>👥</span> Clientes</button>
+
+        <div class="ve-nav-group">Inventario</div>
+        <button class="ve-nav-btn" data-route="catalogo"><span>📦</span> Catálogo (Almacén / Planta)</button>
+        <button class="ve-nav-btn" data-route="conteo-bodega"><span>✅</span> Conteo Digital</button>
+        <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Actualizar Planta</button>
+
+        <div class="ve-nav-group">Gerencia</div>
+        <button class="ve-nav-btn" data-route="analitica"><span>📈</span> Analítica & Cierre</button>
+        <button class="ve-nav-btn" data-route="pedido-sugerido"><span>🧠</span> Pedido Sugerido</button>
+      </nav>
+
+      <div class="p-3 border-t border-slate-200 flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div id="userLabel" class="text-xs font-bold text-slate-800 truncate">Administrador</div>
+          <div class="text-[10px] font-semibold text-emerald-600">Entorno Aislado VE</div>
+        </div>
+        <button id="btnLogoutPC" class="text-xs font-bold text-rose-600 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg cursor-pointer">
+          Salir
+        </button>
+      </div>
+    </aside>
+
+    <!-- Contenedor principal -->
+    <div class="ve-main-wrap">
+      <!-- Barra superior de Tasas en Vivo -->
+      <header class="ve-topbar">
+        <div class="ve-rates-strip" id="ratesStrip">
+          <button type="button" id="pillBcvHoy" class="ve-rate-pill active-bcv" title="Usar tasa BCV vigente de hoy">
+            <span class="ve-rate-label">BCV Hoy</span>
+            <span id="valBcvHoy" class="font-mono-ve">--.--</span>
+          </button>
+
+          <button type="button" id="pillBcvNext" class="ve-rate-pill next-bcv hidden" title="Usar tasa BCV del próximo día hábil">
+            <span class="ve-rate-label">BCV Mañana</span>
+            <span id="valBcvNext" class="font-mono-ve">--.--</span>
+          </button>
+
+          <div class="ve-rate-pill" title="Euro BCV">
+            <span class="ve-rate-label">EUR</span>
+            <span id="valEur" class="font-mono-ve">--.--</span>
+          </div>
+
+          <div class="ve-rate-pill" title="Referencia USDT">
+            <span class="ve-rate-label">USDT</span>
+            <span id="valUsdt" class="font-mono-ve">--.--</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 ml-auto">
+          <span id="relojCaracas" class="text-[11px] font-mono-ve font-bold text-slate-500 hidden sm:inline">--:-- VE</span>
+          <button type="button" id="btnRefrescarTasas" class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+            ↻ Tasas
+          </button>
+        </div>
+      </header>
+
+      <!-- Vista del módulo activo -->
+      <main id="veModuleRoot" class="ve-content">
+        <div class="ve-card text-center py-12 text-slate-500 text-sm font-semibold">
+          Inicializando entorno seguro de Venezuela...
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Barra inferior fija (Móvil) -->
+  <nav class="ve-bottom-nav" id="mobNav">
+    <button class="ve-mob-btn active" data-route="caja-pos"><span class="text-base">🧾</span>Caja</button>
+    <button class="ve-mob-btn" data-route="catalogo"><span class="text-base">📦</span>Catálogo</button>
+    <button class="ve-mob-btn" data-route="cotizaciones"><span class="text-base">📄</span>Cotizar</button>
+    <button class="ve-mob-btn" data-route="conteo-bodega"><span class="text-base">✅</span>Conteo</button>
+    <button class="ve-mob-btn" id="btnMobMore"><span class="text-base">☰</span>Más</button>
+  </nav>
+
+  <!-- Menú desplegable "Más" en móvil -->
+  <div class="ve-drawer-backdrop" id="mobDrawer">
+    <div class="ve-drawer-sheet space-y-2">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+        <div>
+          <div id="mobBrandName" class="text-sm font-extrabold text-slate-900">Empresa</div>
+          <div id="mobBrandRif" class="text-[11px] font-mono-ve text-slate-500">---</div>
+        </div>
+        <button id="btnCloseDrawer" class="text-xs font-bold text-slate-500 px-2 py-1">Cerrar ✕</button>
+      </div>
+      <button class="ve-nav-btn" data-route="inventario-planta"><span>📥</span> Actualizar Planta (Excel)</button>
+      <button class="ve-nav-btn" data-route="clientes"><span>👥</span> Clientes y Tarifas</button>
+      <button class="ve-nav-btn" data-route="analitica"><span>📈</span> Analítica & Cierre</button>
+      <button class="ve-nav-btn" data-route="pedido-sugerido"><span>🧠</span> Pedido Sugerido</button>
+      <div class="pt-2 border-t border-slate-200">
+        <button id="btnLogoutMob" class="w-full py-2.5 rounded-xl bg-rose-50 text-rose-700 font-bold text-xs">
+          Cerrar Sesión
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { verificarAccesoVE, cerrarSesionVE } from "./core/auth-tenant.js";
+
+    const state = {
+      sesion: null,
+      empresa: null,
+      rutaActual: "caja-pos",
+      modoTasaBCV: "hoy", // "hoy" | "manana"
+      tasas: { bcvHoy: 0, bcvManana: 0, eur: 0, usdt: 0, actualizado: "" }
+    };
+
+    window.NEXUS_VE_STATE = state;
+
+    const NOMBRES_RUTAS = {
+      "caja-pos": "Caja / Nota de Entrega",
+      "cotizaciones": "Cotizaciones (72h)",
+      "clientes": "Clientes",
+      "catalogo": "Catálogo (Almacén / Planta)",
+      "conteo-bodega": "Conteo Digital de Almacén",
+      "inventario-planta": "Actualizar Planta (Excel)",
+      "analitica": "Analítica Financiera & Cierre",
+      "pedido-sugerido": "Pedido Sugerido"
+    };
+
+    function actualizarRelojCaracas() {
+      const el = document.getElementById("relojCaracas");
+      if (!el) return;
+      try {
+        const hora = new Intl.DateTimeFormat("es-VE", {
+          timeZone: "America/Caracas",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true
+        }).format(new Date());
+        el.textContent = `${hora} VE`;
+      } catch {
+        el.textContent = "";
+      }
+    }
+
+    function pintarTasas() {
+      const t = state.tasas;
+      document.getElementById("valBcvHoy").textContent = t.bcvHoy ? `${Number(t.bcvHoy).toFixed(2)} Bs` : "--.--";
+      document.getElementById("valEur").textContent = t.eur ? `${Number(t.eur).toFixed(2)} Bs` : "--.--";
+      document.getElementById("valUsdt").textContent = t.usdt ? `${Number(t.usdt).toFixed(2)} Bs` : "--.--";
+
+      const pillNext = document.getElementById("pillBcvNext");
+      if (t.bcvManana && Number(t.bcvManana) !== Number(t.bcvHoy)) {
+        pillNext.classList.remove("hidden");
+        document.getElementById("valBcvNext").textContent = `${Number(t.bcvManana).toFixed(2)} Bs`;
+      } else {
+        pillNext.classList.add("hidden");
+      }
+
+      document.getElementById("pillBcvHoy").classList.toggle("active-bcv", state.modoTasaBCV === "hoy");
+      pillNext.classList.toggle("active-bcv", state.modoTasaBCV === "manana");
+    }
+
+    async function cargarTasas() {
+      try {
+        const resp = await fetch("/api/ve-tasas");
+        if (!resp.ok) return;
+        const data = await resp.json();
+        state.tasas = {
+          bcvHoy: Number(data.bcvHoy ?? data.bcv ?? data.usd ?? 0),
+          bcvManana: Number(data.bcvManana ?? data.bcvProximo ?? 0),
+          eur: Number(data.eur ?? data.euro ?? 0),
+          usdt: Number(data.usdt ?? data.paralelo ?? 0),
+          actualizado: data.actualizado || ""
+        };
+        pintarTasas();
+        window.dispatchEvent(new CustomEvent("nexus-ve-tasas-updated", { detail: state.tasas }));
+      } catch (err) {
+        console.warn("No se pudieron consultar tasas en vivo:", err);
+      }
+    }
+
+    function marcarBotonActivo(route) {
+      document.querySelectorAll("[data-route]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.route === route);
+      });
+    }
+
+    async function abrirModulo(route) {
+      state.rutaActual = route;
+      marcarBotonActivo(route);
+      document.getElementById("mobDrawer").classList.remove("open");
+
+      const root = document.getElementById("veModuleRoot");
+      root.innerHTML = `<div class="ve-card text-center py-10 text-slate-500 text-xs font-bold">Cargando ${NOMBRES_RUTAS[route] || route}...</div>`;
+
+      try {
+        const mod = await import(`./modules/${route}.js`);
+        if (typeof mod.mount === "function") {
+          await mod.mount(root, state);
+        } else if (typeof mod.default === "function") {
+          await mod.default(root, state);
+        } else {
+          throw new Error("El módulo no exporta mount()");
+        }
+      } catch (err) {
+        root.innerHTML = `
+          <div class="ve-card max-w-xl mx-auto text-center space-y-2 py-10">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-slate-400">Módulo en construcción</div>
+            <h2 class="text-lg font-extrabold text-slate-900">${NOMBRES_RUTAS[route] || route}</h2>
+            <p class="text-xs text-slate-500">
+              Aún no se ha creado el archivo <span class="font-mono-ve text-slate-700">venezuela/modules/${route}.js</span>.
+            </p>
+          </div>
+        `;
+      }
+    }
+
+    async function iniciar() {
+      const acceso = await verificarAccesoVE();
+      if (!acceso) return;
+
+      state.sesion = acceso.sesion;
+      state.empresa = acceso.empresa;
+
+      const nombre = acceso.empresa.nombre || acceso.sesion.nombreEmpresa;
+      const rif = acceso.empresa.rif || acceso.sesion.tenantId;
+      const logo = acceso.empresa.logoBase64 || acceso.empresa.logoUrl || "";
+
+      document.getElementById("brandName").textContent = nombre;
+      document.getElementById("brandRif").textContent = rif;
+      document.getElementById("mobBrandName").textContent = nombre;
+      document.getElementById("mobBrandRif").textContent = rif;
+      document.getElementById("userLabel").textContent = acceso.sesion.usuario || "Administrador";
+
+      if (logo) {
+        const wrap = document.getElementById("brandLogoWrap");
+        wrap.outerHTML = `<img src="${logo}" alt="Logo" class="ve-brand-logo" />`;
+      }
+
+      document.querySelectorAll("[data-route]").forEach((btn) => {
+        btn.addEventListener("click", () => abrirModulo(btn.dataset.route));
+      });
+
+      document.getElementById("pillBcvHoy").addEventListener("click", () => {
+        state.modoTasaBCV = "hoy";
+        pintarTasas();
+        window.dispatchEvent(new CustomEvent("nexus-ve-tasa-modo", { detail: "hoy" }));
+      });
+
+      document.getElementById("pillBcvNext").addEventListener("click", () => {
+        state.modoTasaBCV = "manana";
+        pintarTasas();
+        window.dispatchEvent(new CustomEvent("nexus-ve-tasa-modo", { detail: "manana" }));
+      });
+
+      document.getElementById("btnRefrescarTasas").addEventListener("click", cargarTasas);
+      document.getElementById("btnLogoutPC").addEventListener("click", cerrarSesionVE);
+      document.getElementById("btnLogoutMob").addEventListener("click", cerrarSesionVE);
+
+      document.getElementById("btnMobMore").addEventListener("click", () => {
+        document.getElementById("mobDrawer").classList.add("open");
+      });
+      document.getElementById("btnCloseDrawer").addEventListener("click", () => {
+        document.getElementById("mobDrawer").classList.remove("open");
+      });
+      document.getElementById("mobDrawer").addEventListener("click", (e) => {
+        if (e.target.id === "mobDrawer") e.currentTarget.classList.remove("open");
+      });
+
+      actualizarRelojCaracas();
+      setInterval(actualizarRelojCaracas, 30000);
+      await cargarTasas();
+      setInterval(cargarTasas, 10 * 60 * 1000); // Revisa cada 10 min
+
+      await abrirModulo("caja-pos");
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>
