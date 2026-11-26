@@ -2,11 +2,13 @@
 import {
   db,
   getTenantRefs,
-  collection,
   doc,
   getDoc,
   getDocs,
+  query,
+  where,
   writeBatch,
+  increment,
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
@@ -35,7 +37,6 @@ function formatearFechaHora(ts) {
 
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
-  const cierresCol = collection(db, "empresas", state.sesion.tenantId, "cierresCaja");
 
   root.innerHTML = `
     <div class="space-y-4 max-w-6xl mx-auto">
@@ -43,7 +44,7 @@ export async function mount(root, state) {
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Historial de Notas y Cierre Diario</h1>
           <p class="text-xs text-slate-500">
-            Revisa las notas del día en curso, reimprime PDFs, anula notas devolviendo stock/saldo a favor o cierra caja para archivar el día.
+            Carga rápida de la jornada actual. Consulta el archivo infinito bajo demanda, anula con control de abonos o cierra caja.
           </p>
         </div>
         <button id="btnCerrarCajaHist" type="button" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold cursor-pointer">
@@ -77,14 +78,13 @@ export async function mount(root, state) {
       </div>
 
       <div id="listaNotasHist" class="space-y-2.5">
-        <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando notas emitidas...</div>
+        <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando notas de la jornada...</div>
       </div>
     </div>
   `;
 
   let notas = [];
-  let catalogo = [];
-  let cierres = [];
+  let archivoCompletoCargado = false;
   let vistaEstado = "dia";
 
   const busqEl = root.querySelector("#busqNotaHist");
@@ -128,6 +128,7 @@ export async function mount(root, state) {
     contEl.innerHTML = filtradas.map((n) => {
       const anulada = Boolean(n.anulada);
       const archivada = Boolean(n.cierreId);
+      const abonosCount = Array.isArray(n.abonos) ? n.abonos.length : 0;
       const condTxt = n.esCredito && Number(n.saldoPendienteUsd || 0) > 0.01
         ? `Crédito (Saldo: $${Number(n.saldoPendienteUsd).toFixed(2)})`
         : "Contado";
@@ -142,6 +143,7 @@ export async function mount(root, state) {
               ${anulada ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">ANULADA</span>` : ""}
               ${!anulada && archivada ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">Archivada</span>` : ""}
               ${!anulada && !archivada ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Abierta hoy</span>` : ""}
+              ${abonosCount > 0 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">${abonosCount} abono(s)</span>` : ""}
             </div>
             <div class="text-right">
               <div class="font-mono-ve text-sm font-extrabold text-slate-900">$${Number(n.totalUsd || 0).toFixed(2)}</div>
@@ -150,7 +152,7 @@ export async function mount(root, state) {
           </div>
 
           <div class="text-[11px] text-slate-600">
-            ${(n.items || []).map((it) => `${it.cantidad}×${it.codigo}`).join(", ")}
+            ${(n.items || []).map((it) => `${it.cantidad}× ${it.codigo}`).join(", ")}
           </div>
 
           <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
@@ -173,8 +175,39 @@ export async function mount(root, state) {
 
   async function anularNota(nota) {
     if (nota.anulada) return;
-    if (!confirm(`¿Anular Nota #${nota.folio || nota.id} por $${Number(nota.totalUsd || 0).toFixed(2)}? Se devolverá el stock al inventario y se ajustará el saldo a favor si aplica.`)) {
-      return;
+
+    const abonos = Array.isArray(nota.abonos) ? nota.abonos : [];
+    const totalAbonadoEfectivo = Number(
+      abonos
+        .filter((a) => !a.usandoSaldoFavor)
+        .reduce((acc, a) => acc + Number(a.montoUsd || 0), 0)
+        .toFixed(2)
+    );
+
+    const docCli = normalizarIdVE(nota.cliente?.documento || "");
+    let destinoAbonos = "ninguno"; // "favor" | "devolucion"
+
+    if (totalAbonadoEfectivo > 0.01) {
+      const pasarAFavor = confirm(
+        `⚠️ Esta nota (#${nota.folio || nota.id}) ya tiene $${totalAbonadoEfectivo.toFixed(2)} abonados.\n\n` +
+        `• Pulsa ACEPTAR para acreditar esos $${totalAbonadoEfectivo.toFixed(2)} al SALDO A FAVOR del cliente.\n` +
+        `• Pulsa CANCELAR para registrar una DEVOLUCIÓN / SALIDA DE CAJA por $${totalAbonadoEfectivo.toFixed(2)}.`
+      );
+      if (pasarAFavor) {
+        if (!docCli || docCli === "V-00000000") {
+          return alert("No se puede acreditar saldo a favor a Consumidor Final. Usa Devolución de Caja.");
+        }
+        destinoAbonos = "favor";
+      } else {
+        if (!confirm(`¿Confirmas anular Nota #${nota.folio || nota.id} y registrar una Salida de Caja (devolución) por $${totalAbonadoEfectivo.toFixed(2)}?`)) {
+          return;
+        }
+        destinoAbonos = "devolucion";
+      }
+    } else {
+      if (!confirm(`¿Anular Nota #${nota.folio || nota.id} por $${Number(nota.totalUsd || 0).toFixed(2)}? Se devolverá el stock al inventario y se ajustará el saldo a favor si aplica.`)) {
+        return;
+      }
     }
 
     const batch = writeBatch(db);
@@ -183,42 +216,59 @@ export async function mount(root, state) {
     batch.set(doc(refs.notasEntrega(), nota.id), {
       anulada: true,
       anuladaEnTs: now,
+      destinoAbonosAlAnular: destinoAbonos,
       saldoPendienteUsd: 0,
       esCredito: false,
       actualizadoEn: serverTimestamp()
     }, { merge: true });
 
-    // Revertir saldo a favor aplicado o sobrepago generado en esta nota
-    const docCli = normalizarIdVE(nota.cliente?.documento || "");
+    // Ajuste de saldo a favor del cliente (revierte uso/sobrepago + acredita abonos si eligió "favor")
     const favorUsado = Number(nota.saldoFavorAplicadoUsd || 0);
     const sobrepagoGen = Number(nota.sobrepagoUsd || 0);
+    const extraFavorPorAbonos = destinoAbonos === "favor" ? totalAbonadoEfectivo : 0;
 
-    if (docCli && docCli !== "V-00000000" && (favorUsado > 0.01 || sobrepagoGen > 0.01)) {
+    if (docCli && docCli !== "V-00000000" && (favorUsado > 0.01 || sobrepagoGen > 0.01 || extraFavorPorAbonos > 0.01)) {
       const cliRef = doc(refs.clientes(), docCli);
       const cliSnap = await getDoc(cliRef);
       const actualFavor = Number(cliSnap.data()?.saldoAFavorUsd || 0);
-      const favorRevertido = Math.max(0, Number((actualFavor + favorUsado - sobrepagoGen).toFixed(2)));
+      const favorFinal = Math.max(
+        0,
+        Number((actualFavor + favorUsado - sobrepagoGen + extraFavorPorAbonos).toFixed(2))
+      );
       batch.set(cliRef, {
-        saldoAFavorUsd: favorRevertido,
+        saldoAFavorUsd: favorFinal,
         actualizadoEn: serverTimestamp()
       }, { merge: true });
     }
 
+    // Si eligió devolución en efectivo/caja, registrar egreso automático en gastosCaja
+    if (destinoAbonos === "devolucion" && totalAbonadoEfectivo > 0.01) {
+      const gastoId = `DEV-${nota.folio || nota.id}-${now}`;
+      batch.set(doc(refs.gastosCaja(), gastoId), {
+        id: gastoId,
+        montoUsd: totalAbonadoEfectivo,
+        metodo: abonos[abonos.length - 1]?.metodo || "Efectivo USD",
+        motivo: `Devolución por anulación de Nota #${nota.folio || nota.id} (${nota.cliente?.nombre || "Cliente"})`,
+        cierreId: null,
+        creadoTs: now,
+        fechaIso: new Date(now).toISOString().slice(0, 10),
+        fechaHoraTxt: formatearFechaHora(now),
+        usuario: state.sesion?.usuario || "Administrador",
+        creadoEn: serverTimestamp()
+      });
+    }
+
+    // Devolución atómica de stock con increment()
     for (const it of (nota.items || [])) {
-      const prod = catalogo.find((p) => p.id === it.id || p.codigo === it.codigo);
-      if (!prod) continue;
+      if (!it.id) continue;
       if (it.origen === "almacen") {
-        const devStock = (Number(prod.stockAlmacen) || 0) + Number(it.cantidad || 0);
-        prod.stockAlmacen = devStock;
-        batch.set(doc(refs.catalogo(), prod.id), {
-          stockAlmacen: devStock,
+        batch.set(doc(refs.catalogo(), it.id), {
+          stockAlmacen: increment(Number(it.cantidad || 1)),
           actualizadoEn: serverTimestamp()
         }, { merge: true });
       } else {
-        const restPlanta = Math.max(0, (Number(prod.pedidosPlantaCount) || 0) - Number(it.cantidad || 0));
-        prod.pedidosPlantaCount = restPlanta;
-        batch.set(doc(refs.catalogo(), prod.id), {
-          pedidosPlantaCount: restPlanta,
+        batch.set(doc(refs.catalogo(), it.id), {
+          pedidosPlantaCount: increment(-Number(it.cantidad || 1)),
           actualizadoEn: serverTimestamp()
         }, { merge: true });
       }
@@ -228,21 +278,36 @@ export async function mount(root, state) {
     if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
       await window.NEXUS_VE_REFRESH_ALERTAS();
     }
-    await cargarDatos();
-    alert(`Nota #${nota.folio || nota.id} anulada, stock devuelto y saldos actualizados.`);
+    await cargarDatos(archivoCompletoCargado);
+    alert(`Nota #${nota.folio || nota.id} anulada correctamente.`);
   }
 
   async function cerrarCajaDia() {
-    const abiertas = notas.filter((n) => !n.anulada && !n.cierreId);
-    const desdeTs = cierres[0]?.cerradoTs || 0;
+    const [snapAbiertas, snapDeudas, snapGastos] = await Promise.all([
+      getDocs(query(refs.notasEntrega(), where("cierreId", "==", null))),
+      getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
+      getDocs(query(refs.gastosCaja(), where("cierreId", "==", null)))
+    ]);
 
-    // Recolectar abonos cobrados desde el último cierre
+    const abiertas = snapAbiertas.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((n) => !n.anulada);
+
+    const gastosAbiertos = snapGastos.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    // Unir notas abiertas + notas con deuda para detectar abonos sin cierreId
+    const mapaRev = new Map();
+    for (const d of [...snapAbiertas.docs, ...snapDeudas.docs]) {
+      mapaRev.set(d.id, { id: d.id, ...d.data() });
+    }
+
     const abonosAbiertos = [];
-    for (const n of notas) {
+    const notasConAbonosAbiertos = new Set();
+    for (const n of mapaRev.values()) {
       if (n.anulada || !Array.isArray(n.abonos)) continue;
       for (const ab of n.abonos) {
-        const ts = Number(ab.ts || 0);
-        if (!desdeTs || ts > desdeTs) {
+        if (ab.cierreId === null || ab.cierreId === undefined) {
+          notasConAbonosAbiertos.add(n.id);
           abonosAbiertos.push({
             metodo: ab.metodo || "Efectivo USD",
             usandoSaldoFavor: Boolean(ab.usandoSaldoFavor),
@@ -252,21 +317,26 @@ export async function mount(root, state) {
       }
     }
 
-    if (!abiertas.length && !abonosAbiertos.length) {
-      return alert("No hay notas ni abonos abiertos en la jornada actual para cerrar.");
+    if (!abiertas.length && !abonosAbiertos.length && !gastosAbiertos.length) {
+      return alert("No hay notas, abonos ni salidas abiertas en la jornada actual para cerrar.");
     }
 
     const totalVentas = abiertas.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
     const totalUtilidad = abiertas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
+    const pagosVentas = abiertas.reduce(
+      (acc, n) => acc + (Array.isArray(n.pagos) ? n.pagos.reduce((s, p) => s + Number(p.montoUsd || 0), 0) : 0),
+      0
+    );
     const totalAbonos = abonosAbiertos
       .filter((a) => !a.usandoSaldoFavor)
       .reduce((acc, a) => acc + a.totalFisicoUsd, 0);
+    const totalGastos = gastosAbiertos.reduce((acc, g) => acc + Number(g.montoUsd || 0), 0);
+    const netoCaja = Number((pagosVentas + totalAbonos - totalGastos).toFixed(2));
 
-    // Desglose unificado por método de pago
     const desgloseMap = new Map();
     const sumarMet = (m, v) => {
       const val = Number(v || 0);
-      if (val <= 0) return;
+      if (Math.abs(val) < 0.005) return;
       const key = m || "Efectivo USD";
       desgloseMap.set(key, Number(((desgloseMap.get(key) || 0) + val).toFixed(2)));
     };
@@ -278,8 +348,11 @@ export async function mount(root, state) {
     for (const a of abonosAbiertos) {
       if (!a.usandoSaldoFavor) sumarMet(a.metodo, a.totalFisicoUsd);
     }
+    for (const g of gastosAbiertos) {
+      sumarMet(g.metodo, -Number(g.montoUsd || 0));
+    }
 
-    if (!confirm(`¿Cerrar caja con ${abiertas.length} nota(s) ($${totalVentas.toFixed(2)}) y ${abonosAbiertos.length} abono(s) ($${totalAbonos.toFixed(2)})? Quedarán archivadas para empezar un nuevo día.`)) {
+    if (!confirm(`¿Cerrar caja?\n• Notas: ${abiertas.length} ($${totalVentas.toFixed(2)})\n• Abonos: ${abonosAbiertos.length} ($${totalAbonos.toFixed(2)})\n• Salidas: ${gastosAbiertos.length} (-$${totalGastos.toFixed(2)})\n• Neto en caja: $${netoCaja.toFixed(2)}`)) {
       return;
     }
 
@@ -292,15 +365,18 @@ export async function mount(root, state) {
       const fechaHoraTxt = formatearFechaHora(now);
 
       const batch = writeBatch(db);
-      batch.set(doc(cierresCol, cierreId), {
+      batch.set(doc(refs.cierresCaja(), cierreId), {
         cierreId,
         fechaIso: new Date(now).toISOString().slice(0, 10),
         fechaHoraTxt,
         cerradoTs: now,
         cantidadNotas: abiertas.length,
         cantidadAbonos: abonosAbiertos.length,
+        cantidadGastos: gastosAbiertos.length,
         totalVentasUsd: Number(totalVentas.toFixed(2)),
         totalAbonosUsd: Number(totalAbonos.toFixed(2)),
+        totalGastosUsd: Number(totalGastos.toFixed(2)),
+        netoCajaUsd: netoCaja,
         totalUtilidadUsd: Number(totalUtilidad.toFixed(2)),
         desgloseMetodos: Object.fromEntries(desgloseMap),
         usuario: state.sesion?.usuario || "Administrador",
@@ -308,10 +384,20 @@ export async function mount(root, state) {
       });
 
       for (const n of abiertas) {
-        batch.set(doc(refs.notasEntrega(), n.id), {
-          cierreId,
-          cerradoEnTs: now
-        }, { merge: true });
+        batch.set(doc(refs.notasEntrega(), n.id), { cierreId, cerradoEnTs: now }, { merge: true });
+      }
+
+      for (const notaId of notasConAbonosAbiertos) {
+        const nota = mapaRev.get(notaId);
+        if (!nota || !Array.isArray(nota.abonos)) continue;
+        const abonosSellados = nota.abonos.map((ab) => (
+          ab.cierreId === null || ab.cierreId === undefined ? { ...ab, cierreId } : ab
+        ));
+        batch.set(doc(refs.notasEntrega(), notaId), { abonos: abonosSellados }, { merge: true });
+      }
+
+      for (const g of gastosAbiertos) {
+        batch.set(doc(refs.gastosCaja(), g.id), { cierreId, cerradoEnTs: now }, { merge: true });
       }
 
       const nuevaJornadaId = new Date(now + 86400000).toISOString().slice(0, 10);
@@ -320,8 +406,8 @@ export async function mount(root, state) {
       await batch.commit();
       if (state.empresa) state.empresa.jornadaActivaId = nuevaJornadaId;
 
-      await cargarDatos();
-      alert(`Caja cerrada (${cierreId}). Ventas, abonos y desglose por método quedaron archivados.`);
+      await cargarDatos(archivoCompletoCargado);
+      alert(`Caja cerrada (${cierreId}). Todo lo del día quedó archivado.`);
     } catch (err) {
       alert("Error al cerrar caja: " + err.message);
     } finally {
@@ -358,7 +444,7 @@ export async function mount(root, state) {
     }
   });
 
-  root.querySelector("#filtroEstadoNotas").addEventListener("click", (e) => {
+  root.querySelector("#filtroEstadoNotas").addEventListener("click", async (e) => {
     const btn = e.target.closest(".btn-est");
     if (!btn) return;
     vistaEstado = btn.dataset.estado;
@@ -368,27 +454,32 @@ export async function mount(root, state) {
         ? "btn-est px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer"
         : "btn-est px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700 cursor-pointer";
     });
-    renderNotas();
+    if (vistaEstado === "todas" && !archivoCompletoCargado) {
+      contEl.innerHTML = `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando archivo histórico completo...</div>`;
+      await cargarDatos(true);
+    } else {
+      renderNotas();
+    }
   });
 
   root.querySelector("#btnCerrarCajaHist").addEventListener("click", cerrarCajaDia);
   busqEl.addEventListener("input", renderNotas);
 
-  async function cargarDatos() {
-    const [snapNotas, snapCat, snapCierres] = await Promise.all([
-      getDocs(refs.notasEntrega()),
-      getDocs(refs.catalogo()),
-      getDocs(cierresCol)
-    ]);
-    notas = snapNotas.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
-    catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
-    cierres = snapCierres.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.cerradoTs || 0) - (a.cerradoTs || 0));
+  async function cargarDatos(cargarTodo = false) {
+    if (cargarTodo) {
+      const snapNotas = await getDocs(refs.notasEntrega());
+      notas = snapNotas.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
+      archivoCompletoCargado = true;
+    } else {
+      const snapAbiertas = await getDocs(query(refs.notasEntrega(), where("cierreId", "==", null)));
+      notas = snapAbiertas.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
+    }
     renderNotas();
   }
 
-  await cargarDatos();
+  await cargarDatos(false);
 }
