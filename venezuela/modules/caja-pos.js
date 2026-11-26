@@ -230,6 +230,10 @@ export async function mount(root, state) {
                 <span>Total Bs. (BCV)</span>
                 <span id="posTotalBs" class="font-mono-ve">Bs. 0.00</span>
               </div>
+              <div class="flex justify-between text-[11px] font-bold text-slate-400">
+                <span>Ref. USDT (Binance P2P)</span>
+                <span id="posTotalUsdt" class="font-mono-ve">0.00 USDT</span>
+              </div>
             </div>
 
             <div class="pt-2 border-t border-slate-200 space-y-2">
@@ -271,9 +275,24 @@ export async function mount(root, state) {
                 <span id="lblRestante" class="text-slate-500">Restante por cubrir:</span>
                 <span id="posRestante" class="font-mono-ve text-rose-600">$0.00</span>
               </div>
-              <div id="filaSobrepago" class="hidden flex justify-between text-[11px] font-bold text-emerald-700">
-                <span>Sobrepago irá a saldo a favor:</span>
-                <span id="posSobrepago" class="font-mono-ve">+$0.00</span>
+
+              <!-- Calculadora Atómica de Vuelto / Cambio vs Saldo a Favor -->
+              <div id="panelVueltoCambio" class="hidden p-2.5 rounded-xl bg-sky-50 border border-sky-200 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] font-extrabold text-sky-950">Cambio / Excedente:</span>
+                  <div class="text-right">
+                    <div id="posVueltoUsd" class="font-mono-ve text-sm font-extrabold text-sky-900">$0.00</div>
+                    <div id="posVueltoBs" class="font-mono-ve text-[10px] font-bold text-sky-700">Bs. 0.00</div>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button type="button" id="btnExcedenteVuelto" class="py-1.5 px-2 rounded-lg text-[11px] font-extrabold bg-sky-700 text-white cursor-pointer">
+                    💵 Entregar Vuelto
+                  </button>
+                  <button type="button" id="btnExcedenteFavor" class="py-1.5 px-2 rounded-lg text-[11px] font-extrabold bg-white border border-sky-300 text-sky-900 cursor-pointer">
+                    💾 Dejar Saldo a Favor
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -314,6 +333,7 @@ export async function mount(root, state) {
   let deudaActualCliente = 0;
   let limiteCreditoCliente = 0;
   let usarSaldoFavorEnNota = true;
+  let modoExcedente = "vuelto"; // "vuelto" | "favor"
   let monedaVistaFavor = "USD";
   let cotizacionOrigenId = null;
   let emitiendo = false;
@@ -364,6 +384,28 @@ export async function mount(root, state) {
     return Math.max(0, Number((totalVenta() - montoDescuentoFavorActual()).toFixed(2)));
   }
 
+  function actualizarBotonesExcedente() {
+    const btnV = root.querySelector("#btnExcedenteVuelto");
+    const btnF = root.querySelector("#btnExcedenteFavor");
+    if (modoExcedente === "vuelto") {
+      btnV.className = "py-1.5 px-2 rounded-lg text-[11px] font-extrabold bg-sky-700 text-white cursor-pointer";
+      btnF.className = "py-1.5 px-2 rounded-lg text-[11px] font-extrabold bg-white border border-sky-300 text-sky-900 cursor-pointer";
+    } else {
+      btnF.className = "py-1.5 px-2 rounded-lg text-[11px] font-extrabold bg-emerald-700 text-white cursor-pointer";
+      btnV.className = "py-1.5 px-2 rounded-lg text-[11px] font-extrabold bg-white border border-sky-300 text-sky-900 cursor-pointer";
+    }
+  }
+
+  root.querySelector("#btnExcedenteVuelto").addEventListener("click", () => {
+    modoExcedente = "vuelto";
+    actualizarBotonesExcedente();
+  });
+
+  root.querySelector("#btnExcedenteFavor").addEventListener("click", () => {
+    modoExcedente = "favor";
+    actualizarBotonesExcedente();
+  });
+
   function actualizarBotonesDecisionFavor() {
     const btnUsar = root.querySelector("#btnDecidirUsarFavor");
     const btnGuardar = root.querySelector("#btnDecidirGuardarFavor");
@@ -403,7 +445,6 @@ export async function mount(root, state) {
       pendientes.reduce((acc, n) => acc + Number(n.saldoPendienteUsd || 0), 0).toFixed(2)
     );
 
-    // Panel de límite de crédito editable
     limiteBox.classList.remove("hidden");
     if (limiteCreditoCliente > 0) {
       const cupo = Number((limiteCreditoCliente - deudaActualCliente).toFixed(2));
@@ -417,7 +458,6 @@ export async function mount(root, state) {
     }
     inpLimitePos.value = limiteCreditoCliente.toFixed(2);
 
-    // Panel saldo a favor
     if (saldoFavorDisponible > 0.01) {
       const cliNombre = nomEl.value.trim() || cli?.nombre || docId;
       const tasas = getTasaActiva(state);
@@ -439,7 +479,6 @@ export async function mount(root, state) {
       favorBox.classList.add("hidden");
     }
 
-    // Alerta deuda acumulada
     if (!pendientes.length) {
       alertaBox.classList.add("hidden");
     } else {
@@ -519,6 +558,8 @@ export async function mount(root, state) {
 
     root.querySelector("#posTotalUsd").textContent = `$${total.toFixed(2)}`;
     root.querySelector("#posTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
+    const convUsdt = convertirUsdAMoneda(total, "USDT", tasas);
+    root.querySelector("#posTotalUsdt").textContent = convUsdt.texto;
 
     const filaDesc = root.querySelector("#filaDescuentoFavor");
     const filaNeto = root.querySelector("#filaNetoPagar");
@@ -534,7 +575,7 @@ export async function mount(root, state) {
 
     const cubierto = pagos.reduce((acc, p) => acc + Number(p.montoUsd || 0), 0);
     const restante = Math.max(0, Number((objetivo - cubierto).toFixed(2)));
-    const sobrepago = Math.max(0, Number((cubierto - objetivo).toFixed(2)));
+    const excedente = Math.max(0, Number((cubierto - objetivo).toFixed(2)));
 
     const restEl = root.querySelector("#posRestante");
     restEl.textContent = `$${restante.toFixed(2)}`;
@@ -542,15 +583,18 @@ export async function mount(root, state) {
       ? "font-mono-ve text-amber-800"
       : (restante <= 0.01 ? "font-mono-ve text-emerald-700" : "font-mono-ve text-rose-600");
 
-    const filaSobre = root.querySelector("#filaSobrepago");
-    if (sobrepago > 0.01) {
-      filaSobre.classList.remove("hidden");
-      root.querySelector("#posSobrepago").textContent = `+$${sobrepago.toFixed(2)}`;
+    const panelVuelto = root.querySelector("#panelVueltoCambio");
+    if (excedente > 0.01) {
+      panelVuelto.classList.remove("hidden");
+      root.querySelector("#posVueltoUsd").textContent = `$${excedente.toFixed(2)}`;
+      root.querySelector("#posVueltoBs").textContent = tasas.bcvActiva
+        ? `Bs. ${(excedente * tasas.bcvActiva).toFixed(2)} (BCV)`
+        : "Bs. --";
+      actualizarBotonesExcedente();
     } else {
-      filaSobre.classList.add("hidden");
+      panelVuelto.classList.add("hidden");
     }
 
-    // Alerta visual si el crédito supera el límite configurado
     const alertaLim = root.querySelector("#alertaExcesoLimite");
     if (esCredito && limiteCreditoCliente > 0 && (deudaActualCliente + restante) > limiteCreditoCliente + 0.01) {
       const proyectada = Number((deudaActualCliente + restante).toFixed(2));
@@ -904,6 +948,7 @@ export async function mount(root, state) {
     esCredito = false;
     diasCredito = 15;
     usarSaldoFavorEnNota = true;
+    modoExcedente = "vuelto";
     cotizacionOrigenId = null;
     pagos = [{ metodo: "Efectivo USD", montoUsd: 0, referencia: "" }];
     actualizarEstadoCreditoUI();
@@ -921,7 +966,7 @@ export async function mount(root, state) {
     const objetivoHoy = Math.max(0, Number((totalUsd - usadoFavor).toFixed(2)));
     const tasas = getTasaActiva(state);
 
-    const pagosValidos = pagos
+    let pagosValidos = pagos
       .filter((p) => Number(p.montoUsd) > 0)
       .map((p) => ({
         metodo: p.metodo,
@@ -930,9 +975,14 @@ export async function mount(root, state) {
         referencia: String(p.referencia || "").trim()
       }));
 
-    const totalPagadoHoy = Number(pagosValidos.reduce((acc, p) => acc + p.montoUsd, 0).toFixed(2));
-    const restanteHoy = Math.max(0, Number((objetivoHoy - totalPagadoHoy).toFixed(2)));
-    const sobrepagoGenerado = Math.max(0, Number((totalPagadoHoy - objetivoHoy).toFixed(2)));
+    const totalEntregadoHoy = Number(pagosValidos.reduce((acc, p) => acc + p.montoUsd, 0).toFixed(2));
+    const restanteHoy = Math.max(0, Number((objetivoHoy - totalEntregadoHoy).toFixed(2)));
+    const excedente = Math.max(0, Number((totalEntregadoHoy - objetivoHoy).toFixed(2)));
+
+    // Si el excedente se entrega como vuelto, no va a saldo a favor y se descuenta del efectivo guardado en caja
+    const vueltoEntregadoUsd = excedente > 0.01 && modoExcedente === "vuelto" ? excedente : 0;
+    const sobrepagoGenerado = excedente > 0.01 && modoExcedente === "favor" ? excedente : 0;
+
     const docCli = normalizarIdVE(docEl.value) || "V-00000000";
     const nomCli = nomEl.value.trim() || "Consumidor Final";
 
@@ -940,17 +990,28 @@ export async function mount(root, state) {
       return alert(`Faltan $${restanteHoy.toFixed(2)} por cubrir en Formas de Pago. Completa el pago o cambia la condición a Crédito.`);
     }
     if (sobrepagoGenerado > 0.01 && docCli === "V-00000000") {
-      return alert(`Hay un sobrepago de +$${sobrepagoGenerado.toFixed(2)}. Ingresa la Cédula/RIF real del cliente para guardarle el saldo a favor, o ajusta el monto pagado.`);
+      return alert(`Para dejar +$${sobrepagoGenerado.toFixed(2)} como Saldo a Favor debes ingresar la Cédula/RIF real del cliente (o selecciona "Entregar Vuelto").`);
     }
     if (esCredito && restanteHoy > 0.01 && docCli === "V-00000000") {
       return alert("Para emitir una nota a Crédito debes ingresar la Cédula o RIF del cliente.");
     }
 
-    // Confirmación editable si supera el límite de crédito configurado
     if (esCredito && limiteCreditoCliente > 0 && (deudaActualCliente + restanteHoy) > limiteCreditoCliente + 0.01) {
       const proyectada = Number((deudaActualCliente + restanteHoy).toFixed(2));
       if (!confirm(`⚠️ ${nomCli} supera su límite de crédito ($${limiteCreditoCliente.toFixed(2)}).\nSu deuda total quedaría en $${proyectada.toFixed(2)}.\n\n¿Autorizar y emitir esta nota de todas formas?`)) {
         return;
+      }
+    }
+
+    // Si entregó vuelto en efectivo, ajustar el neto que realmente quedó en caja en el último pago
+    if (vueltoEntregadoUsd > 0.01 && pagosValidos.length) {
+      let porRestar = vueltoEntregadoUsd;
+      for (let i = pagosValidos.length - 1; i >= 0 && porRestar > 0.005; i--) {
+        const desc = Math.min(pagosValidos[i].montoUsd, porRestar);
+        pagosValidos[i].recibidoUsd = pagosValidos[i].montoUsd;
+        pagosValidos[i].montoUsd = Number((pagosValidos[i].montoUsd - desc).toFixed(2));
+        pagosValidos[i].montoBs = tasas.bcvActiva ? Number((pagosValidos[i].montoUsd * tasas.bcvActiva).toFixed(2)) : 0;
+        porRestar = Number((porRestar - desc).toFixed(2));
       }
     }
 
@@ -968,7 +1029,6 @@ export async function mount(root, state) {
       const jornadaId = state.empresa?.jornadaActivaId || new Date().toISOString().slice(0, 10);
       const cotIdAEliminar = cotizacionOrigenId;
 
-      // Transacción atómica: folio único + stock atómico + saldo a favor + eliminación de cotización
       const { folio, nuevoNum } = await runTransaction(db, async (tx) => {
         const empSnap = await tx.get(refs.empresaRef);
         const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || 0);
@@ -992,6 +1052,7 @@ export async function mount(root, state) {
           cliente: { documento: docCli, nombre: nomCli },
           items: carrito,
           pagos: pagosValidos,
+          vueltoEntregadoUsd,
           saldoFavorAplicadoUsd: usadoFavor,
           saldoFavorDejadoAparte: !usarSaldoFavorEnNota && saldoFavorDisponible > 0.01,
           sobrepagoUsd: sobrepagoGenerado,
@@ -1053,7 +1114,6 @@ export async function mount(root, state) {
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
       actualizarFolioUI();
 
-      // Refresco local optimista de stock y recarga ligera solo de deudas activas y clientes
       for (const it of carrito) {
         const prod = catalogo.find((p) => p.id === it.id);
         if (prod && it.origen === "almacen") {
@@ -1075,6 +1135,7 @@ export async function mount(root, state) {
       const formato = root.querySelector("#posFormatoPrint").value;
       const partesObs = [];
       if (usadoFavor > 0.01) partesObs.push(`Saldo a favor descontado: $${usadoFavor.toFixed(2)}.`);
+      if (vueltoEntregadoUsd > 0.01) partesObs.push(`Vuelto entregado: $${vueltoEntregadoUsd.toFixed(2)}.`);
       if (sobrepagoGenerado > 0.01) partesObs.push(`Sobrepago acreditado a saldo a favor: +$${sobrepagoGenerado.toFixed(2)}.`);
       if (esCredito && saldoPendienteUsd > 0.01) {
         partesObs.push(`Venta a crédito (${diasCredito} días). Saldo pendiente: $${saldoPendienteUsd.toFixed(2)}.`);
