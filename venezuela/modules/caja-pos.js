@@ -67,10 +67,14 @@ export async function mount(root, state) {
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input id="posCliDoc" type="text" placeholder="Cédula / RIF (F2)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
               <input id="posCliNom" type="text" placeholder="Nombre / Razón Social" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-              <select id="posTarifa" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold">
-                <option value="detal">Detal (×${fDetal})</option>
-                <option value="mayor">Mayor (×${fMayor})</option>
-              </select>
+              <div class="flex gap-1.5">
+                <select id="posTarifa" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
+                  <option value="detal">Detal (×${fDetal})</option>
+                  <option value="mayor">Mayor (×${fMayor})</option>
+                  <option value="custom">Mult.</option>
+                </select>
+                <input id="posMult" type="number" step="0.05" min="0.1" value="${fDetal}" title="Multiplicador libre sobre costo" class="w-20 bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-mono-ve font-extrabold text-center" />
+              </div>
             </div>
           </div>
 
@@ -186,11 +190,27 @@ export async function mount(root, state) {
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
   const tarifaEl = root.querySelector("#posTarifa");
+  const multEl = root.querySelector("#posMult");
   const busqEl = root.querySelector("#posBusq");
   const resEl = root.querySelector("#posResultados");
   const cartEl = root.querySelector("#posCarrito");
   const pagosEl = root.querySelector("#posPagos");
   const alertaBox = root.querySelector("#alertaDeudaCliente");
+
+  function aplicarFactorPos(nuevoFactor) {
+    const val = Number(nuevoFactor);
+    if (isNaN(val) || val <= 0) return;
+    factorActual = val;
+    multEl.value = String(val);
+    if (carrito.length) {
+      carrito = carrito.map((it) => ({
+        ...it,
+        precioUsd: Number(((it.costoUsd || 0) * factorActual).toFixed(2))
+      }));
+      renderCarrito();
+    }
+    renderBusqueda();
+  }
 
   function actualizarFolioUI() {
     root.querySelector("#nextFolioTxt").textContent = String(ultimoFolio + 1).padStart(5, "0");
@@ -499,15 +519,22 @@ export async function mount(root, state) {
     if (cli) {
       docEl.value = cli.id;
       if (!nomEl.value.trim()) nomEl.value = cli.nombre || "";
-      factorActual = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
-      renderBusqueda();
+      const fCli = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
+      tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
+      aplicarFactorPos(fCli);
     }
     chequearDeudaClienteActual();
   });
 
   tarifaEl.addEventListener("change", () => {
-    factorActual = tarifaEl.value === "mayor" ? fMayor : fDetal;
-    renderBusqueda();
+    if (tarifaEl.value === "mayor") aplicarFactorPos(fMayor);
+    else if (tarifaEl.value === "detal") aplicarFactorPos(fDetal);
+    else multEl.focus();
+  });
+
+  multEl.addEventListener("input", () => {
+    tarifaEl.value = "custom";
+    aplicarFactorPos(multEl.value);
   });
 
   function limpiarCaja() {
@@ -563,6 +590,7 @@ export async function mount(root, state) {
         totalUsd,
         costoTotalUsd,
         utilidadUsd,
+        multiplicador: factorActual,
         tasaBcvUsada: tasas.bcvActiva,
         monedas: monedas.length ? monedas : ["USD", "BS"],
         usuario: state.sesion.usuario || "Administrador",
@@ -571,6 +599,7 @@ export async function mount(root, state) {
 
       batch.set(refs.empresaRef, { correlativos: { notaEntregaActual: nuevoNum } }, { merge: true });
 
+      // Descuenta SOLO lo vendido desde Almacén; lo de Planta NO se descuenta de Planta
       for (const it of carrito) {
         if (it.origen === "almacen") {
           const prod = catalogo.find((p) => p.id === it.id);
@@ -578,6 +607,11 @@ export async function mount(root, state) {
           if (prod) prod.stockAlmacen = nuevoStock;
           batch.set(doc(refs.catalogo(), it.id), {
             stockAlmacen: nuevoStock,
+            ultimaVentaTs: now
+          }, { merge: true });
+        } else {
+          batch.set(doc(refs.catalogo(), it.id), {
+            pedidosPlantaCount: (catalogo.find((p) => p.id === it.id)?.pedidosPlantaCount || 0) + Number(it.cantidad || 1),
             ultimaVentaTs: now
           }, { merge: true });
         }
@@ -588,7 +622,6 @@ export async function mount(root, state) {
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
       actualizarFolioUI();
 
-      // Refrescar caché de notas y alertas
       const snapNotas = await getDocs(refs.notasEntrega());
       todasNotas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (typeof window.NEXUS_VE_REFRESH_ALERTAS === "function") {
@@ -661,6 +694,7 @@ export async function mount(root, state) {
     state.cotizacionPendiente = null;
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
+    if (cot.multiplicador) aplicarFactorPos(cot.multiplicador);
     carrito = (cot.items || []).map((it) => ({ ...it }));
     chequearDeudaClienteActual();
   }
