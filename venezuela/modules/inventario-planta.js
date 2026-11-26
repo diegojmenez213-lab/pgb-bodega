@@ -4,9 +4,9 @@ import {
   getTenantRefs,
   doc,
   getDocs,
-  updateDoc,
   runTransaction,
   increment,
+  normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
 import { abrirDocumentoPDF } from "./documentos-pdf.js";
@@ -53,7 +53,6 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Modal / Panel de Edición para notas del día en curso -->
       <div id="panelEditarNota" class="hidden ve-card border-2 border-sky-400 bg-sky-50/40 p-4 space-y-3">
         <div class="flex items-center justify-between gap-2 border-b border-sky-200 pb-2">
           <div>
@@ -277,9 +276,18 @@ export async function mount(root, state) {
       }));
 
     const pagadoHoy = Number(pagosLimpios.reduce((acc, p) => acc + p.montoUsd, 0).toFixed(2));
-    const descFavor = Number(notaEnEdicion.saldoFavorAplicadoUsd || 0);
-    const objetivoHoy = Math.max(0, Number((totalUsd - descFavor).toFixed(2)));
+    const descFavorPrevio = Number(notaEnEdicion.saldoFavorAplicadoUsd || 0);
+    const sobrepagoPrevio = Number(notaEnEdicion.sobrepagoUsd || 0);
+    const docCli = normalizarIdVE(notaEnEdicion.cliente?.documento || "");
+
+    const descFavorNuevo = (docCli && docCli !== "V-00000000")
+      ? Math.min(descFavorPrevio, totalUsd)
+      : 0;
+    const objetivoHoy = Math.max(0, Number((totalUsd - descFavorNuevo).toFixed(2)));
     const restante = Math.max(0, Number((objetivoHoy - pagadoHoy).toFixed(2)));
+    const sobrepagoNuevo = (!esCre && pagadoHoy > objetivoHoy + 0.01 && docCli && docCli !== "V-00000000")
+      ? Number((pagadoHoy - objetivoHoy).toFixed(2))
+      : 0;
 
     if (!esCre && restante > 0.01) {
       return alert(`Faltan $${restante.toFixed(2)} por cubrir o cambia la condición a Crédito.`);
@@ -302,7 +310,6 @@ export async function mount(root, state) {
           throw new Error("La nota ya fue anulada o cerrada.");
         }
 
-        // 1. Revertir efecto anterior en catálogo
         for (const oldIt of anteriores) {
           const idProd = oldIt.prodId || oldIt.id;
           if (!idProd) continue;
@@ -315,7 +322,6 @@ export async function mount(root, state) {
           }
         }
 
-        // 2. Aplicar nuevo efecto en catálogo
         for (const newIt of itemsEdicion) {
           const idProd = newIt.prodId || newIt.id;
           if (!idProd) continue;
@@ -326,6 +332,20 @@ export async function mount(root, state) {
           } else {
             tx.set(doc(refs.catalogo(), idProd), { pedidosPlantaCount: increment(cantNew) }, { merge: true });
           }
+        }
+
+        if (docCli && docCli !== "V-00000000") {
+          const cliRef = doc(refs.clientes(), docCli);
+          const cliSnap = await tx.get(cliRef);
+          const favorActualCli = Number(cliSnap.data()?.saldoAFavorUsd || 0);
+          const deltaFavor = descFavorPrevio - sobrepagoPrevio - descFavorNuevo + sobrepagoNuevo;
+          const favorFinalCli = Math.max(0, Number((favorActualCli + deltaFavor).toFixed(2)));
+          tx.set(cliRef, {
+            documento: docCli,
+            nombre: notaEnEdicion.cliente?.nombre || docCli,
+            saldoAFavorUsd: favorFinalCli,
+            actualizadoEn: serverTimestamp()
+          }, { merge: true });
         }
 
         const costoTotalUsd = Number(
@@ -340,6 +360,8 @@ export async function mount(root, state) {
           totalUsd,
           costoTotalUsd,
           utilidadUsd,
+          saldoFavorAplicadoUsd: descFavorNuevo,
+          sobrepagoUsd: sobrepagoNuevo,
           esCredito: esCre && saldoPendienteUsd > 0.01,
           diasCredito: esCre ? diasCre : 0,
           saldoPendienteUsd,
