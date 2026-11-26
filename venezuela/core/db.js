@@ -1,5 +1,5 @@
 // venezuela/core/db.js
-import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore,
@@ -30,7 +30,7 @@ const firebaseConfig = {
   appId: "1:497839332750:web:bb1e6003a603d60cafd8df"
 };
 
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
@@ -48,7 +48,8 @@ asegurarAuthVE();
  * Ej: "j-50343856-8" -> "J-50343856-8" | "20504570" -> "V-20504570"
  */
 export function normalizarIdVE(raw = "") {
-  const limpio = String(raw).trim().toUpperCase().replace(/\s+/g, "");
+  const limpio = String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+  if (!limpio) return "";
   if (/^[VEJGP]-\d+/.test(limpio)) return limpio;
   if (/^[VEJGP]\d+/.test(limpio)) return `${limpio[0]}-${limpio.slice(1)}`;
   if (/^\d{6,9}$/.test(limpio)) return `V-${limpio}`;
@@ -68,11 +69,11 @@ export function getTenantRefs(tenantId) {
     empresaRef,
     catalogo: () => collection(db, "empresas", id, "catalogo"),
     clientes: () => collection(db, "empresas", id, "clientes"),
+    proveedores: () => collection(db, "empresas", id, "proveedores"),
     cotizaciones: () => collection(db, "empresas", id, "cotizaciones"),
     notasEntrega: () => collection(db, "empresas", id, "notas_entrega"),
     historialNovedades: () => collection(db, "empresas", id, "historial_novedades"),
     conteos: () => collection(db, "empresas", id, "conteos"),
-    proveedores: () => collection(db, "empresas", id, "proveedores"),
     cierresCaja: () => collection(db, "empresas", id, "cierresCaja"),
     gastosCaja: () => collection(db, "empresas", id, "gastosCaja"),
     tasasGlobales: () => doc(db, "sistema_ve", "tasas_live")
