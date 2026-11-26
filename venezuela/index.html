@@ -137,7 +137,7 @@
 
   <script type="module">
     import { verificarAccesoVE, cerrarSesionVE } from "./core/auth-tenant.js";
-    import { getTenantRefs, getDocs } from "./core/db.js";
+    import { getTenantRefs, getDocs, query, where } from "./core/db.js";
 
     const TEMAS_GUARDADOS = {
       "ejecutivo-oscuro": { p: "#0f172a", ps: "#1e293b", a: "#059669", f: "#f8fafc", s: "#ffffff", b: "#cbd5e1" },
@@ -225,7 +225,7 @@
       if (!state.sesion?.tenantId) return;
       try {
         const refs = getTenantRefs(state.sesion.tenantId);
-        const snap = await getDocs(refs.notasEntrega());
+        const snap = await getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0)));
         const ahora = Date.now();
         let vencidos = 0;
 
