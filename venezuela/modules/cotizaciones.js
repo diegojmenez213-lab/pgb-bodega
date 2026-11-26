@@ -18,6 +18,29 @@ function getTasaActiva(state) {
   return { ...t, bcvActiva: Number(bcv || 0) };
 }
 
+function formatearEntradaMoneda(inputEl) {
+  const digitos = String(inputEl.value || "").replace(/\D/g, "");
+  const centavos = parseInt(digitos || "0", 10);
+  const valor = Number((centavos / 100).toFixed(2));
+  const texto = valor.toFixed(2);
+  inputEl.value = texto;
+  requestAnimationFrame(() => {
+    try {
+      inputEl.setSelectionRange(texto.length, texto.length);
+    } catch {}
+  });
+  return valor;
+}
+
+function fijarCursorAlFinal(inputEl) {
+  requestAnimationFrame(() => {
+    try {
+      const len = inputEl.value.length;
+      inputEl.setSelectionRange(len, len);
+    } catch {}
+  });
+}
+
 function parseMultiplicadorTexto(raw) {
   const limpio = String(raw || "").replace(",", ".").trim();
   if (!limpio || limpio === "." || limpio.endsWith(".")) return null;
@@ -181,6 +204,15 @@ export async function mount(root, state) {
     return carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
   }
 
+  function actualizarTotalesCotUI() {
+    const total = calcularTotal();
+    const tasas = getTasaActiva(state);
+    const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
+    root.querySelector("#cotCantItemsBadge").textContent = String(totalUnds);
+    root.querySelector("#cotTotalUsd").textContent = `$${total.toFixed(2)}`;
+    root.querySelector("#cotTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
+  }
+
   function agregarProductoCotizacion(prodId, cantAgregar = 1) {
     const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
     if (!p) return;
@@ -209,12 +241,7 @@ export async function mount(root, state) {
   }
 
   function renderCarrito() {
-    const total = calcularTotal();
-    const tasas = getTasaActiva(state);
-    const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
-    root.querySelector("#cotCantItemsBadge").textContent = String(totalUnds);
-    root.querySelector("#cotTotalUsd").textContent = `$${total.toFixed(2)}`;
-    root.querySelector("#cotTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
+    actualizarTotalesCotUI();
 
     if (!carrito.length) {
       itemsEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Agrega productos desde el buscador.</div>`;
@@ -238,9 +265,9 @@ export async function mount(root, state) {
           </div>
           <div class="flex items-center gap-1">
             <span class="text-[10px] font-bold text-slate-500">$</span>
-            <input type="number" step="0.01" min="0" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
+            <input type="text" inputmode="numeric" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
           </div>
-          <div class="font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
+          <div class="item-subtotal font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
         </div>
       </div>
     `).join("");
@@ -298,6 +325,10 @@ export async function mount(root, state) {
     agregarProductoCotizacion(prodId, 1);
   });
 
+  itemsEl.addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("inp-prec")) fijarCursorAlFinal(e.target);
+  });
+
   itemsEl.addEventListener("input", (e) => {
     const row = e.target.closest("[data-idx]");
     if (!row) return;
@@ -305,12 +336,18 @@ export async function mount(root, state) {
     if (e.target.classList.contains("inp-cant")) {
       carrito[idx].cantidad = Math.max(1, parseInt(e.target.value, 10) || 1);
     } else if (e.target.classList.contains("inp-prec")) {
-      carrito[idx].precioUsd = Math.max(0, parseFloat(e.target.value) || 0);
+      carrito[idx].precioUsd = formatearEntradaMoneda(e.target);
     }
-    renderCarrito();
+    const subEl = row.querySelector(".item-subtotal");
+    if (subEl) subEl.textContent = `$${(carrito[idx].cantidad * carrito[idx].precioUsd).toFixed(2)}`;
+    actualizarTotalesCotUI();
   });
 
   itemsEl.addEventListener("click", (e) => {
+    if (e.target.classList.contains("inp-prec")) {
+      fijarCursorAlFinal(e.target);
+      return;
+    }
     const row = e.target.closest("[data-idx]");
     if (!row) return;
     const idx = Number(row.dataset.idx);
@@ -429,7 +466,6 @@ export async function mount(root, state) {
     alert(`Cotización ${saved.folio} guardada (válida por 72 horas).`);
   });
 
-  // Genera el PDF manteniendo tu carrito intacto por si quieres seguir ajustando o guardarlo luego
   root.querySelector("#btnGenerarPdfCot").addEventListener("click", async () => {
     const saved = await persistirCotizacion();
     if (!saved) return;
