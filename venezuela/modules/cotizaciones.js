@@ -168,6 +168,7 @@ export async function mount(root, state) {
   let carrito = [];
   let factorActual = fDetal;
   let busqAbierta = false;
+  let folioActivoEnEdicion = null;
 
   const docEl = root.querySelector("#cotCliDoc");
   const nomEl = root.querySelector("#cotCliNom");
@@ -182,9 +183,7 @@ export async function mount(root, state) {
     const val = parseMultiplicadorTexto(nuevoFactor);
     if (val === null) return;
     factorActual = val;
-    if (sincronizarInput) {
-      multEl.value = String(val);
-    }
+    if (sincronizarInput) multEl.value = String(val);
     if (actualizarCarrito && carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
@@ -321,8 +320,7 @@ export async function mount(root, state) {
     if (!target) return;
     e.preventDefault();
     e.stopPropagation();
-    const prodId = decodeURIComponent(target.dataset.id || "");
-    agregarProductoCotizacion(prodId, 1);
+    agregarProductoCotizacion(decodeURIComponent(target.dataset.id || ""), 1);
   });
 
   itemsEl.addEventListener("focusin", (e) => {
@@ -358,13 +356,14 @@ export async function mount(root, state) {
       carrito[idx].cantidad += 1;
       renderCarrito();
     } else if (e.target.closest(".btn-menos")) {
-      if (carrito[idx].cantidad > 1) {
-        carrito[idx].cantidad -= 1;
-      } else {
-        carrito.splice(idx, 1);
-      }
+      if (carrito[idx].cantidad > 1) carrito[idx].cantidad -= 1;
+      else carrito.splice(idx, 1);
       renderCarrito();
     }
+  });
+
+  docEl.addEventListener("input", () => {
+    folioActivoEnEdicion = null;
   });
 
   docEl.addEventListener("blur", () => {
@@ -406,6 +405,7 @@ export async function mount(root, state) {
 
   root.querySelector("#btnLimpiarCot").addEventListener("click", () => {
     carrito = [];
+    folioActivoEnEdicion = null;
     renderCarrito();
   });
 
@@ -438,7 +438,10 @@ export async function mount(root, state) {
       return null;
     }
 
-    const folio = `COT-${String(Date.now()).slice(-6)}`;
+    // Reutiliza el mismo folio si ya se guardó esta cotización en pantalla
+    const folio = folioActivoEnEdicion || `COT-${String(Date.now()).slice(-6)}`;
+    folioActivoEnEdicion = folio;
+
     const now = Date.now();
     const tasasAct = getTasaActiva(state);
     const payload = {
