@@ -424,40 +424,48 @@ export async function mount(root, state) {
         </div>
       </div>
 
-      <!-- Registro de cambios inteligente (Última Actualización) -->
+      <!-- Registro de cambios inteligente SEPARADO POR PROVEEDOR -->
       <div id="panelCambiosPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Novedades de la Última Actualización Excel</h2>
+            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Últimas Novedades por Proveedor</h2>
             <p id="metaUltimaAct" class="text-[11px] text-sky-800 font-semibold"></p>
           </div>
-          <div class="flex flex-wrap items-center gap-1.5">
-            <div id="resumenBadgesCambios" class="flex flex-wrap gap-1.5 text-[11px] font-extrabold"></div>
-            <button id="btnLimpiarNovedades" type="button" class="px-2.5 py-1 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-extrabold cursor-pointer">
-              ✕ Limpiar
-            </button>
-          </div>
+          <button id="btnLimpiarNovedades" type="button" class="px-2.5 py-1 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-extrabold cursor-pointer">
+            ✕ Limpiar este reporte
+          </button>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
-          <div class="bg-white rounded-xl border border-amber-300 p-2.5 space-y-1">
-            <div class="font-extrabold text-amber-900">📈 Subieron de Precio Costo</div>
-            <div id="listSubieronPrecio" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
-          </div>
+        <!-- Pestañas de proveedores con reporte vigente -->
+        <div id="tabsReportesProv" class="flex flex-wrap gap-1.5"></div>
 
-          <div class="bg-white rounded-xl border border-emerald-200 p-2.5 space-y-1">
-            <div class="font-extrabold text-emerald-800">✦ Productos Nuevos (con Costo)</div>
-            <div id="listNuevosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
-          </div>
+        <!-- Aviso limpio cuando fue Carga Inicial -->
+        <div id="boxCargaInicial" class="hidden p-3 rounded-xl bg-white border border-emerald-200 text-xs text-slate-700"></div>
 
-          <div class="bg-white rounded-xl border border-sky-200 p-2.5 space-y-1">
-            <div class="font-extrabold text-sky-800">↑ No Había y Ahora Sí (Reingresos)</div>
-            <div id="listLlegaronPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
-          </div>
+        <!-- Badges + Grid de cambios (solo para actualizaciones posteriores) -->
+        <div id="boxCambiosDetalle" class="space-y-2.5">
+          <div id="resumenBadgesCambios" class="flex flex-wrap gap-1.5 text-[11px] font-extrabold"></div>
 
-          <div class="bg-white rounded-xl border border-rose-200 p-2.5 space-y-1">
-            <div class="font-extrabold text-rose-800">↓ Había Antes y Ya No Hay</div>
-            <div id="listAgotadosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+            <div class="bg-white rounded-xl border border-amber-300 p-2.5 space-y-1">
+              <div class="font-extrabold text-amber-900">📈 Subieron de Precio Costo</div>
+              <div id="listSubieronPrecio" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-emerald-200 p-2.5 space-y-1">
+              <div class="font-extrabold text-emerald-800">✦ Productos Nuevos (con Costo)</div>
+              <div id="listNuevosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-sky-200 p-2.5 space-y-1">
+              <div class="font-extrabold text-sky-800">↑ No Había y Ahora Sí (Reingresos)</div>
+              <div id="listLlegaronPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-rose-200 p-2.5 space-y-1">
+              <div class="font-extrabold text-rose-800">↓ Había Antes y Ya No Hay</div>
+              <div id="listAgotadosPlanta" class="max-h-40 overflow-y-auto space-y-1 text-[11px] text-slate-700"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -471,7 +479,8 @@ export async function mount(root, state) {
 
   let productos = [];
   let proveedores = [];
-  let ultimoReportePlanta = null;
+  let reportesPorProv = new Map(); // provId -> reporte
+  let provReporteActivo = null;
   let origen = "almacen";
   let proveedorActivoSubida = "";
 
@@ -560,7 +569,6 @@ export async function mount(root, state) {
     const norm = normalizarTexto(nombreLimpio);
     const existente = proveedores.find((p) => normalizarTexto(p.nombre) === norm);
 
-    // Si hay un proveedor muy parecido, pregunta para evitar duplicados
     if (!existente) {
       const parecido = proveedores.find((p) => {
         const np = normalizarTexto(p.nombre);
@@ -591,29 +599,69 @@ export async function mount(root, state) {
 
     tituloInv.textContent = esAlm ? "Inventario Almacén Físico" : "Inventario Planta (Por Proveedor)";
     btnAbrirExcel.textContent = esAlm ? "↑ Actualizar Excel Almacén (En 0)" : "↑ Actualizar Excel Planta";
-    panelCambios.classList.toggle("hidden", !ultimoReportePlanta);
   }
 
   function renderPanelCambios() {
-    if (!ultimoReportePlanta) {
+    const listaReportes = Array.from(reportesPorProv.values()).sort(
+      (a, b) => Number(b.actualizadoTs || 0) - Number(a.actualizadoTs || 0)
+    );
+
+    if (!listaReportes.length) {
       panelCambios.classList.add("hidden");
       return;
     }
+
+    if (!provReporteActivo || !reportesPorProv.has(provReporteActivo)) {
+      provReporteActivo = listaReportes[0].proveedorId;
+    }
+
     panelCambios.classList.remove("hidden");
-    const r = ultimoReportePlanta;
+
+    // Pestañas para cambiar entre proveedores
+    root.querySelector("#tabsReportesProv").innerHTML = listaReportes.map((rep) => {
+      const activo = rep.proveedorId === provReporteActivo;
+      return `
+        <button type="button" class="btn-tab-rep px-3 py-1 rounded-full text-[11px] font-extrabold cursor-pointer ${
+          activo ? "bg-slate-950 text-white" : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-100"
+        }" data-provid="${rep.proveedorId}">
+          ${rep.proveedor || rep.proveedorId}
+        </button>
+      `;
+    }).join("");
+
+    const r = reportesPorProv.get(provReporteActivo);
+    const boxInicial = root.querySelector("#boxCargaInicial");
+    const boxDetalle = root.querySelector("#boxCambiosDetalle");
+
+    const crucesInteligentes = Number(r.crucesInteligentes || 0);
+    root.querySelector("#metaUltimaAct").textContent =
+      `Proveedor: ${r.proveedor || "GENERAL"} • Archivo: ${r.archivo || "Excel"} • Fecha: ${r.fechaIso || "---"}${crucesInteligentes > 0 ? ` • ${crucesInteligentes} cruce(s) inteligente(s)` : ""}`;
+
+    if (r.esCargaInicial) {
+      boxInicial.classList.remove("hidden");
+      boxDetalle.classList.add("hidden");
+      boxInicial.innerHTML = `
+        <div class="font-extrabold text-emerald-800 mb-1">✓ Carga Inicial de ${r.proveedor}</div>
+        <div>
+          Se registraron <strong>${r.totalCargados || 0} productos</strong> con su precio costo, <strong>Almacén en 0</strong> (listo para conteo) y el <strong>stock de Planta</strong> enviado en el Excel.
+          La próxima vez que actualices a este proveedor, aquí verás automáticamente qué subió de precio, qué llegó y qué se agotó.
+        </div>
+      `;
+      return;
+    }
+
+    boxInicial.classList.add("hidden");
+    boxDetalle.classList.remove("hidden");
+
     const nuevos = r.nuevos || [];
     const llegaron = r.llegaron || [];
     const agotados = r.agotados || [];
     const subieronPrecio = r.subieronPrecio || [];
-    const crucesInteligentes = Number(r.crucesInteligentes || 0);
 
     const cntSub = r.totalSubieronPrecio ?? subieronPrecio.length;
     const cntNue = r.totalNuevos ?? nuevos.length;
     const cntLle = r.totalLlegaron ?? llegaron.length;
     const cntAgo = r.totalAgotados ?? agotados.length;
-
-    root.querySelector("#metaUltimaAct").textContent =
-      `Proveedor: ${r.proveedor || "GENERAL"} • Archivo: ${r.archivo || "Excel"} • Fecha: ${r.fechaIso || "---"}${crucesInteligentes > 0 ? ` • ${crucesInteligentes} cruce(s) inteligente(s)` : ""}`;
 
     root.querySelector("#resumenBadgesCambios").innerHTML = `
       <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900">Subió precio: ${cntSub}</span>
@@ -649,6 +697,13 @@ export async function mount(root, state) {
     root.querySelector("#listLlegaronPlanta").innerHTML = pintLista(llegaron, "Ningún producto sin existencia reingresó.", true);
     root.querySelector("#listAgotadosPlanta").innerHTML = pintLista(agotados, "Ningún producto pasó a sin existencia.", false);
   }
+
+  root.querySelector("#tabsReportesProv").addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-tab-rep");
+    if (!btn) return;
+    provReporteActivo = btn.dataset.provid;
+    renderPanelCambios();
+  });
 
   function poblarFiltros() {
     const cats = Array.from(new Set(productos.map((p) => p.categoria || "SIN CATEGORÍA"))).sort((a, b) => a.localeCompare(b, "es"));
@@ -791,16 +846,22 @@ export async function mount(root, state) {
       }
 
       const esAlmacen = origen === "almacen";
-      const msg = esAlmacen
-        ? `Proveedor: ${provNombre}\nSe cargarán ${itemsExcel.length} productos en Almacén (en 0 para conteo físico). ¿Continuar?`
-        : `Proveedor: ${provNombre}\nSe actualizará Planta con ${itemsExcel.length} productos (sin afectar a otros proveedores ni tu stock de Almacén). ¿Continuar?`;
+      const productosDelProveedor = productos.filter(
+        (p) => normalizarIdProveedor(p.proveedor || "") === provId || p.proveedorId === provId
+      );
+      const esCargaInicial = productosDelProveedor.length === 0;
+
+      const msg = esCargaInicial
+        ? `Carga Inicial para ${provNombre}:\nSe registrarán ${itemsExcel.length} productos con Almacén en 0 y el stock de Planta del Excel. ¿Continuar?`
+        : (esAlmacen
+          ? `Proveedor: ${provNombre}\nSe cargarán ${itemsExcel.length} productos en Almacén (en 0 para conteo físico). ¿Continuar?`
+          : `Proveedor: ${provNombre}\nSe actualizará Planta con ${itemsExcel.length} productos y se reemplazará el reporte de novedades anterior de este proveedor. ¿Continuar?`);
 
       if (!confirm(msg)) {
         progWrap.classList.add("hidden");
         return;
       }
 
-      // Guardar/actualizar proveedor en colección proveedores
       await setDoc(doc(refs.proveedores(), provId), {
         id: provId,
         nombre: provNombre,
@@ -808,10 +869,6 @@ export async function mount(root, state) {
         actualizadoEn: serverTimestamp()
       }, { merge: true });
 
-      // Cruce inteligente aislado a los productos de este proveedor (evita tocar otros proveedores)
-      const productosDelProveedor = productos.filter(
-        (p) => normalizarIdProveedor(p.proveedor || "") === provId || p.proveedorId === provId
-      );
       const indice = crearIndiceExistentes(productosDelProveedor);
       const idsVistosEnExcel = new Set();
       const operaciones = [];
@@ -836,36 +893,38 @@ export async function mount(root, state) {
         const nuevoCosto = Number(it.costoUsd || 0);
         const prevPlanta = Number(prev?.stockPlanta || 0);
 
-        if (!prev) {
-          nuevos.push({
-            codigo: it.codigo,
-            descripcion: it.descripcion,
-            costoUsd: nuevoCosto
-          });
-        } else {
-          if (prevCosto > 0 && nuevoCosto > prevCosto + 0.009) {
-            const pctSubida = ((nuevoCosto - prevCosto) / prevCosto) * 100;
-            subieronPrecio.push({
-              codigo: prev.codigo || it.codigo,
-              descripcion: it.descripcion || prev.descripcion,
-              costoAnterior: prevCosto,
-              costoNuevo: nuevoCosto,
-              pctSubida: Number(pctSubida.toFixed(1))
+        if (!esCargaInicial) {
+          if (!prev) {
+            nuevos.push({
+              codigo: it.codigo,
+              descripcion: it.descripcion,
+              costoUsd: nuevoCosto
             });
-          }
-
-          if (!esAlmacen) {
-            if (prevPlanta <= 0 && it.stockPlanta > 0) {
-              llegaron.push({
+          } else {
+            if (prevCosto > 0 && nuevoCosto > prevCosto + 0.009) {
+              const pctSubida = ((nuevoCosto - prevCosto) / prevCosto) * 100;
+              subieronPrecio.push({
                 codigo: prev.codigo || it.codigo,
                 descripcion: it.descripcion || prev.descripcion,
-                costoUsd: nuevoCosto
+                costoAnterior: prevCosto,
+                costoNuevo: nuevoCosto,
+                pctSubida: Number(pctSubida.toFixed(1))
               });
-            } else if (prevPlanta > 0 && it.stockPlanta <= 0) {
-              agotados.push({
-                codigo: prev.codigo || it.codigo,
-                descripcion: it.descripcion || prev.descripcion
-              });
+            }
+
+            if (!esAlmacen) {
+              if (prevPlanta <= 0 && it.stockPlanta > 0) {
+                llegaron.push({
+                  codigo: prev.codigo || it.codigo,
+                  descripcion: it.descripcion || prev.descripcion,
+                  costoUsd: nuevoCosto
+                });
+              } else if (prevPlanta > 0 && it.stockPlanta <= 0) {
+                agotados.push({
+                  codigo: prev.codigo || it.codigo,
+                  descripcion: it.descripcion || prev.descripcion
+                });
+              }
             }
           }
         }
@@ -873,9 +932,8 @@ export async function mount(root, state) {
         operaciones.push({ targetId, prev, it });
       }
 
-      // Solo marca agotados los productos faltantes DE ESTE MISMO PROVEEDOR
       const faltantesEnExcel = [];
-      if (!esAlmacen) {
+      if (!esAlmacen && !esCargaInicial) {
         for (const prev of productosDelProveedor) {
           if (!idsVistosEnExcel.has(prev.id) && Number(prev.stockPlanta || 0) > 0) {
             faltantesEnExcel.push(prev);
@@ -912,7 +970,7 @@ export async function mount(root, state) {
           if (esAlmacen) {
             payload.stockAlmacen = 0;
             payload.contado = false;
-            if (!prev) payload.stockPlanta = 0;
+            if (!prev) payload.stockPlanta = it.stockPlanta;
           } else {
             payload.stockPlanta = it.stockPlanta;
             if (!prev) {
@@ -943,13 +1001,16 @@ export async function mount(root, state) {
         }
       }
 
-      // Protección límite 1MB de Firestore: guarda totales reales y máx 250 ítems por bloque
+      // Sobrescribe automáticamente el reporte anterior SOLO de este proveedor
       const reportePayload = {
         archivo: file.name,
         proveedor: provNombre,
         proveedorId: provId,
         fechaIso: new Date().toISOString().slice(0, 10),
+        actualizadoTs: Date.now(),
         origenActualizado: origen,
+        esCargaInicial,
+        totalCargados: itemsExcel.length,
         crucesInteligentes,
         totalNuevos: nuevos.length,
         totalLlegaron: llegaron.length,
@@ -961,18 +1022,18 @@ export async function mount(root, state) {
         subieronPrecio: subieronPrecio.slice(0, 250),
         actualizadoEn: serverTimestamp()
       };
-      await setDoc(doc(refs.historialNovedades(), "ultimo_planta"), reportePayload);
-      ultimoReportePlanta = reportePayload;
+
+      await setDoc(doc(refs.historialNovedades(), `prov_${provId}`), reportePayload);
+      reportesPorProv.set(provId, reportePayload);
+      provReporteActivo = provId;
 
       panelProv.classList.add("hidden");
       progWrap.classList.add("hidden");
       alert(
-        `¡Actualización de ${provNombre} completada!\n` +
-        `• Nuevos: ${nuevos.length}\n` +
-        `• Subieron de precio costo: ${subieronPrecio.length}\n` +
-        `• No había y ahora sí: ${llegaron.length}\n` +
-        `• Había y ya no hay: ${agotados.length}\n` +
-        (crucesInteligentes > 0 ? `• Cruces inteligentes (sin código exacto): ${crucesInteligentes}` : "")
+        esCargaInicial
+          ? `¡Carga inicial de ${provNombre} lista!\n• ${itemsExcel.length} productos registrados (Almacén en 0 y Planta actualizada).`
+          : `¡Actualización de ${provNombre} completada!\n• Nuevos: ${nuevos.length}\n• Subieron de precio costo: ${subieronPrecio.length}\n• No había y ahora sí: ${llegaron.length}\n• Había y ya no hay: ${agotados.length}` +
+            (crucesInteligentes > 0 ? `\n• Cruces inteligentes: ${crucesInteligentes}` : "")
       );
       await cargarCatalogo();
     } catch (err) {
@@ -982,10 +1043,13 @@ export async function mount(root, state) {
   });
 
   root.querySelector("#btnLimpiarNovedades").addEventListener("click", async () => {
-    if (!confirm("¿Borrar el reporte de novedades de la última actualización?")) return;
-    await deleteDoc(doc(refs.historialNovedades(), "ultimo_planta"));
-    ultimoReportePlanta = null;
-    render();
+    if (!provReporteActivo) return;
+    const rep = reportesPorProv.get(provReporteActivo);
+    if (!confirm(`¿Borrar el reporte de novedades de ${rep?.proveedor || provReporteActivo}?`)) return;
+    await deleteDoc(doc(refs.historialNovedades(), `prov_${provReporteActivo}`));
+    reportesPorProv.delete(provReporteActivo);
+    provReporteActivo = null;
+    renderPanelCambios();
   });
 
   async function cargarCatalogo() {
@@ -998,8 +1062,16 @@ export async function mount(root, state) {
     proveedores = snapProv.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
-    const docUltimo = snapNov.docs.find((d) => d.id === "ultimo_planta");
-    ultimoReportePlanta = docUltimo ? docUltimo.data() : null;
+
+    reportesPorProv = new Map();
+    snapNov.docs.forEach((d) => {
+      if (d.id.startsWith("prov_")) {
+        const data = d.data();
+        const pid = data.proveedorId || d.id.replace(/^prov_/, "");
+        reportesPorProv.set(pid, { ...data, proveedorId: pid });
+      }
+    });
+
     poblarFiltros();
     render();
   }
@@ -1007,7 +1079,14 @@ export async function mount(root, state) {
   tabAlm.addEventListener("click", () => { origen = "almacen"; render(); });
   tabPla.addEventListener("click", () => { origen = "planta"; render(); });
   busqEl.addEventListener("input", render);
-  provFilterEl.addEventListener("change", render);
+  provFilterEl.addEventListener("change", () => {
+    const provSel = provFilterEl.value;
+    if (provSel) {
+      const pid = normalizarIdProveedor(provSel);
+      if (reportesPorProv.has(pid)) provReporteActivo = pid;
+    }
+    render();
+  });
   catEl.addEventListener("change", render);
   soloStockEl.addEventListener("change", render);
   root.querySelector("#btnRecargarCat").addEventListener("click", cargarCatalogo);
