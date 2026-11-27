@@ -303,6 +303,7 @@ export async function mount(root, state) {
       const anteriores = notaEnEdicion.items || [];
 
       await runTransaction(db, async (tx) => {
+        // 1. TODAS las lecturas primero (regla estricta de Firestore)
         const snap = await tx.get(notaRef);
         if (!snap.exists()) throw new Error("La nota no existe.");
         const actualData = snap.data();
@@ -310,6 +311,15 @@ export async function mount(root, state) {
           throw new Error("La nota ya fue anulada o cerrada.");
         }
 
+        let cliRef = null;
+        let favorActualCli = 0;
+        if (docCli && docCli !== "V-00000000") {
+          cliRef = doc(refs.clientes(), docCli);
+          const cliSnap = await tx.get(cliRef);
+          favorActualCli = Number(cliSnap.data()?.saldoAFavorUsd || 0);
+        }
+
+        // 2. TODAS las escrituras después
         for (const oldIt of anteriores) {
           const idProd = oldIt.prodId || oldIt.id;
           if (!idProd) continue;
@@ -334,10 +344,7 @@ export async function mount(root, state) {
           }
         }
 
-        if (docCli && docCli !== "V-00000000") {
-          const cliRef = doc(refs.clientes(), docCli);
-          const cliSnap = await tx.get(cliRef);
-          const favorActualCli = Number(cliSnap.data()?.saldoAFavorUsd || 0);
+        if (cliRef) {
           const deltaFavor = descFavorPrevio - sobrepagoPrevio - descFavorNuevo + sobrepagoNuevo;
           const favorFinalCli = Math.max(0, Number((favorActualCli + deltaFavor).toFixed(2)));
           tx.set(cliRef, {
