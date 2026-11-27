@@ -7,7 +7,8 @@ import {
   deleteDoc,
   runTransaction,
   normalizarIdVE,
-  serverTimestamp
+  serverTimestamp,
+  obtenerFechaLocalIso
 } from "../core/db.js";
 import { abrirDocumentoPDF } from "./documentos-pdf.js";
 
@@ -37,6 +38,15 @@ function formatearEntradaMoneda(inputEl) {
     } catch {}
   });
   return valor;
+}
+
+function fijarCursorAlFinal(inputEl) {
+  requestAnimationFrame(() => {
+    try {
+      const len = inputEl.value.length;
+      inputEl.setSelectionRange(len, len);
+    } catch {}
+  });
 }
 
 function normalizarBusquedaTexto(txt) {
@@ -93,10 +103,10 @@ export async function mount(root, state) {
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div class="lg:col-span-7 space-y-3">
-          <div class="ve-card p-3 space-y-2">
+          <div id="boxClienteCot" class="ve-card p-3 space-y-2 relative">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <input id="cotCliDoc" type="text" placeholder="Cédula / RIF" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
-              <input id="cotCliNom" type="text" placeholder="Nombre / Razón Social" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+              <input id="cotCliDoc" type="text" autocomplete="off" placeholder="Cédula / RIF" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
+              <input id="cotCliNom" type="text" autocomplete="off" placeholder="Nombre / Razón Social" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
               <div class="flex gap-1.5">
                 <select id="cotTarifa" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
                   <option value="detal">Detal (×${fDetal})</option>
@@ -113,6 +123,7 @@ export async function mount(root, state) {
                 />
               </div>
             </div>
+            <div id="sugerenciasCliCot" class="hidden bg-white border border-slate-300 rounded-xl shadow-lg max-h-44 overflow-y-auto divide-y divide-slate-100"></div>
           </div>
 
           <div class="ve-card p-3 space-y-2">
@@ -181,6 +192,7 @@ export async function mount(root, state) {
 
   const docEl = root.querySelector("#cotCliDoc");
   const nomEl = root.querySelector("#cotCliNom");
+  const sugCliEl = root.querySelector("#sugerenciasCliCot");
   const tarifaEl = root.querySelector("#cotTarifa");
   const multEl = root.querySelector("#cotMult");
   const busqEl = root.querySelector("#cotBusq");
@@ -191,11 +203,20 @@ export async function mount(root, state) {
     root.querySelector("#nextCotFolioTxt").textContent = String(ultimoFolioCot + 1).padStart(5, "0");
   }
 
+  function sincronizarSelectTarifaConFactor(val) {
+    if (Math.abs(val - fMayor) < 0.001) tarifaEl.value = "mayor";
+    else if (Math.abs(val - fDetal) < 0.001) tarifaEl.value = "detal";
+    else tarifaEl.value = "custom";
+  }
+
   function aplicarFactorCot(nuevoFactor, sincronizarInput = false) {
     const val = parseMultiplicadorTexto(nuevoFactor);
     if (val === null) return;
     factorActual = val;
-    if (sincronizarInput) multEl.value = String(val);
+    if (sincronizarInput) {
+      multEl.value = String(val);
+      sincronizarSelectTarifaConFactor(val);
+    }
     if (carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
@@ -206,10 +227,14 @@ export async function mount(root, state) {
     if (busqAbierta || busqEl.value.trim()) renderBusqueda();
   }
 
-  function aplicarClienteDetectado(cli, rellenarDoc = true, rellenarNom = true) {
+  function aplicarClienteDetectado(cli, { rellenarDoc = true, rellenarNom = true, forzar = false } = {}) {
     if (!cli) return;
-    if (rellenarDoc && cli.id) docEl.value = cli.id;
-    if (rellenarNom && cli.nombre && !nomEl.value.trim()) nomEl.value = cli.nombre;
+    if (rellenarDoc && cli.id && (forzar || !docEl.value.trim() || normalizarIdVE(docEl.value) === cli.id)) {
+      docEl.value = cli.id;
+    }
+    if (rellenarNom && cli.nombre && (forzar || !nomEl.value.trim())) {
+      nomEl.value = cli.nombre;
+    }
 
     if (ultimoClienteAplicadoId !== cli.id) {
       ultimoClienteAplicadoId = cli.id;
@@ -218,13 +243,58 @@ export async function mount(root, state) {
         Number(cli.factorPersonalizado) ||
         (cli.tarifa === "mayor" ? fMayor : fDetal);
 
-      if (Math.abs(fCli - fMayor) < 0.001) tarifaEl.value = "mayor";
-      else if (Math.abs(fCli - fDetal) < 0.001) tarifaEl.value = "detal";
-      else tarifaEl.value = "custom";
-
       aplicarFactorCot(fCli, true);
     }
   }
+
+  function renderSugerenciasCliente(textoRaw) {
+    const q = normalizarBusquedaTexto(textoRaw);
+    if (!q || q.length < 2) {
+      sugCliEl.classList.add("hidden");
+      return;
+    }
+
+    const matches = clientes.filter((c) => {
+      if (!c.id || c.id === "V-00000000") return false;
+      const nom = normalizarBusquedaTexto(c.nombre || "");
+      const docNorm = normalizarBusquedaTexto(c.id || "");
+      return nom.includes(q) || docNorm.includes(q);
+    }).slice(0, 8);
+
+    if (!matches.length) {
+      sugCliEl.classList.add("hidden");
+      return;
+    }
+
+    sugCliEl.innerHTML = matches.map((c) => {
+      const multGuardado = Number(c.ultimoMultiplicador || c.factorPersonalizado || 0);
+      return `
+        <button type="button" class="btn-pick-cli-cot w-full text-left px-3 py-2 text-xs hover:bg-slate-100 flex items-center justify-between gap-2 cursor-pointer" data-clid="${encodeURIComponent(c.id)}">
+          <div class="min-w-0 truncate">
+            <span class="font-extrabold text-slate-900">${c.nombre || c.id}</span>
+            <span class="font-mono-ve text-[10px] text-slate-500 ml-1">${c.id}</span>
+          </div>
+          ${multGuardado > 0 ? `<span class="font-mono-ve text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 shrink-0">×${multGuardado}</span>` : ""}
+        </button>
+      `;
+    }).join("");
+    sugCliEl.classList.remove("hidden");
+  }
+
+  sugCliEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-pick-cli-cot");
+    if (!btn) return;
+    const clid = decodeURIComponent(btn.dataset.clid || "");
+    const cli = clientes.find((c) => c.id === clid);
+    sugCliEl.classList.add("hidden");
+    if (cli) aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: true, forzar: true });
+  });
+
+  root.addEventListener("click", (e) => {
+    if (!e.target.closest("#boxClienteCot")) {
+      sugCliEl.classList.add("hidden");
+    }
+  });
 
   function buscarClientePorNombreExacto(texto) {
     const norm = normalizarBusquedaTexto(texto);
@@ -233,26 +303,35 @@ export async function mount(root, state) {
   }
 
   docEl.addEventListener("input", () => {
+    renderSugerenciasCliente(docEl.value);
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
-    if (cli) aplicarClienteDetectado(cli, false, true);
-    else ultimoClienteAplicadoId = "";
+    if (cli) {
+      aplicarClienteDetectado(cli, { rellenarDoc: false, rellenarNom: true, forzar: false });
+      sugCliEl.classList.add("hidden");
+    } else {
+      ultimoClienteAplicadoId = "";
+    }
   });
 
   docEl.addEventListener("blur", () => {
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
-    if (cli) aplicarClienteDetectado(cli, true, true);
+    if (cli) aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: true, forzar: false });
   });
 
   nomEl.addEventListener("input", () => {
+    renderSugerenciasCliente(nomEl.value);
     const cli = buscarClientePorNombreExacto(nomEl.value);
-    if (cli) aplicarClienteDetectado(cli, true, false);
+    if (cli) {
+      aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: false, forzar: true });
+      sugCliEl.classList.add("hidden");
+    }
   });
 
   nomEl.addEventListener("blur", () => {
     const cli = buscarClientePorNombreExacto(nomEl.value);
-    if (cli) aplicarClienteDetectado(cli, true, false);
+    if (cli) aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: false, forzar: true });
   });
 
   tarifaEl.addEventListener("change", () => {
@@ -270,6 +349,7 @@ export async function mount(root, state) {
     const val = parseMultiplicadorTexto(multEl.value);
     if (val !== null) {
       multEl.value = String(val);
+      sincronizarSelectTarifaConFactor(val);
       aplicarFactorCot(val, false);
     } else {
       multEl.value = String(factorActual);
@@ -342,6 +422,7 @@ export async function mount(root, state) {
               ${dispAlm > 0
                 ? `<span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Almacén: ${dispAlm}</span>`
                 : `<span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-900">Planta: ${dispPla}</span>`}
+              ${p.proveedor ? `<span class="text-[9px] font-bold text-slate-400">${p.proveedor}</span>` : ""}
             </div>
             <div class="text-[11px] font-semibold text-slate-600 truncate mt-0.5">${p.descripcion}</div>
           </div>
@@ -392,6 +473,10 @@ export async function mount(root, state) {
     renderCarrito();
   });
 
+  cartEl.addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("inp-prec-cot")) fijarCursorAlFinal(e.target);
+  });
+
   cartEl.addEventListener("input", (e) => {
     const row = e.target.closest("[data-cidx]");
     if (!row) return;
@@ -407,6 +492,10 @@ export async function mount(root, state) {
   });
 
   cartEl.addEventListener("click", (e) => {
+    if (e.target.classList.contains("inp-prec-cot")) {
+      fijarCursorAlFinal(e.target);
+      return;
+    }
     const row = e.target.closest("[data-cidx]");
     if (!row) return;
     const idx = Number(row.dataset.cidx);
@@ -426,6 +515,7 @@ export async function mount(root, state) {
   root.querySelector("#btnLimpiarCot").addEventListener("click", () => {
     carrito = [];
     ultimoClienteAplicadoId = "";
+    sugCliEl.classList.add("hidden");
     renderCarrito();
   });
 
@@ -438,6 +528,7 @@ export async function mount(root, state) {
     const totalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0).toFixed(2));
     const tasas = getTasaActiva(state);
     const now = Date.now();
+    const fechaLocalHoy = obtenerFechaLocalIso(now);
 
     guardando = true;
     const btn = root.querySelector("#btnGuardarCot");
@@ -446,6 +537,7 @@ export async function mount(root, state) {
 
     try {
       const { cotGuardada, nuevoNum } = await runTransaction(db, async (tx) => {
+        // 1. Lectura primero
         const empSnap = await tx.get(refs.empresaRef);
         const actual = Number(empSnap.data()?.correlativos?.cotizacionActual || 0);
         const sigNum = actual + 1;
@@ -455,17 +547,19 @@ export async function mount(root, state) {
           id: sigFolio,
           folio: sigFolio,
           numero: sigNum,
-          fechaIso: new Date(now).toISOString().slice(0, 10),
+          fechaIso: fechaLocalHoy,
           creadoTs: now,
           cliente: { documento: docCli, nombre: nomCli },
           items: carrito,
           totalUsd,
           multiplicador: factorActual,
           tasaBcvUsada: tasas.bcvActiva,
+          monedas: ["USD", "BS"],
           usuario: state.sesion.usuario || "Administrador",
           creadoEn: serverTimestamp()
         };
 
+        // 2. Escrituras después
         tx.set(doc(refs.cotizaciones(), sigFolio), payload);
         tx.set(refs.empresaRef, { correlativos: { cotizacionActual: sigNum } }, { merge: true });
 
@@ -582,6 +676,15 @@ export async function mount(root, state) {
   });
 
   root.querySelector("#busqCotGuardadas").addEventListener("input", renderListaCotizaciones);
+
+  if (window.__veCotTasaHandler) {
+    window.removeEventListener("ve-tasa-changed", window.__veCotTasaHandler);
+  }
+  window.__veCotTasaHandler = () => {
+    if (state.rutaActual !== "cotizaciones") return;
+    renderTotales();
+  };
+  window.addEventListener("ve-tasa-changed", window.__veCotTasaHandler);
 
   async function cargarCotizaciones() {
     const snap = await getDocs(refs.cotizaciones());
