@@ -7,7 +7,8 @@ import {
   setDoc,
   deleteDoc,
   writeBatch,
-  serverTimestamp
+  serverTimestamp,
+  obtenerFechaLocalIso
 } from "../core/db.js";
 
 async function cargarSheetJS() {
@@ -187,6 +188,10 @@ function crearIndiceExistentes(productosExistentes) {
     let metodoGanador = "";
 
     for (const cand of candidatos) {
+      // Si ambos tienen código explícito y distinto, no mezclar productos diferentes
+      const ckCand = normalizarCodigoClave(cand.codigo || "");
+      if (!itemExcel.sinCodigo && ck && ckCand && ck !== ckCand) continue;
+
       const firmaCand = firmas.get(cand.id);
       if (!firmaCand) continue;
 
@@ -196,7 +201,7 @@ function crearIndiceExistentes(productosExistentes) {
       const simBigramas = similitudConjuntos(firmaNuevo.bigramas, firmaCand.bigramas);
       const score = simPalabras * 0.65 + simBigramas * 0.35;
 
-      const umbral = firmaNuevo.medidas.length > 0 ? 0.78 : 0.9;
+      const umbral = firmaNuevo.medidas.length > 0 ? 0.82 : 0.92;
       if (score >= umbral && score > mejorScore) {
         mejorScore = score;
         mejorProd = cand;
@@ -815,6 +820,8 @@ export async function mount(root, state) {
     const progPct = root.querySelector("#progExcelPct");
     const progTxt = root.querySelector("#progExcelTxt");
     progWrap.classList.remove("hidden");
+    progBar.style.width = "0%";
+    progPct.textContent = "0%";
     progTxt.textContent = `Analizando ${file.name} para ${provNombre}...`;
 
     try {
@@ -850,10 +857,12 @@ export async function mount(root, state) {
         return;
       }
 
+      const fechaLocalHoy = obtenerFechaLocalIso();
+
       await setDoc(doc(refs.proveedores(), provId), {
         id: provId,
         nombre: provNombre,
-        ultimaActualizacionIso: new Date().toISOString().slice(0, 10),
+        ultimaActualizacionIso: fechaLocalHoy,
         actualizadoEn: serverTimestamp()
       }, { merge: true });
 
@@ -935,8 +944,15 @@ export async function mount(root, state) {
 
       const colRef = refs.catalogo();
       const LOTE = 400;
-      const totalOps = operaciones.length + faltantesEnExcel.length;
+      const totalOps = Math.max(1, operaciones.length + faltantesEnExcel.length);
       let hechas = 0;
+
+      const actualizarProgreso = () => {
+        const pct = Math.min(100, Math.round((hechas / totalOps) * 100));
+        progBar.style.width = `${pct}%`;
+        progPct.textContent = `${pct}%`;
+        progTxt.textContent = `Guardando ${hechas} de ${totalOps}...`;
+      };
 
       for (let i = 0; i < operaciones.length; i += LOTE) {
         const slice = operaciones.slice(i, i + LOTE);
@@ -963,10 +979,7 @@ export async function mount(root, state) {
         }
         await batch.commit();
         hechas += slice.length;
-        const pct = Math.min(100, Math.round((hechas / Math.max(1, totalOps)) * 100));
-        progBar.style.width = `${pct}%`;
-        progPct.textContent = `${pct}%`;
-        progTxt.textContent = `Guardando ${hechas} de ${totalOps}...`;
+        actualizarProgreso();
       }
 
       if (faltantesEnExcel.length) {
@@ -978,6 +991,7 @@ export async function mount(root, state) {
           }
           await batch.commit();
           hechas += slice.length;
+          actualizarProgreso();
         }
       }
 
@@ -985,7 +999,7 @@ export async function mount(root, state) {
         archivo: file.name,
         proveedor: provNombre,
         proveedorId: provId,
-        fechaIso: new Date().toISOString().slice(0, 10),
+        fechaIso: fechaLocalHoy,
         actualizadoTs: Date.now(),
         origenActualizado: "planta",
         esCargaInicial,
