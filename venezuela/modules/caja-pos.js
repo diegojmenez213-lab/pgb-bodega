@@ -358,6 +358,7 @@ export async function mount(root, state) {
   let monedaVistaFavor = "USD";
   let cotizacionOrigenId = null;
   let emitiendo = false;
+  let ultimoClienteAplicadoId = "";
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
@@ -423,6 +424,29 @@ export async function mount(root, state) {
       renderCarrito();
     }
     if (busqAbierta || busqEl.value.trim()) renderBusqueda();
+  }
+
+  function aplicarClienteDetectado(cli, rellenarDoc = true, rellenarNom = true) {
+    if (!cli) return;
+    if (rellenarDoc && cli.id) docEl.value = cli.id;
+    if (rellenarNom && cli.nombre && !nomEl.value.trim()) nomEl.value = cli.nombre;
+
+    if (ultimoClienteAplicadoId !== cli.id) {
+      ultimoClienteAplicadoId = cli.id;
+      const fCli =
+        Number(cli.ultimoMultiplicador) ||
+        Number(cli.factorPersonalizado) ||
+        (cli.tarifa === "mayor" ? fMayor : fDetal);
+
+      if (Math.abs(fCli - fMayor) < 0.001) tarifaEl.value = "mayor";
+      else if (Math.abs(fCli - fDetal) < 0.001) tarifaEl.value = "detal";
+      else tarifaEl.value = "custom";
+
+      aplicarFactorPos(fCli, true);
+    }
+
+    usarSaldoFavorEnNota = true;
+    refrescarEstadoClienteActual();
   }
 
   function actualizarFolioUI() {
@@ -984,19 +1008,42 @@ export async function mount(root, state) {
     renderPagos();
   });
 
-  docEl.addEventListener("input", refrescarEstadoClienteActual);
+  docEl.addEventListener("input", () => {
+    const id = normalizarIdVE(docEl.value);
+    const cli = clientes.find((c) => c.id === id);
+    if (cli) {
+      aplicarClienteDetectado(cli, false, true);
+    } else {
+      ultimoClienteAplicadoId = "";
+      refrescarEstadoClienteActual();
+    }
+  });
+
   docEl.addEventListener("blur", () => {
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
     if (cli) {
-      docEl.value = cli.id;
-      if (!nomEl.value.trim()) nomEl.value = cli.nombre || "";
-      const fCli = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
-      tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
-      aplicarFactorPos(fCli, true);
+      aplicarClienteDetectado(cli, true, true);
+    } else {
+      usarSaldoFavorEnNota = true;
+      refrescarEstadoClienteActual();
     }
-    usarSaldoFavorEnNota = true;
-    refrescarEstadoClienteActual();
+  });
+
+  function buscarClientePorNombreExacto(texto) {
+    const norm = normalizarBusquedaTexto(texto);
+    if (!norm || norm.length < 3) return null;
+    return clientes.find((c) => normalizarBusquedaTexto(c.nombre || "") === norm) || null;
+  }
+
+  nomEl.addEventListener("input", () => {
+    const cli = buscarClientePorNombreExacto(nomEl.value);
+    if (cli) aplicarClienteDetectado(cli, true, false);
+  });
+
+  nomEl.addEventListener("blur", () => {
+    const cli = buscarClientePorNombreExacto(nomEl.value);
+    if (cli) aplicarClienteDetectado(cli, true, false);
   });
 
   tarifaEl.addEventListener("change", () => {
@@ -1027,6 +1074,7 @@ export async function mount(root, state) {
     usarSaldoFavorEnNota = true;
     modoExcedente = "vuelto";
     cotizacionOrigenId = null;
+    ultimoClienteAplicadoId = "";
     pagos = [{ metodo: "Efectivo USD", montoUsd: 0, referencia: "" }];
     actualizarEstadoCreditoUI();
     renderCarrito();
@@ -1229,6 +1277,7 @@ export async function mount(root, state) {
               documento: docCli,
               nombre: nomCli,
               saldoAFavorUsd: nuevoSaldoFavorCli,
+              ultimoMultiplicador: factorActual,
               actualizadoEn: serverTimestamp()
             },
             { merge: true }
@@ -1255,6 +1304,21 @@ export async function mount(root, state) {
 
         return { folio: sigFolio, nuevoNum: sigNum };
       });
+
+      if (docCli !== "V-00000000") {
+        const cliEx = clientes.find((c) => c.id === docCli);
+        if (cliEx) {
+          cliEx.nombre = nomCli;
+          cliEx.ultimoMultiplicador = factorActual;
+        } else {
+          clientes.push({
+            id: docCli,
+            documento: docCli,
+            nombre: nomCli,
+            ultimoMultiplicador: factorActual
+          });
+        }
+      }
 
       ultimoFolio = nuevoNum;
       if (state.empresa?.correlativos) state.empresa.correlativos.notaEntregaActual = nuevoNum;
@@ -1319,7 +1383,6 @@ export async function mount(root, state) {
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
     if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
-    carrito = (cot.items || []).map((it) => ({ ...it, prodId: it.prodId || it.id }));
     refrescarEstadoClienteActual();
   }
 
