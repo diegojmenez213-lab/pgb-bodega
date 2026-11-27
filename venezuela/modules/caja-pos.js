@@ -1383,6 +1383,7 @@ export async function mount(root, state) {
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
     if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
+    carrito = (cot.items || []).map((it) => ({ ...it, prodId: it.prodId || it.id }));
     refrescarEstadoClienteActual();
   }
 
