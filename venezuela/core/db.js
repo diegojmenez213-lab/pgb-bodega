@@ -44,6 +44,24 @@ export async function asegurarAuthVE() {
 asegurarAuthVE();
 
 /**
+ * Retorna la fecha local en formato YYYY-MM-DD (evita el salto de día por UTC en la noche).
+ */
+export function obtenerFechaLocalIso(ts = Date.now()) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Suma días sobre una fecha y retorna YYYY-MM-DD en horario local.
+ */
+export function sumarDiasLocalIso(dias = 0, baseTs = Date.now()) {
+  return obtenerFechaLocalIso(baseTs + Number(dias || 0) * 86400000);
+}
+
+/**
  * Normaliza Cédula o RIF venezolano a ID limpio para Firestore.
  * Ej: "j-50343856-8" -> "J-50343856-8" | "20504570" -> "V-20504570"
  */
