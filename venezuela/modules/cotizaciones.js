@@ -1,21 +1,28 @@
 // venezuela/modules/cotizaciones.js
 import {
+  db,
   getTenantRefs,
   doc,
   getDocs,
-  setDoc,
   deleteDoc,
+  runTransaction,
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
-import { imprimirDocumentoCarta } from "./documentos-pdf.js";
-
-const HORAS_72_MS = 72 * 60 * 60 * 1000;
+import { abrirDocumentoPDF } from "./documentos-pdf.js";
 
 function getTasaActiva(state) {
   const t = state.tasas || {};
   const bcv = state.modoTasaBCV === "manana" && t.bcvManana ? t.bcvManana : t.bcvHoy;
   return { ...t, bcvActiva: Number(bcv || 0) };
+}
+
+function parseMultiplicadorTexto(raw) {
+  const limpio = String(raw || "").replace(",", ".").trim();
+  if (!limpio || limpio === "." || limpio.endsWith(".")) return null;
+  const num = Number(limpio);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num;
 }
 
 function formatearEntradaMoneda(inputEl) {
@@ -32,21 +39,39 @@ function formatearEntradaMoneda(inputEl) {
   return valor;
 }
 
-function fijarCursorAlFinal(inputEl) {
-  requestAnimationFrame(() => {
-    try {
-      const len = inputEl.value.length;
-      inputEl.setSelectionRange(len, len);
-    } catch {}
-  });
+function normalizarBusquedaTexto(txt) {
+  return String(txt || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9/.\-]+/g, " ")
+    .trim();
 }
 
-function parseMultiplicadorTexto(raw) {
-  const limpio = String(raw || "").replace(",", ".").trim();
-  if (!limpio || limpio === "." || limpio.endsWith(".")) return null;
-  const num = Number(limpio);
-  if (!Number.isFinite(num) || num <= 0) return null;
-  return num;
+function cumpleFiltroEstricto(prod, queryRaw) {
+  const dispAlm = Math.max(0, Number(prod.stockAlmacen || 0));
+  const dispPla = Math.max(0, Number(prod.stockPlanta || 0));
+  if (dispAlm <= 0 && dispPla <= 0) return false;
+
+  const qNorm = normalizarBusquedaTexto(queryRaw);
+  if (!qNorm) return true;
+
+  const codigo = normalizarBusquedaTexto(prod.codigo || prod.id || "");
+  const campoCompleto = normalizarBusquedaTexto(
+    `${prod.codigo || ""} ${prod.descripcion || ""} ${prod.marca || ""} ${prod.proveedor || ""}`
+  );
+  const tokensCampo = campoCompleto.split(/\s+/).filter(Boolean);
+  const terminos = qNorm.split(/\s+/).filter(Boolean);
+
+  if (terminos.length === 1 && terminos[0].length < 5) {
+    const t = terminos[0];
+    return codigo.startsWith(t) || tokensCampo.some((w) => w.startsWith(t));
+  }
+
+  return terminos.every((t) => {
+    if (codigo.includes(t)) return true;
+    return tokensCampo.some((w) => w === t || (t.length >= 4 && w.startsWith(t)));
+  });
 }
 
 export async function mount(root, state) {
@@ -55,110 +80,92 @@ export async function mount(root, state) {
   const fDetal = Number(state.empresa?.precios?.factorDetal) || 2.5;
 
   root.innerHTML = `
-    <div class="space-y-4 max-w-6xl mx-auto">
+    <div class="space-y-4 max-w-7xl mx-auto">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 class="text-lg font-extrabold text-slate-900">Cotizaciones (PDF • 72h)</h1>
-          <p class="text-xs text-slate-500">Usa tarifa Detal, Mayor o escribe cualquier multiplicador sobre costo (ej. 2.3).</p>
+          <h1 class="text-lg font-extrabold text-slate-900">Cotizaciones</h1>
+          <p class="text-xs text-slate-500">Genera presupuestos en PDF y conviértelos en Nota de Entrega con un clic.</p>
         </div>
-        <div class="flex gap-1.5">
-          <button id="tabNuevaCot" type="button" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer">+ Nueva Cotización</button>
-          <button id="tabListaCot" type="button" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 cursor-pointer">Activas (<span id="countCot">0</span>)</button>
+        <div class="text-xs font-extrabold px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-mono-ve">
+          Próxima Cotización: #<span id="nextCotFolioTxt">---</span>
         </div>
       </div>
 
-      <!-- Nueva Cotización -->
-      <section id="viewNuevaCot" class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div class="lg:col-span-7 space-y-3">
           <div class="ve-card p-3 space-y-2">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input id="cotCliDoc" type="text" placeholder="Cédula / RIF *" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
-              <input id="cotCliNom" type="text" placeholder="Nombre del Cliente *" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
-            </div>
-            <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <div class="flex flex-wrap items-center gap-2 text-xs font-bold">
-                <span class="text-slate-500">Tarifa:</span>
-                <select id="cotTarifa" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input id="cotCliDoc" type="text" placeholder="Cédula / RIF" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
+              <input id="cotCliNom" type="text" placeholder="Nombre / Razón Social" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+              <div class="flex gap-1.5">
+                <select id="cotTarifa" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
                   <option value="detal">Detal (×${fDetal})</option>
                   <option value="mayor">Mayor (×${fMayor})</option>
-                  <option value="custom">Personalizado</option>
+                  <option value="custom">Mult.</option>
                 </select>
-                <span class="text-slate-500">Mult. (×):</span>
                 <input
                   id="cotMult"
                   type="text"
                   inputmode="decimal"
                   value="${fDetal}"
-                  class="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono-ve font-extrabold text-center"
+                  title="Multiplicador libre sobre costo"
+                  class="w-20 bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-mono-ve font-extrabold text-center"
                 />
               </div>
-              <div id="cotCliBadge" class="text-[11px] font-bold text-emerald-700 hidden">✓ Cliente registrado</div>
             </div>
           </div>
 
-          <!-- Buscador de productos -->
           <div class="ve-card p-3 space-y-2">
             <div class="flex items-center gap-2">
-              <input id="cotBusqProd" type="text" placeholder="Buscar repuesto por código, descripción o marca..." class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-900" />
+              <input id="cotBusq" type="text" placeholder="Buscar producto disponible (Almacén o Planta)..." class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-slate-950" />
               <button id="btnToggleBusqCot" type="button" class="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-extrabold cursor-pointer shrink-0">
-                Catálogo
+                Disponibles
               </button>
             </div>
             <div id="cotResultados" class="space-y-1.5 max-h-72 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-4">Escribe o toca "Catálogo" para agregar productos...</div>
+              <div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos...</div>
             </div>
           </div>
         </div>
 
-        <!-- Carrito Cotización -->
-        <div id="cotResumenCard" class="lg:col-span-5">
+        <div class="lg:col-span-5 space-y-3">
           <div class="ve-card space-y-3">
             <div class="flex items-center justify-between">
-              <h2 class="text-sm font-extrabold text-slate-900">Detalle del Presupuesto (<span id="cotCantItemsBadge">0</span> und)</h2>
+              <h2 class="text-sm font-extrabold text-slate-900">Ítems Cotizados (<span id="cotCantItemsBadge">0</span> und)</h2>
               <button id="btnLimpiarCot" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar</button>
             </div>
 
-            <div id="cotItems" class="space-y-2 max-h-80 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-6">Agrega productos desde el buscador.</div>
+            <div id="cotCarrito" class="space-y-2 max-h-72 overflow-y-auto">
+              <div class="text-xs text-slate-400 text-center py-6">Sin productos en la cotización.</div>
             </div>
 
-            <div class="pt-3 border-t border-slate-200 space-y-1.5">
-              <div class="flex justify-between text-sm font-extrabold text-slate-950">
+            <div class="pt-3 border-t border-slate-200 space-y-1">
+              <div class="flex justify-between text-base font-extrabold text-slate-950">
                 <span>TOTAL USD</span>
                 <span id="cotTotalUsd" class="font-mono-ve">$0.00</span>
               </div>
               <div class="flex justify-between text-xs font-bold text-slate-500">
-                <span>Ref. Bs. (BCV)</span>
+                <span>Total Bs. (BCV)</span>
                 <span id="cotTotalBs" class="font-mono-ve">Bs. 0.00</span>
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-2 text-[11px] font-bold text-slate-600">
-              <label class="flex items-center gap-1"><input type="checkbox" class="cot-mon" value="USD" checked /> USD</label>
-              <label class="flex items-center gap-1"><input type="checkbox" class="cot-mon" value="BS" checked /> Bs.</label>
-              <label class="flex items-center gap-1"><input type="checkbox" class="cot-mon" value="USDT" /> USDT</label>
-              <label class="flex items-center gap-1"><input type="checkbox" class="cot-mon" value="EUR" /> EUR</label>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2 pt-1">
-              <button id="btnGuardarCot" type="button" class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-xs font-extrabold cursor-pointer">
-                Guardar 72h
-              </button>
-              <button id="btnGenerarPdfCot" type="button" class="py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
-                Generar PDF
-              </button>
-            </div>
+            <button id="btnGuardarCot" type="button" class="w-full py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold uppercase tracking-wider cursor-pointer">
+              Guardar Cotización y Generar PDF
+            </button>
           </div>
         </div>
-      </section>
+      </div>
 
-      <!-- Lista de Cotizaciones Activas -->
-      <section id="viewListaCot" class="hidden space-y-2">
-        <p class="text-xs text-slate-500 font-semibold">Toca cualquier cotización para abrir su PDF listo para enviar por WhatsApp.</p>
-        <div id="listaCotizaciones" class="space-y-2">
-          <div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">Cargando cotizaciones...</div>
+      <div class="space-y-2.5 pt-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-extrabold text-slate-900">Cotizaciones Guardadas</h2>
+          <input id="busqCotGuardadas" type="text" placeholder="Buscar cotización..." class="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold" />
         </div>
-      </section>
+        <div id="listaCotizaciones" class="space-y-2">
+          <div class="ve-card text-center py-8 text-xs text-slate-500 font-bold">Cargando cotizaciones...</div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -167,24 +174,29 @@ export async function mount(root, state) {
   let cotizaciones = [];
   let carrito = [];
   let factorActual = fDetal;
+  let ultimoFolioCot = Number(state.empresa?.correlativos?.cotizacionActual || 0);
   let busqAbierta = false;
-  let folioActivoEnEdicion = null;
+  let guardando = false;
+  let ultimoClienteAplicadoId = "";
 
   const docEl = root.querySelector("#cotCliDoc");
   const nomEl = root.querySelector("#cotCliNom");
   const tarifaEl = root.querySelector("#cotTarifa");
   const multEl = root.querySelector("#cotMult");
-  const badgeCli = root.querySelector("#cotCliBadge");
-  const busqEl = root.querySelector("#cotBusqProd");
+  const busqEl = root.querySelector("#cotBusq");
   const resEl = root.querySelector("#cotResultados");
-  const itemsEl = root.querySelector("#cotItems");
+  const cartEl = root.querySelector("#cotCarrito");
 
-  function aplicarFactor(nuevoFactor, { sincronizarInput = false, actualizarCarrito = true } = {}) {
+  function actualizarFolioUI() {
+    root.querySelector("#nextCotFolioTxt").textContent = String(ultimoFolioCot + 1).padStart(5, "0");
+  }
+
+  function aplicarFactorCot(nuevoFactor, sincronizarInput = false) {
     const val = parseMultiplicadorTexto(nuevoFactor);
     if (val === null) return;
     factorActual = val;
     if (sincronizarInput) multEl.value = String(val);
-    if (actualizarCarrito && carrito.length) {
+    if (carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
         precioUsd: Number(((it.costoUsd || 0) * factorActual).toFixed(2))
@@ -194,113 +206,146 @@ export async function mount(root, state) {
     if (busqAbierta || busqEl.value.trim()) renderBusqueda();
   }
 
-  function obtenerMonedas() {
-    const arr = Array.from(root.querySelectorAll(".cot-mon:checked")).map((el) => el.value);
-    return arr.length ? arr : ["USD"];
+  function aplicarClienteDetectado(cli, rellenarDoc = true, rellenarNom = true) {
+    if (!cli) return;
+    if (rellenarDoc && cli.id) docEl.value = cli.id;
+    if (rellenarNom && cli.nombre && !nomEl.value.trim()) nomEl.value = cli.nombre;
+
+    if (ultimoClienteAplicadoId !== cli.id) {
+      ultimoClienteAplicadoId = cli.id;
+      const fCli =
+        Number(cli.ultimoMultiplicador) ||
+        Number(cli.factorPersonalizado) ||
+        (cli.tarifa === "mayor" ? fMayor : fDetal);
+
+      if (Math.abs(fCli - fMayor) < 0.001) tarifaEl.value = "mayor";
+      else if (Math.abs(fCli - fDetal) < 0.001) tarifaEl.value = "detal";
+      else tarifaEl.value = "custom";
+
+      aplicarFactorCot(fCli, true);
+    }
   }
 
-  function calcularTotal() {
-    return carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
+  function buscarClientePorNombreExacto(texto) {
+    const norm = normalizarBusquedaTexto(texto);
+    if (!norm || norm.length < 3) return null;
+    return clientes.find((c) => normalizarBusquedaTexto(c.nombre || "") === norm) || null;
   }
 
-  function actualizarTotalesCotUI() {
-    const total = calcularTotal();
+  docEl.addEventListener("input", () => {
+    const id = normalizarIdVE(docEl.value);
+    const cli = clientes.find((c) => c.id === id);
+    if (cli) aplicarClienteDetectado(cli, false, true);
+    else ultimoClienteAplicadoId = "";
+  });
+
+  docEl.addEventListener("blur", () => {
+    const id = normalizarIdVE(docEl.value);
+    const cli = clientes.find((c) => c.id === id);
+    if (cli) aplicarClienteDetectado(cli, true, true);
+  });
+
+  nomEl.addEventListener("input", () => {
+    const cli = buscarClientePorNombreExacto(nomEl.value);
+    if (cli) aplicarClienteDetectado(cli, true, false);
+  });
+
+  nomEl.addEventListener("blur", () => {
+    const cli = buscarClientePorNombreExacto(nomEl.value);
+    if (cli) aplicarClienteDetectado(cli, true, false);
+  });
+
+  tarifaEl.addEventListener("change", () => {
+    if (tarifaEl.value === "mayor") aplicarFactorCot(fMayor, true);
+    else if (tarifaEl.value === "detal") aplicarFactorCot(fDetal, true);
+    else multEl.focus();
+  });
+
+  multEl.addEventListener("input", () => {
+    tarifaEl.value = "custom";
+    aplicarFactorCot(multEl.value, false);
+  });
+
+  multEl.addEventListener("blur", () => {
+    const val = parseMultiplicadorTexto(multEl.value);
+    if (val !== null) {
+      multEl.value = String(val);
+      aplicarFactorCot(val, false);
+    } else {
+      multEl.value = String(factorActual);
+    }
+  });
+
+  function renderTotales() {
+    const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
     const tasas = getTasaActiva(state);
-    const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
-    root.querySelector("#cotCantItemsBadge").textContent = String(totalUnds);
     root.querySelector("#cotTotalUsd").textContent = `$${total.toFixed(2)}`;
     root.querySelector("#cotTotalBs").textContent = tasas.bcvActiva ? `Bs. ${(total * tasas.bcvActiva).toFixed(2)}` : "Bs. --";
-  }
-
-  function agregarProductoCotizacion(prodId, cantAgregar = 1) {
-    const p = catalogo.find((x) => x.id === prodId || x.codigo === prodId);
-    if (!p) return;
-    const sum = Math.max(1, parseInt(cantAgregar, 10) || 1);
-
-    const ex = carrito.find((x) => x.id === p.id);
-    if (ex) {
-      ex.cantidad += sum;
-    } else {
-      carrito.push({
-        id: p.id,
-        codigo: p.codigo || p.id,
-        descripcion: p.descripcion || p.codigo || p.id,
-        costoUsd: Number(p.costoUsd || 0),
-        precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
-        cantidad: sum,
-        origen: (p.stockAlmacen || 0) > 0 ? "almacen" : "planta"
-      });
-    }
-
-    renderCarrito();
-    busqAbierta = false;
-    busqEl.value = "";
-    resEl.innerHTML = `<div class="text-xs text-emerald-700 font-bold text-center py-2">✓ Agregado al presupuesto. Toca "Catálogo" o escribe para sumar más.</div>`;
-    root.querySelector("#cotResumenCard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    root.querySelector("#cotCantItemsBadge").textContent = String(
+      carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0)
+    );
   }
 
   function renderCarrito() {
-    actualizarTotalesCotUI();
-
     if (!carrito.length) {
-      itemsEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Agrega productos desde el buscador.</div>`;
-      return;
+      cartEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Sin productos en la cotización.</div>`;
+    } else {
+      cartEl.innerHTML = carrito.map((it, idx) => `
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2" data-cidx="${idx}">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="font-mono-ve text-[11px] font-extrabold text-slate-900">${it.codigo}</div>
+              <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
+            </div>
+            <button type="button" class="btn-rm-cot text-xs font-bold text-rose-600 cursor-pointer px-1.5">✕</button>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn-menos-cot w-7 h-7 rounded-lg bg-white border border-slate-300 text-xs font-extrabold cursor-pointer">−</button>
+              <input type="number" min="1" value="${it.cantidad}" class="inp-cant-cot w-14 h-7 bg-white border border-slate-300 rounded-lg px-1 text-xs font-extrabold text-center font-mono-ve" />
+              <button type="button" class="btn-mas-cot w-7 h-7 rounded-lg bg-slate-950 text-white text-xs font-extrabold cursor-pointer">+</button>
+            </div>
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] font-bold text-slate-500">$</span>
+              <input type="text" inputmode="numeric" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec-cot w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
+            </div>
+            <div class="item-sub-cot font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
+          </div>
+        </div>
+      `).join("");
     }
-
-    itemsEl.innerHTML = carrito.map((it, idx) => `
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2" data-idx="${idx}">
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="font-mono-ve text-[11px] font-extrabold text-slate-900">${it.codigo}</div>
-            <div class="text-[11px] font-semibold text-slate-600 truncate">${it.descripcion}</div>
-          </div>
-          <button type="button" class="btn-rm text-xs font-bold text-rose-600 cursor-pointer px-1.5 py-0.5">✕</button>
-        </div>
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-1">
-            <button type="button" class="btn-menos w-7 h-7 rounded-lg bg-white border border-slate-300 text-xs font-extrabold text-slate-800 cursor-pointer">−</button>
-            <input type="number" min="1" value="${it.cantidad}" class="inp-cant w-14 h-7 bg-white border border-slate-300 rounded-lg px-1 text-xs font-extrabold text-center font-mono-ve" />
-            <button type="button" class="btn-mas w-7 h-7 rounded-lg bg-slate-950 text-white text-xs font-extrabold cursor-pointer">+</button>
-          </div>
-          <div class="flex items-center gap-1">
-            <span class="text-[10px] font-bold text-slate-500">$</span>
-            <input type="text" inputmode="numeric" value="${Number(it.precioUsd).toFixed(2)}" class="inp-prec w-20 h-7 bg-white border border-slate-300 rounded-lg px-1.5 text-xs font-bold text-right font-mono-ve" />
-          </div>
-          <div class="item-subtotal font-mono-ve text-xs font-extrabold text-slate-900">$${(it.cantidad * it.precioUsd).toFixed(2)}</div>
-        </div>
-      </div>
-    `).join("");
+    renderTotales();
   }
 
   function renderBusqueda() {
-    const q = busqEl.value.trim().toLowerCase();
+    const q = busqEl.value.trim();
     if (!q && !busqAbierta) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">Escribe o toca "Catálogo" para agregar productos...</div>`;
+      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos...</div>`;
       return;
     }
 
-    const matches = (q
-      ? catalogo.filter((p) => `${p.codigo || ""} ${p.descripcion || ""} ${p.marca || ""}`.toLowerCase().includes(q))
-      : catalogo
-    ).slice(0, 25);
-
-    if (!matches.length) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">Sin resultados para "${q}".</div>`;
+    const disponibles = catalogo.filter((p) => cumpleFiltroEstricto(p, q)).slice(0, 25);
+    if (!disponibles.length) {
+      resEl.innerHTML = `<div class="text-xs text-slate-500 font-bold text-center py-6">No disponible / Sin stock en Almacén ni en Planta.</div>`;
       return;
     }
 
-    resEl.innerHTML = matches.map((p) => {
+    resEl.innerHTML = disponibles.map((p) => {
+      const dispAlm = Math.max(0, Number(p.stockAlmacen || 0));
+      const dispPla = Math.max(0, Number(p.stockPlanta || 0));
       const precio = Number(((p.costoUsd || 0) * factorActual).toFixed(2));
       return `
-        <div class="fila-prod-cot p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 flex items-center justify-between gap-2 cursor-pointer select-none" data-id="${encodeURIComponent(p.id)}">
+        <div class="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center justify-between gap-2 cursor-pointer select-none" data-pid="${encodeURIComponent(p.id)}">
           <div class="min-w-0 flex-1 pointer-events-none">
-            <div class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo} <span class="font-sans text-[10px] text-slate-400">${p.marca || ""}</span></div>
-            <div class="text-[11px] font-semibold text-slate-600 truncate">${p.descripcion}</div>
-            <div class="text-[10px] font-bold text-slate-500">Alm: <span class="text-emerald-700">${p.stockAlmacen ?? 0}</span> • Planta: <span class="text-sky-700">${p.stockPlanta ?? 0}</span></div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-mono-ve text-xs font-extrabold text-slate-900">${p.codigo}</span>
+              ${dispAlm > 0
+                ? `<span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Almacén: ${dispAlm}</span>`
+                : `<span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-900">Planta: ${dispPla}</span>`}
+            </div>
+            <div class="text-[11px] font-semibold text-slate-600 truncate mt-0.5">${p.descripcion}</div>
           </div>
-          <button type="button" class="btn-add-cot px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer shrink-0" data-id="${encodeURIComponent(p.id)}">
-            + $${precio.toFixed(2)}
-          </button>
+          <button type="button" class="px-3 py-1.5 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer shrink-0">+ $${precio.toFixed(2)}</button>
         </div>
       `;
     }).join("");
@@ -308,272 +353,251 @@ export async function mount(root, state) {
 
   root.querySelector("#btnToggleBusqCot").addEventListener("click", () => {
     busqAbierta = !busqAbierta;
-    if (!busqAbierta && !busqEl.value.trim()) {
-      resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">Catálogo retraído.</div>`;
-    } else {
-      renderBusqueda();
-    }
+    renderBusqueda();
   });
-
-  resEl.addEventListener("click", (e) => {
-    const target = e.target.closest("[data-id]");
-    if (!target) return;
-    e.preventDefault();
-    e.stopPropagation();
-    agregarProductoCotizacion(decodeURIComponent(target.dataset.id || ""), 1);
-  });
-
-  itemsEl.addEventListener("focusin", (e) => {
-    if (e.target.classList.contains("inp-prec")) fijarCursorAlFinal(e.target);
-  });
-
-  itemsEl.addEventListener("input", (e) => {
-    const row = e.target.closest("[data-idx]");
-    if (!row) return;
-    const idx = Number(row.dataset.idx);
-    if (e.target.classList.contains("inp-cant")) {
-      carrito[idx].cantidad = Math.max(1, parseInt(e.target.value, 10) || 1);
-    } else if (e.target.classList.contains("inp-prec")) {
-      carrito[idx].precioUsd = formatearEntradaMoneda(e.target);
-    }
-    const subEl = row.querySelector(".item-subtotal");
-    if (subEl) subEl.textContent = `$${(carrito[idx].cantidad * carrito[idx].precioUsd).toFixed(2)}`;
-    actualizarTotalesCotUI();
-  });
-
-  itemsEl.addEventListener("click", (e) => {
-    if (e.target.classList.contains("inp-prec")) {
-      fijarCursorAlFinal(e.target);
-      return;
-    }
-    const row = e.target.closest("[data-idx]");
-    if (!row) return;
-    const idx = Number(row.dataset.idx);
-    if (e.target.closest(".btn-rm")) {
-      carrito.splice(idx, 1);
-      renderCarrito();
-    } else if (e.target.closest(".btn-mas")) {
-      carrito[idx].cantidad += 1;
-      renderCarrito();
-    } else if (e.target.closest(".btn-menos")) {
-      if (carrito[idx].cantidad > 1) carrito[idx].cantidad -= 1;
-      else carrito.splice(idx, 1);
-      renderCarrito();
-    }
-  });
-
-  docEl.addEventListener("input", () => {
-    folioActivoEnEdicion = null;
-  });
-
-  docEl.addEventListener("blur", () => {
-    const id = normalizarIdVE(docEl.value);
-    const cli = clientes.find((c) => c.id === id);
-    if (cli) {
-      docEl.value = cli.id;
-      nomEl.value = cli.nombre || "";
-      const fCli = Number(cli.factorPersonalizado) || (cli.tarifa === "mayor" ? fMayor : fDetal);
-      tarifaEl.value = cli.tarifa === "mayor" ? "mayor" : (cli.tarifa === "especial" ? "custom" : "detal");
-      aplicarFactor(fCli, { sincronizarInput: true, actualizarCarrito: true });
-      badgeCli.textContent = `✓ Cliente registrado (${cli.tarifa || "detal"})`;
-      badgeCli.classList.remove("hidden");
-    } else {
-      badgeCli.classList.add("hidden");
-    }
-  });
-
-  tarifaEl.addEventListener("change", () => {
-    if (tarifaEl.value === "mayor") aplicarFactor(fMayor, { sincronizarInput: true, actualizarCarrito: true });
-    else if (tarifaEl.value === "detal") aplicarFactor(fDetal, { sincronizarInput: true, actualizarCarrito: true });
-    else multEl.focus();
-  });
-
-  multEl.addEventListener("input", () => {
-    tarifaEl.value = "custom";
-    aplicarFactor(multEl.value, { sincronizarInput: false, actualizarCarrito: true });
-  });
-
-  multEl.addEventListener("blur", () => {
-    const val = parseMultiplicadorTexto(multEl.value);
-    if (val !== null) {
-      multEl.value = String(val);
-      aplicarFactor(val, { sincronizarInput: false, actualizarCarrito: true });
-    } else {
-      multEl.value = String(factorActual);
-    }
-  });
-
-  root.querySelector("#btnLimpiarCot").addEventListener("click", () => {
-    carrito = [];
-    folioActivoEnEdicion = null;
-    renderCarrito();
-  });
-
-  function abrirPdfCotizacion(cot) {
-    const tasasActuales = getTasaActiva(state);
-    const tasaDoc = cot.tasaBcvSnapshot ? { ...tasasActuales, bcvActiva: Number(cot.tasaBcvSnapshot) } : tasasActuales;
-    imprimirDocumentoCarta({
-      tipo: "COTIZACIÓN",
-      folio: cot.folio || cot.id,
-      empresa: state.empresa,
-      cliente: cot.cliente || {},
-      items: cot.items || [],
-      totalUsd: Number(cot.totalUsd || 0),
-      monedas: cot.monedas || ["USD", "BS"],
-      tasas: tasaDoc,
-      fecha: cot.fechaTexto || "",
-      observaciones: "Presupuesto válido por 72 horas. Precios sujetos a disponibilidad."
-    });
-  }
-
-  async function persistirCotizacion() {
-    const docCli = normalizarIdVE(docEl.value);
-    const nomCli = nomEl.value.trim();
-    if (!docCli || !nomCli) {
-      alert("Ingresa Cédula/RIF y Nombre del cliente.");
-      return null;
-    }
-    if (!carrito.length) {
-      alert("Agrega al menos un producto.");
-      return null;
-    }
-
-    // Reutiliza el mismo folio si ya se guardó esta cotización en pantalla
-    const folio = folioActivoEnEdicion || `COT-${String(Date.now()).slice(-6)}`;
-    folioActivoEnEdicion = folio;
-
-    const now = Date.now();
-    const tasasAct = getTasaActiva(state);
-    const payload = {
-      folio,
-      cliente: { documento: docCli, nombre: nomCli },
-      items: carrito.map((it) => ({ ...it })),
-      multiplicador: factorActual,
-      totalUsd: Number(calcularTotal().toFixed(2)),
-      tasaBcvSnapshot: tasasAct.bcvActiva || 0,
-      monedas: obtenerMonedas(),
-      fechaTexto: new Date().toLocaleDateString("es-VE"),
-      creadoTs: now,
-      expiraTs: now + HORAS_72_MS,
-      creadoEn: serverTimestamp()
-    };
-
-    await setDoc(doc(refs.cotizaciones(), folio), payload);
-    await cargarCotizaciones();
-    return payload;
-  }
-
-  root.querySelector("#btnGuardarCot").addEventListener("click", async () => {
-    const saved = await persistirCotizacion();
-    if (!saved) return;
-    alert(`Cotización ${saved.folio} guardada (válida por 72 horas).`);
-  });
-
-  root.querySelector("#btnGenerarPdfCot").addEventListener("click", async () => {
-    const saved = await persistirCotizacion();
-    if (!saved) return;
-    abrirPdfCotizacion(saved);
-  });
-
-  function renderListaCot() {
-    root.querySelector("#countCot").textContent = cotizaciones.length;
-    const cont = root.querySelector("#listaCotizaciones");
-
-    if (!cotizaciones.length) {
-      cont.innerHTML = `<div class="ve-card text-center py-10 text-xs text-slate-500 font-bold">No hay cotizaciones activas.</div>`;
-      return;
-    }
-
-    cont.innerHTML = cotizaciones.map((c) => {
-      const horasRest = Math.max(0, Math.round(((c.expiraTs || 0) - Date.now()) / 3600000));
-      const totalTxt = `$${Number(c.totalUsd || 0).toFixed(2)}`;
-      return `
-        <div class="cot-card-item ve-card p-3.5 flex flex-wrap items-center justify-between gap-2 hover:border-slate-400 cursor-pointer" data-id="${c.id}">
-          <div class="min-w-0 flex-1 pointer-events-none">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-mono-ve text-xs font-extrabold text-slate-900">${c.folio || c.id}</span>
-              <span class="text-xs font-extrabold text-slate-900">${c.cliente?.nombre || ""}</span>
-              <span class="font-mono-ve text-xs font-extrabold text-emerald-700">${totalTxt}</span>
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Expira en ${horasRest}h</span>
-            </div>
-            <div class="text-[11px] text-slate-500 mt-0.5">
-              ${c.items?.length || 0} ítems • Mult. ×${c.multiplicador || 1} • Toca la tarjeta para ver PDF
-            </div>
-          </div>
-          <div class="flex items-center gap-1.5" data-accion="controles">
-            <button type="button" class="btn-a-caja px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-extrabold cursor-pointer">Pasar a Caja →</button>
-            <button type="button" class="btn-del-cot px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold cursor-pointer">✕</button>
-          </div>
-        </div>
-      `;
-    }).join("");
-  }
-
-  root.querySelector("#listaCotizaciones").addEventListener("click", async (e) => {
-    const card = e.target.closest("[data-id]");
-    if (!card) return;
-    const cot = cotizaciones.find((x) => x.id === card.dataset.id);
-    if (!cot) return;
-
-    if (e.target.closest(".btn-a-caja")) {
-      e.stopPropagation();
-      state.cotizacionPendiente = cot;
-      if (typeof window.NEXUS_VE_NAV === "function") {
-        window.NEXUS_VE_NAV("caja-pos");
-      }
-    } else if (e.target.closest(".btn-del-cot")) {
-      e.stopPropagation();
-      if (!confirm(`¿Eliminar cotización ${cot.folio}?`)) return;
-      await deleteDoc(doc(refs.cotizaciones(), cot.id));
-      await cargarCotizaciones();
-    } else if (e.target.closest(".cot-card-item")) {
-      abrirPdfCotizacion(cot);
-    }
-  });
-
-  const tabNueva = root.querySelector("#tabNuevaCot");
-  const tabLista = root.querySelector("#tabListaCot");
-  const viewNueva = root.querySelector("#viewNuevaCot");
-  const viewLista = root.querySelector("#viewListaCot");
-
-  tabNueva.addEventListener("click", () => {
-    viewNueva.classList.remove("hidden");
-    viewLista.classList.add("hidden");
-    tabNueva.className = "px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer";
-    tabLista.className = "px-3 py-1.5 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 cursor-pointer";
-  });
-
-  tabLista.addEventListener("click", () => {
-    viewNueva.classList.add("hidden");
-    viewLista.classList.remove("hidden");
-    tabLista.className = "px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-950 text-white cursor-pointer";
-    tabNueva.className = "px-3 py-1.5 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 cursor-pointer";
-  });
-
-  async function cargarCotizaciones() {
-    const snap = await getDocs(refs.cotizaciones());
-    const ahora = Date.now();
-    const activas = [];
-    for (const d of snap.docs) {
-      const data = { id: d.id, ...d.data() };
-      if (data.expiraTs && data.expiraTs < ahora) {
-        deleteDoc(doc(refs.cotizaciones(), d.id)).catch(() => {});
-      } else {
-        activas.push(data);
-      }
-    }
-    cotizaciones = activas.sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
-    renderListaCot();
-  }
 
   busqEl.addEventListener("input", () => {
     busqAbierta = Boolean(busqEl.value.trim());
     renderBusqueda();
   });
 
-  const [snapCat, snapCli] = await Promise.all([getDocs(refs.catalogo()), getDocs(refs.clientes())]);
+  resEl.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-pid]");
+    if (!row) return;
+    const prodId = decodeURIComponent(row.dataset.pid || "");
+    const p = catalogo.find((x) => x.id === prodId);
+    if (!p) return;
+
+    const dispAlm = Math.max(0, Number(p.stockAlmacen || 0));
+    const origenInicial = dispAlm > 0 ? "almacen" : "planta";
+    const ex = carrito.find((x) => x.prodId === p.id);
+    if (ex) {
+      ex.cantidad += 1;
+    } else {
+      carrito.push({
+        id: p.id,
+        prodId: p.id,
+        codigo: p.codigo || p.id,
+        descripcion: p.descripcion || p.codigo || p.id,
+        proveedor: p.proveedor || "",
+        costoUsd: Number(p.costoUsd || 0),
+        precioUsd: Number(((p.costoUsd || 0) * factorActual).toFixed(2)),
+        cantidad: 1,
+        origen: origenInicial
+      });
+    }
+    busqAbierta = false;
+    busqEl.value = "";
+    renderBusqueda();
+    renderCarrito();
+  });
+
+  cartEl.addEventListener("input", (e) => {
+    const row = e.target.closest("[data-cidx]");
+    if (!row) return;
+    const idx = Number(row.dataset.cidx);
+    if (e.target.classList.contains("inp-cant-cot")) {
+      carrito[idx].cantidad = Math.max(1, parseInt(e.target.value, 10) || 1);
+    } else if (e.target.classList.contains("inp-prec-cot")) {
+      carrito[idx].precioUsd = formatearEntradaMoneda(e.target);
+    }
+    const sub = row.querySelector(".item-sub-cot");
+    if (sub) sub.textContent = `$${(carrito[idx].cantidad * carrito[idx].precioUsd).toFixed(2)}`;
+    renderTotales();
+  });
+
+  cartEl.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-cidx]");
+    if (!row) return;
+    const idx = Number(row.dataset.cidx);
+    if (e.target.closest(".btn-rm-cot")) {
+      carrito.splice(idx, 1);
+      renderCarrito();
+    } else if (e.target.closest(".btn-mas-cot")) {
+      carrito[idx].cantidad += 1;
+      renderCarrito();
+    } else if (e.target.closest(".btn-menos-cot")) {
+      if (carrito[idx].cantidad > 1) carrito[idx].cantidad -= 1;
+      else carrito.splice(idx, 1);
+      renderCarrito();
+    }
+  });
+
+  root.querySelector("#btnLimpiarCot").addEventListener("click", () => {
+    carrito = [];
+    ultimoClienteAplicadoId = "";
+    renderCarrito();
+  });
+
+  root.querySelector("#btnGuardarCot").addEventListener("click", async () => {
+    if (guardando) return;
+    if (!carrito.length) return alert("Agrega al menos un producto a la cotización.");
+
+    const docCli = normalizarIdVE(docEl.value) || "V-00000000";
+    const nomCli = nomEl.value.trim() || "Consumidor Final";
+    const totalUsd = Number(carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0).toFixed(2));
+    const tasas = getTasaActiva(state);
+    const now = Date.now();
+
+    guardando = true;
+    const btn = root.querySelector("#btnGuardarCot");
+    btn.disabled = true;
+    btn.textContent = "Guardando...";
+
+    try {
+      const { cotGuardada, nuevoNum } = await runTransaction(db, async (tx) => {
+        const empSnap = await tx.get(refs.empresaRef);
+        const actual = Number(empSnap.data()?.correlativos?.cotizacionActual || 0);
+        const sigNum = actual + 1;
+        const sigFolio = String(sigNum).padStart(5, "0");
+
+        const payload = {
+          id: sigFolio,
+          folio: sigFolio,
+          numero: sigNum,
+          fechaIso: new Date(now).toISOString().slice(0, 10),
+          creadoTs: now,
+          cliente: { documento: docCli, nombre: nomCli },
+          items: carrito,
+          totalUsd,
+          multiplicador: factorActual,
+          tasaBcvUsada: tasas.bcvActiva,
+          usuario: state.sesion.usuario || "Administrador",
+          creadoEn: serverTimestamp()
+        };
+
+        tx.set(doc(refs.cotizaciones(), sigFolio), payload);
+        tx.set(refs.empresaRef, { correlativos: { cotizacionActual: sigNum } }, { merge: true });
+
+        if (docCli !== "V-00000000") {
+          tx.set(
+            doc(refs.clientes(), docCli),
+            {
+              documento: docCli,
+              nombre: nomCli,
+              ultimoMultiplicador: factorActual,
+              actualizadoEn: serverTimestamp()
+            },
+            { merge: true }
+          );
+        }
+
+        return { cotGuardada: payload, nuevoNum: sigNum };
+      });
+
+      if (docCli !== "V-00000000") {
+        const cliEx = clientes.find((c) => c.id === docCli);
+        if (cliEx) {
+          cliEx.nombre = nomCli;
+          cliEx.ultimoMultiplicador = factorActual;
+        } else {
+          clientes.push({
+            id: docCli,
+            documento: docCli,
+            nombre: nomCli,
+            ultimoMultiplicador: factorActual
+          });
+        }
+      }
+
+      ultimoFolioCot = nuevoNum;
+      if (state.empresa?.correlativos) state.empresa.correlativos.cotizacionActual = nuevoNum;
+      actualizarFolioUI();
+
+      carrito = [];
+      ultimoClienteAplicadoId = "";
+      renderCarrito();
+      await cargarCotizaciones();
+      abrirDocumentoPDF("cotizacion", cotGuardada, state);
+    } catch (err) {
+      alert("Error guardando cotización: " + err.message);
+    } finally {
+      guardando = false;
+      btn.disabled = false;
+      btn.textContent = "Guardar Cotización y Generar PDF";
+    }
+  });
+
+  function renderListaCotizaciones() {
+    const q = root.querySelector("#busqCotGuardadas").value.trim().toLowerCase();
+    const cont = root.querySelector("#listaCotizaciones");
+
+    const filtradas = cotizaciones.filter((c) => {
+      if (!q) return true;
+      return `${c.folio || ""} ${c.cliente?.nombre || ""} ${c.cliente?.documento || ""}`.toLowerCase().includes(q);
+    });
+
+    if (!filtradas.length) {
+      cont.innerHTML = `<div class="ve-card text-center py-8 text-xs text-slate-500 font-bold">No hay cotizaciones guardadas.</div>`;
+      return;
+    }
+
+    cont.innerHTML = filtradas.map((c) => `
+      <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-cotid="${c.id}">
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-mono-ve text-xs font-extrabold text-slate-950">#${c.folio || c.id}</span>
+            <span class="text-[10px] font-bold text-slate-500">${c.fechaIso || "---"}</span>
+            ${c.multiplicador ? `<span class="text-[10px] font-mono-ve font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">×${c.multiplicador}</span>` : ""}
+          </div>
+          <div class="text-xs font-extrabold text-slate-800 mt-0.5">${c.cliente?.nombre || "Consumidor Final"} (${c.cliente?.documento || "---"})</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="text-right mr-1">
+            <div class="font-mono-ve text-sm font-extrabold text-slate-950">$${Number(c.totalUsd || 0).toFixed(2)}</div>
+            <div class="font-mono-ve text-[10px] text-slate-500">${(c.items || []).length} ítem(s)</div>
+          </div>
+          <button type="button" class="btn-conv-cot px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer">
+            Facturar →
+          </button>
+          <button type="button" class="btn-pdf-cot px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer">
+            PDF
+          </button>
+          <button type="button" class="btn-del-cot px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer">
+            ✕
+          </button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  root.querySelector("#listaCotizaciones").addEventListener("click", async (e) => {
+    const card = e.target.closest("[data-cotid]");
+    if (!card) return;
+    const cot = cotizaciones.find((x) => x.id === card.dataset.cotid);
+    if (!cot) return;
+
+    if (e.target.closest(".btn-conv-cot")) {
+      state.cotizacionPendiente = cot;
+      if (typeof window.NEXUS_VE_NAV === "function") {
+        window.NEXUS_VE_NAV("caja-pos");
+      }
+    } else if (e.target.closest(".btn-pdf-cot")) {
+      abrirDocumentoPDF("cotizacion", cot, state);
+    } else if (e.target.closest(".btn-del-cot")) {
+      if (!confirm(`¿Eliminar la cotización #${cot.folio || cot.id}?`)) return;
+      await deleteDoc(doc(refs.cotizaciones(), cot.id));
+      await cargarCotizaciones();
+    }
+  });
+
+  root.querySelector("#busqCotGuardadas").addEventListener("input", renderListaCotizaciones);
+
+  async function cargarCotizaciones() {
+    const snap = await getDocs(refs.cotizaciones());
+    cotizaciones = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => Number(b.creadoTs || 0) - Number(a.creadoTs || 0));
+    renderListaCotizaciones();
+  }
+
+  actualizarFolioUI();
+  const [snapCat, snapCli] = await Promise.all([
+    getDocs(refs.catalogo()),
+    getDocs(refs.clientes())
+  ]);
   catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
   clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
-  renderCarrito();
   await cargarCotizaciones();
+  renderCarrito();
 }
