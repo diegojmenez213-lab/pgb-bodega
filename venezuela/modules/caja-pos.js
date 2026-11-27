@@ -10,7 +10,8 @@ import {
   runTransaction,
   increment,
   normalizarIdVE,
-  serverTimestamp
+  serverTimestamp,
+  obtenerFechaLocalIso
 } from "../core/db.js";
 
 function getTasaActiva(state) {
@@ -198,10 +199,10 @@ export async function mount(root, state) {
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div class="lg:col-span-7 space-y-3">
-          <div class="ve-card p-3 space-y-2">
+          <div id="boxClientePos" class="ve-card p-3 space-y-2 relative">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <input id="posCliDoc" type="text" placeholder="Cédula / RIF (F2)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
-              <input id="posCliNom" type="text" placeholder="Nombre / Razón Social" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
+              <input id="posCliDoc" type="text" autocomplete="off" placeholder="Cédula / RIF (F2)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold uppercase" />
+              <input id="posCliNom" type="text" autocomplete="off" placeholder="Nombre / Razón Social" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold" />
               <div class="flex gap-1.5">
                 <select id="posTarifa" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold">
                   <option value="detal">Detal (×${fDetal})</option>
@@ -218,6 +219,7 @@ export async function mount(root, state) {
                 />
               </div>
             </div>
+            <div id="sugerenciasCliPos" class="hidden bg-white border border-slate-300 rounded-xl shadow-lg max-h-44 overflow-y-auto divide-y divide-slate-100"></div>
           </div>
 
           <div class="ve-card p-3 space-y-2">
@@ -238,6 +240,11 @@ export async function mount(root, state) {
             <div class="flex items-center justify-between">
               <h2 class="text-sm font-extrabold text-slate-900">Ítems de la Nota (<span id="posCantItemsBadge">0</span> und)</h2>
               <button id="btnLimpiarPos" type="button" class="text-[11px] font-bold text-rose-600 cursor-pointer">Limpiar (F8)</button>
+            </div>
+
+            <div id="avisoCostoCotizacion" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-[11px] text-rose-900 space-y-1">
+              <div class="font-extrabold">📈 Aviso: el costo subió desde que se hizo esta cotización</div>
+              <div id="txtAvisoCostoCotizacion" class="font-semibold leading-snug"></div>
             </div>
 
             <div id="avisoExcesoAlmacen" class="hidden p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-[11px] text-amber-950 space-y-1">
@@ -362,6 +369,7 @@ export async function mount(root, state) {
 
   const docEl = root.querySelector("#posCliDoc");
   const nomEl = root.querySelector("#posCliNom");
+  const sugCliEl = root.querySelector("#sugerenciasCliPos");
   const tarifaEl = root.querySelector("#posTarifa");
   const multEl = root.querySelector("#posMult");
   const busqEl = root.querySelector("#posBusq");
@@ -375,7 +383,9 @@ export async function mount(root, state) {
   const inpLimitePos = root.querySelector("#inpLimitePos");
 
   function buscarProdCatalogo(itemCarrito) {
-    return catalogo.find((x) => x.id === itemCarrito.prodId || x.id === itemCarrito.id || x.codigo === itemCarrito.codigo);
+    return catalogo.find(
+      (x) => x.id === itemCarrito.prodId || x.id === itemCarrito.id || x.codigo === itemCarrito.codigo
+    );
   }
 
   function refrescarAvisoExcesoAlmacen() {
@@ -411,12 +421,21 @@ export async function mount(root, state) {
     box.classList.remove("hidden");
   }
 
-  function aplicarFactorPos(nuevoFactor, sincronizarInput = false) {
+  function sincronizarSelectTarifaConFactor(val) {
+    if (Math.abs(val - fMayor) < 0.001) tarifaEl.value = "mayor";
+    else if (Math.abs(val - fDetal) < 0.001) tarifaEl.value = "detal";
+    else tarifaEl.value = "custom";
+  }
+
+  function aplicarFactorPos(nuevoFactor, sincronizarInput = false, recalcularCarrito = true) {
     const val = parseMultiplicadorTexto(nuevoFactor);
     if (val === null) return;
     factorActual = val;
-    if (sincronizarInput) multEl.value = String(val);
-    if (carrito.length) {
+    if (sincronizarInput) {
+      multEl.value = String(val);
+      sincronizarSelectTarifaConFactor(val);
+    }
+    if (recalcularCarrito && carrito.length) {
       carrito = carrito.map((it) => ({
         ...it,
         precioUsd: Number(((it.costoUsd || 0) * factorActual).toFixed(2))
@@ -426,10 +445,14 @@ export async function mount(root, state) {
     if (busqAbierta || busqEl.value.trim()) renderBusqueda();
   }
 
-  function aplicarClienteDetectado(cli, rellenarDoc = true, rellenarNom = true) {
+  function aplicarClienteDetectado(cli, { rellenarDoc = true, rellenarNom = true, forzar = false } = {}) {
     if (!cli) return;
-    if (rellenarDoc && cli.id) docEl.value = cli.id;
-    if (rellenarNom && cli.nombre && !nomEl.value.trim()) nomEl.value = cli.nombre;
+    if (rellenarDoc && cli.id && (forzar || !docEl.value.trim() || normalizarIdVE(docEl.value) === cli.id)) {
+      docEl.value = cli.id;
+    }
+    if (rellenarNom && cli.nombre && (forzar || !nomEl.value.trim())) {
+      nomEl.value = cli.nombre;
+    }
 
     if (ultimoClienteAplicadoId !== cli.id) {
       ultimoClienteAplicadoId = cli.id;
@@ -438,16 +461,61 @@ export async function mount(root, state) {
         Number(cli.factorPersonalizado) ||
         (cli.tarifa === "mayor" ? fMayor : fDetal);
 
-      if (Math.abs(fCli - fMayor) < 0.001) tarifaEl.value = "mayor";
-      else if (Math.abs(fCli - fDetal) < 0.001) tarifaEl.value = "detal";
-      else tarifaEl.value = "custom";
-
-      aplicarFactorPos(fCli, true);
+      aplicarFactorPos(fCli, true, true);
     }
 
     usarSaldoFavorEnNota = true;
     refrescarEstadoClienteActual();
   }
+
+  function renderSugerenciasCliente(textoRaw) {
+    const q = normalizarBusquedaTexto(textoRaw);
+    if (!q || q.length < 2) {
+      sugCliEl.classList.add("hidden");
+      return;
+    }
+
+    const matches = clientes.filter((c) => {
+      if (!c.id || c.id === "V-00000000") return false;
+      const nom = normalizarBusquedaTexto(c.nombre || "");
+      const docNorm = normalizarBusquedaTexto(c.id || "");
+      return nom.includes(q) || docNorm.includes(q);
+    }).slice(0, 8);
+
+    if (!matches.length) {
+      sugCliEl.classList.add("hidden");
+      return;
+    }
+
+    sugCliEl.innerHTML = matches.map((c) => {
+      const multGuardado = Number(c.ultimoMultiplicador || c.factorPersonalizado || 0);
+      return `
+        <button type="button" class="btn-pick-cli-pos w-full text-left px-3 py-2 text-xs hover:bg-slate-100 flex items-center justify-between gap-2 cursor-pointer" data-clid="${encodeURIComponent(c.id)}">
+          <div class="min-w-0 truncate">
+            <span class="font-extrabold text-slate-900">${c.nombre || c.id}</span>
+            <span class="font-mono-ve text-[10px] text-slate-500 ml-1">${c.id}</span>
+          </div>
+          ${multGuardado > 0 ? `<span class="font-mono-ve text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 shrink-0">×${multGuardado}</span>` : ""}
+        </button>
+      `;
+    }).join("");
+    sugCliEl.classList.remove("hidden");
+  }
+
+  sugCliEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-pick-cli-pos");
+    if (!btn) return;
+    const clid = decodeURIComponent(btn.dataset.clid || "");
+    const cli = clientes.find((c) => c.id === clid);
+    sugCliEl.classList.add("hidden");
+    if (cli) aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: true, forzar: true });
+  });
+
+  root.addEventListener("click", (e) => {
+    if (!e.target.closest("#boxClientePos")) {
+      sugCliEl.classList.add("hidden");
+    }
+  });
 
   function actualizarFolioUI() {
     root.querySelector("#nextFolioTxt").textContent = String(ultimoFolio + 1).padStart(5, "0");
@@ -1009,10 +1077,12 @@ export async function mount(root, state) {
   });
 
   docEl.addEventListener("input", () => {
+    renderSugerenciasCliente(docEl.value);
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
     if (cli) {
-      aplicarClienteDetectado(cli, false, true);
+      aplicarClienteDetectado(cli, { rellenarDoc: false, rellenarNom: true, forzar: false });
+      sugCliEl.classList.add("hidden");
     } else {
       ultimoClienteAplicadoId = "";
       refrescarEstadoClienteActual();
@@ -1023,7 +1093,7 @@ export async function mount(root, state) {
     const id = normalizarIdVE(docEl.value);
     const cli = clientes.find((c) => c.id === id);
     if (cli) {
-      aplicarClienteDetectado(cli, true, true);
+      aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: true, forzar: false });
     } else {
       usarSaldoFavorEnNota = true;
       refrescarEstadoClienteActual();
@@ -1037,31 +1107,36 @@ export async function mount(root, state) {
   }
 
   nomEl.addEventListener("input", () => {
+    renderSugerenciasCliente(nomEl.value);
     const cli = buscarClientePorNombreExacto(nomEl.value);
-    if (cli) aplicarClienteDetectado(cli, true, false);
+    if (cli) {
+      aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: false, forzar: true });
+      sugCliEl.classList.add("hidden");
+    }
   });
 
   nomEl.addEventListener("blur", () => {
     const cli = buscarClientePorNombreExacto(nomEl.value);
-    if (cli) aplicarClienteDetectado(cli, true, false);
+    if (cli) aplicarClienteDetectado(cli, { rellenarDoc: true, rellenarNom: false, forzar: true });
   });
 
   tarifaEl.addEventListener("change", () => {
-    if (tarifaEl.value === "mayor") aplicarFactorPos(fMayor, true);
-    else if (tarifaEl.value === "detal") aplicarFactorPos(fDetal, true);
+    if (tarifaEl.value === "mayor") aplicarFactorPos(fMayor, true, true);
+    else if (tarifaEl.value === "detal") aplicarFactorPos(fDetal, true, true);
     else multEl.focus();
   });
 
   multEl.addEventListener("input", () => {
     tarifaEl.value = "custom";
-    aplicarFactorPos(multEl.value, false);
+    aplicarFactorPos(multEl.value, false, true);
   });
 
   multEl.addEventListener("blur", () => {
     const val = parseMultiplicadorTexto(multEl.value);
     if (val !== null) {
       multEl.value = String(val);
-      aplicarFactorPos(val, false);
+      sincronizarSelectTarifaConFactor(val);
+      aplicarFactorPos(val, false, true);
     } else {
       multEl.value = String(factorActual);
     }
@@ -1076,6 +1151,8 @@ export async function mount(root, state) {
     cotizacionOrigenId = null;
     ultimoClienteAplicadoId = "";
     pagos = [{ metodo: "Efectivo USD", montoUsd: 0, referencia: "" }];
+    root.querySelector("#avisoCostoCotizacion").classList.add("hidden");
+    sugCliEl.classList.add("hidden");
     actualizarEstadoCreditoUI();
     renderCarrito();
   }
@@ -1090,6 +1167,7 @@ export async function mount(root, state) {
       const prod = buscarProdCatalogo(it);
       const dispAlm = Math.max(0, Number(prod?.stockAlmacen || 0));
       const cantTotal = Math.max(1, Number(it.cantidad || 1));
+      const costoFresco = prod ? Number(prod.costoUsd || 0) : Number(it.costoUsd || 0);
 
       if (it.origen === "almacen" && cantTotal > dispAlm) {
         if (dispAlm > 0) {
@@ -1097,12 +1175,16 @@ export async function mount(root, state) {
           itemsFinales.push({
             ...it,
             id: prod?.id || it.prodId || it.id,
+            prodId: prod?.id || it.prodId || it.id,
+            costoUsd: costoFresco,
             cantidad: dispAlm,
             origen: "almacen"
           });
           itemsFinales.push({
             ...it,
             id: prod?.id || it.prodId || it.id,
+            prodId: prod?.id || it.prodId || it.id,
+            costoUsd: costoFresco,
             cantidad: cantPlanta,
             origen: "planta"
           });
@@ -1111,6 +1193,8 @@ export async function mount(root, state) {
           itemsFinales.push({
             ...it,
             id: prod?.id || it.prodId || it.id,
+            prodId: prod?.id || it.prodId || it.id,
+            costoUsd: costoFresco,
             cantidad: cantTotal,
             origen: "planta"
           });
@@ -1120,6 +1204,8 @@ export async function mount(root, state) {
         itemsFinales.push({
           ...it,
           id: prod?.id || it.prodId || it.id,
+          prodId: prod?.id || it.prodId || it.id,
+          costoUsd: costoFresco,
           cantidad: cantTotal,
           origen: it.origen || (dispAlm > 0 ? "almacen" : "planta")
         });
@@ -1220,10 +1306,12 @@ export async function mount(root, state) {
       }
 
       const now = Date.now();
-      const jornadaId = state.empresa?.jornadaActivaId || new Date().toISOString().slice(0, 10);
+      const fechaHoyLocal = obtenerFechaLocalIso(now);
+      const jornadaId = state.empresa?.jornadaActivaId || fechaHoyLocal;
       const cotIdAEliminar = cotizacionOrigenId;
 
       const { nuevoNum } = await runTransaction(db, async (tx) => {
+        // 1. TODAS las lecturas primero (regla estricta de Firestore)
         const empSnap = await tx.get(refs.empresaRef);
         const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || 0);
         const sigNum = actual + 1;
@@ -1235,10 +1323,28 @@ export async function mount(root, state) {
           cliFavorActual = Number(cliSnap.data()?.saldoAFavorUsd || 0);
         }
 
+        const deltasPorProd = new Map();
+        for (const it of itemsFinales) {
+          const pid = it.prodId || it.id;
+          if (!pid) continue;
+          const cant = Number(it.cantidad || 0);
+          if (cant <= 0) continue;
+          const acc = deltasPorProd.get(pid) || { almacen: 0, planta: 0 };
+          if (it.origen === "almacen") acc.almacen += cant;
+          else acc.planta += cant;
+          deltasPorProd.set(pid, acc);
+        }
+
+        const prodSnaps = new Map();
+        for (const pid of deltasPorProd.keys()) {
+          prodSnaps.set(pid, await tx.get(doc(refs.catalogo(), pid)));
+        }
+
+        // 2. TODAS las escrituras después
         tx.set(doc(refs.notasEntrega(), sigFolio), {
           folio: sigFolio,
           numero: sigNum,
-          fechaIso: new Date(now).toISOString().slice(0, 10),
+          fechaIso: fechaHoyLocal,
           jornadaId,
           cierreId: null,
           anulada: false,
@@ -1284,18 +1390,19 @@ export async function mount(root, state) {
           );
         }
 
-        for (const it of itemsFinales) {
-          if (it.origen === "almacen") {
-            tx.set(doc(refs.catalogo(), it.id), {
-              stockAlmacen: increment(-Number(it.cantidad || 1)),
-              ultimaVentaTs: now
-            }, { merge: true });
-          } else {
-            tx.set(doc(refs.catalogo(), it.id), {
-              pedidosPlantaCount: increment(Number(it.cantidad || 1)),
-              ultimaVentaTs: now
-            }, { merge: true });
+        for (const [pid, delta] of deltasPorProd.entries()) {
+          const pData = prodSnaps.get(pid)?.data() || {};
+          const updateProd = { ultimaVentaTs: now };
+          if (delta.almacen > 0) {
+            const curAlm = Number(pData.stockAlmacen || 0);
+            updateProd.stockAlmacen = Math.max(0, curAlm - delta.almacen);
           }
+          if (delta.planta > 0) {
+            const curPla = Number(pData.stockPlanta || 0);
+            updateProd.stockPlanta = Math.max(0, curPla - delta.planta);
+            updateProd.pedidosPlantaCount = increment(delta.planta);
+          }
+          tx.set(doc(refs.catalogo(), pid), updateProd, { merge: true });
         }
 
         if (cotIdAEliminar) {
@@ -1361,6 +1468,16 @@ export async function mount(root, state) {
   };
   window.addEventListener("keydown", window.__vePosKeyHandler);
 
+  if (window.__vePosTasaHandler) {
+    window.removeEventListener("ve-tasa-changed", window.__vePosTasaHandler);
+  }
+  window.__vePosTasaHandler = () => {
+    if (state.rutaActual !== "caja-pos") return;
+    refrescarEstadoClienteActual();
+    renderTotalesYRestante();
+  };
+  window.addEventListener("ve-tasa-changed", window.__vePosTasaHandler);
+
   busqEl.addEventListener("input", () => {
     busqAbierta = Boolean(busqEl.value.trim());
     renderBusqueda();
@@ -1382,8 +1499,44 @@ export async function mount(root, state) {
     cotizacionOrigenId = cot.id || cot.folio || null;
     docEl.value = cot.cliente?.documento || "";
     nomEl.value = cot.cliente?.nombre || "";
-    if (cot.multiplicador) aplicarFactorPos(cot.multiplicador, true);
-    carrito = (cot.items || []).map((it) => ({ ...it, prodId: it.prodId || it.id }));
+
+    const docNormCot = normalizarIdVE(docEl.value);
+    if (docNormCot && docNormCot !== "V-00000000") {
+      ultimoClienteAplicadoId = docNormCot;
+    }
+
+    if (cot.multiplicador) {
+      aplicarFactorPos(cot.multiplicador, true, false);
+    }
+
+    const alertasCosto = [];
+    carrito = (cot.items || []).map((it) => {
+      const prod = catalogo.find(
+        (x) => x.id === it.prodId || x.id === it.id || x.codigo === it.codigo
+      );
+      const costoPrevio = Number(it.costoUsd || 0);
+      const costoActual = prod ? Number(prod.costoUsd || 0) : costoPrevio;
+      if (prod && costoPrevio > 0 && costoActual > costoPrevio + 0.009) {
+        alertasCosto.push(
+          `<strong>${it.codigo || prod.codigo}</strong>: costo $${costoPrevio.toFixed(2)} → $${costoActual.toFixed(2)} (precio cotizado: $${Number(it.precioUsd || 0).toFixed(2)})`
+        );
+      }
+      const dispAlm = Math.max(0, Number(prod?.stockAlmacen || 0));
+      const origenActualizado = dispAlm > 0 ? "almacen" : (it.origen || "planta");
+      return {
+        ...it,
+        id: prod?.id || it.prodId || it.id,
+        prodId: prod?.id || it.prodId || it.id,
+        costoUsd: costoActual,
+        origen: origenActualizado
+      };
+    });
+
+    if (alertasCosto.length) {
+      root.querySelector("#txtAvisoCostoCotizacion").innerHTML = alertasCosto.join("<br>");
+      root.querySelector("#avisoCostoCotizacion").classList.remove("hidden");
+    }
+
     refrescarEstadoClienteActual();
   }
 
