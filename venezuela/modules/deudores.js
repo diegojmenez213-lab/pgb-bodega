@@ -9,9 +9,10 @@ import {
   where,
   writeBatch,
   normalizarIdVE,
-  serverTimestamp
+  serverTimestamp,
+  obtenerFechaLocalIso
 } from "../core/db.js";
-import { imprimirDocumentoCarta } from "./documentos-pdf.js";
+import { abrirDocumentoPDF } from "./documentos-pdf.js";
 
 const METODOS_PAGO = [
   "Efectivo USD",
@@ -99,7 +100,7 @@ export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
   root.innerHTML = `
-    <div class="space-y-4 max-w-6xl mx-auto">
+    <div id="deudoresWrap" class="space-y-4 max-w-6xl mx-auto">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Deudores Activos</h1>
@@ -145,6 +146,7 @@ export async function mount(root, state) {
     </div>
   `;
 
+  const wrapEl = root.querySelector("#deudoresWrap");
   let gruposDeudores = [];
   let clientesMap = new Map();
   let procesandoAbono = false;
@@ -218,6 +220,7 @@ export async function mount(root, state) {
   }
 
   function render() {
+    if (!wrapEl.isConnected) return;
     const q = busqEl.value.trim().toLowerCase();
     const fPorVencer = porVencerEl.checked;
     const fVencidas = vencidasEl.checked;
@@ -432,10 +435,11 @@ export async function mount(root, state) {
     procesandoAbono = true;
     try {
       const saldoActual = Number(nota.saldoPendienteUsd || 0);
-      const abonoAplicadoANota = Math.min(saldoActual, monto);
+      const abonoAplicadoANota = Number(Math.min(saldoActual, monto).toFixed(2));
       const sobrepago = usandoSaldoFavor ? 0 : Math.max(0, Number((monto - saldoActual).toFixed(2)));
       const nuevoSaldo = Math.max(0, Number((saldoActual - abonoAplicadoANota).toFixed(2)));
       const now = Date.now();
+      const fechaHoyIso = obtenerFechaLocalIso(now);
       const tasas = getTasaActiva(state);
 
       const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
@@ -447,20 +451,25 @@ export async function mount(root, state) {
         referencia: String(referencia || "").trim(),
         usandoSaldoFavor,
         cierreId: null,
-        fechaIso: new Date(now).toISOString().slice(0, 10),
+        fechaIso: fechaHoyIso,
         fechaHoraTxt: formatearFechaHora(now),
         ts: now,
         usuario: state.sesion?.usuario || "Administrador"
       });
+
+      const totalAbonadoUsd = Number(
+        historialAbonos.reduce((s, a) => s + Number(a.montoUsd || 0), 0).toFixed(2)
+      );
 
       const batch = writeBatch(db);
       batch.set(
         doc(refs.notasEntrega(), nota.id),
         {
           saldoPendienteUsd: nuevoSaldo,
+          totalAbonadoUsd,
           esCredito: nuevoSaldo > 0.01,
           tieneAbonosSinCerrar: true,
-          saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
+          saldadaEn: nuevoSaldo <= 0.01 ? fechaHoyIso : (nota.saldadaEn || null),
           saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
           abonos: historialAbonos,
           actualizadoEn: serverTimestamp()
@@ -512,6 +521,7 @@ export async function mount(root, state) {
     procesandoAbono = true;
     try {
       const now = Date.now();
+      const fechaHoyIso = obtenerFechaLocalIso(now);
       const tasas = getTasaActiva(state);
       const batch = writeBatch(db);
       let notasAfectadas = 0;
@@ -522,7 +532,7 @@ export async function mount(root, state) {
         if (saldoActual <= 0.009) continue;
 
         const esUltima = i === grupo.notas.length - 1;
-        const aplicado = Math.min(saldoActual, restante);
+        const aplicado = Number(Math.min(saldoActual, restante).toFixed(2));
         restante = Number((restante - aplicado).toFixed(2));
         const sobrepagoEnEsta = esUltima && restante > 0.01 ? restante : 0;
         if (sobrepagoEnEsta > 0) restante = 0;
@@ -530,7 +540,7 @@ export async function mount(root, state) {
         const nuevoSaldo = Math.max(0, Number((saldoActual - aplicado).toFixed(2)));
         const historialAbonos = Array.isArray(nota.abonos) ? [...nota.abonos] : [];
         historialAbonos.push({
-          montoUsd: Number(aplicado.toFixed(2)),
+          montoUsd: aplicado,
           sobrepagoUsd: sobrepagoEnEsta,
           montoBs: tasas.bcvActiva ? Number(((aplicado + sobrepagoEnEsta) * tasas.bcvActiva).toFixed(2)) : 0,
           metodo,
@@ -538,19 +548,24 @@ export async function mount(root, state) {
           usandoSaldoFavor: false,
           esFifo: true,
           cierreId: null,
-          fechaIso: new Date(now).toISOString().slice(0, 10),
+          fechaIso: fechaHoyIso,
           fechaHoraTxt: formatearFechaHora(now),
           ts: now,
           usuario: state.sesion?.usuario || "Administrador"
         });
 
+        const totalAbonadoUsd = Number(
+          historialAbonos.reduce((s, a) => s + Number(a.montoUsd || 0), 0).toFixed(2)
+        );
+
         batch.set(
           doc(refs.notasEntrega(), nota.id),
           {
             saldoPendienteUsd: nuevoSaldo,
+            totalAbonadoUsd,
             esCredito: nuevoSaldo > 0.01,
             tieneAbonosSinCerrar: true,
-            saldadaEn: nuevoSaldo <= 0.01 ? new Date(now).toISOString().slice(0, 10) : (nota.saldadaEn || null),
+            saldadaEn: nuevoSaldo <= 0.01 ? fechaHoyIso : (nota.saldadaEn || null),
             saldadaTs: nuevoSaldo <= 0.01 ? now : (nota.saldadaTs || null),
             abonos: historialAbonos,
             actualizadoEn: serverTimestamp()
@@ -679,20 +694,25 @@ export async function mount(root, state) {
       else abonosAbiertos.add(claveNota);
       render();
     } else if (e.target.closest(".btn-ver-nota")) {
-      imprimirDocumentoCarta({
-        tipo: "NOTA DE ENTREGA",
-        folio: nota.folio || nota.id,
-        empresa: state.empresa,
-        cliente: nota.cliente || { documento: grupo.documento, nombre: grupo.nombre },
-        items: nota.items || [],
-        totalUsd: Number(nota.totalUsd || 0),
-        monedas: nota.monedas || ["USD", "BS"],
-        tasas: getTasaActiva(state),
-        pagos: nota.pagos || [],
-        observaciones: `Saldo pendiente: $${Number(nota.saldoPendienteUsd || 0).toFixed(2)} • Plazo: ${nota.plazoDias} días.`
-      });
+      abrirDocumentoPDF(
+        "nota",
+        {
+          ...nota,
+          cliente: nota.cliente || { documento: grupo.documento, nombre: grupo.nombre }
+        },
+        state
+      );
     }
   });
+
+  const onTasaChanged = () => {
+    if (!wrapEl.isConnected) {
+      window.removeEventListener("ve-tasa-changed", onTasaChanged);
+      return;
+    }
+    render();
+  };
+  window.addEventListener("ve-tasa-changed", onTasaChanged);
 
   async function cargarDeudores() {
     const [snapNotas, snapCli] = await Promise.all([
