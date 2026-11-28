@@ -278,6 +278,15 @@
       } catch { el.textContent = ""; }
     }
 
+    function emitirCambioTasas() {
+      const detail = {
+        ...state.tasas,
+        modoTasaBCV: state.modoTasaBCV
+      };
+      window.dispatchEvent(new CustomEvent("ve-tasa-changed", { detail }));
+      window.dispatchEvent(new CustomEvent("nexus-ve-tasas-updated", { detail: state.tasas }));
+    }
+
     function pintarTasas() {
       const t = state.tasas;
       document.getElementById("valBcvHoy").textContent = t.bcvHoy ? `${Number(t.bcvHoy).toFixed(2)} Bs` : "--.--";
@@ -285,11 +294,13 @@
       document.getElementById("valUsdt").textContent = t.usdt ? `${Number(t.usdt).toFixed(2)} Bs` : "--.--";
 
       const pillNext = document.getElementById("pillBcvNext");
-      if (t.bcvManana && Number(t.bcvManana) !== Number(t.bcvHoy)) {
+      const hayManana = Boolean(t.bcvManana && Number(t.bcvManana) !== Number(t.bcvHoy));
+      if (hayManana) {
         pillNext.classList.remove("hidden");
         document.getElementById("valBcvNext").textContent = `${Number(t.bcvManana).toFixed(2)} Bs`;
       } else {
         pillNext.classList.add("hidden");
+        if (state.modoTasaBCV === "manana") state.modoTasaBCV = "hoy";
       }
       document.getElementById("pillBcvHoy").classList.toggle("active-bcv", state.modoTasaBCV === "hoy");
       pillNext.classList.toggle("active-bcv", state.modoTasaBCV === "manana");
@@ -311,7 +322,7 @@
           actualizado: data.actualizado || ""
         };
         pintarTasas();
-        window.dispatchEvent(new CustomEvent("nexus-ve-tasas-updated", { detail: state.tasas }));
+        emitirCambioTasas();
       } catch (err) {
         console.warn("Error tasas:", err);
       } finally {
@@ -437,8 +448,17 @@
       });
 
       document.getElementById("btnAlertaVencidos").addEventListener("click", () => abrirModulo("deudores", { pushHistory: true }));
-      document.getElementById("pillBcvHoy").addEventListener("click", () => { state.modoTasaBCV = "hoy"; pintarTasas(); });
-      document.getElementById("pillBcvNext").addEventListener("click", () => { state.modoTasaBCV = "manana"; pintarTasas(); });
+      document.getElementById("pillBcvHoy").addEventListener("click", () => {
+        state.modoTasaBCV = "hoy";
+        pintarTasas();
+        emitirCambioTasas();
+      });
+      document.getElementById("pillBcvNext").addEventListener("click", () => {
+        if (!state.tasas.bcvManana) return;
+        state.modoTasaBCV = "manana";
+        pintarTasas();
+        emitirCambioTasas();
+      });
       document.getElementById("btnRefrescarTasas").addEventListener("click", () => cargarTasas(true));
       document.getElementById("btnLogoutPC").addEventListener("click", cerrarSesionVE);
       document.getElementById("btnLogoutMob").addEventListener("click", cerrarSesionVE);
