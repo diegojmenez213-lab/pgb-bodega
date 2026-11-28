@@ -4,9 +4,13 @@ import {
   doc,
   getDocs,
   setDoc,
+  query,
+  where,
   serverTimestamp,
   obtenerFechaLocalIso
 } from "../core/db.js";
+
+const DIAS_31_MS = 31 * 86400000;
 
 async function cargarSheetJS() {
   if (window.XLSX) return window.XLSX;
@@ -18,6 +22,14 @@ async function cargarSheetJS() {
     document.head.appendChild(s);
   });
   return window.XLSX;
+}
+
+function escaparHtml(str = "") {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function normalizarTexto(txt) {
@@ -121,6 +133,7 @@ export async function mount(root, state) {
   let catalogo = [];
   let notas = [];
   let tabActiva = "pedir";
+  let cargando = false;
   let cantPedirManual = new Map();
   let analisisActual = {
     pedir: [],
@@ -134,8 +147,10 @@ export async function mount(root, state) {
   const busqEl = root.querySelector("#sugBusq");
   const soloPlantaEl = root.querySelector("#sugSoloPlanta");
   const listaEl = root.querySelector("#listaSugerido");
+  const btnRecargarEl = root.querySelector("#btnRecargarSug");
 
   function poblarProveedores() {
+    if (!root.isConnected) return;
     const provs = Array.from(
       new Set(catalogo.map((p) => String(p.proveedor || "").trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b, "es"));
@@ -143,11 +158,12 @@ export async function mount(root, state) {
     const prevVal = provEl.value;
     provEl.innerHTML =
       `<option value="">Todos los Proveedores (${provs.length})</option>` +
-      provs.map((pr) => `<option value="${pr}">${pr}</option>`).join("");
+      provs.map((pr) => `<option value="${escaparHtml(pr)}">${escaparHtml(pr)}</option>`).join("");
     if (prevVal && provs.includes(prevVal)) provEl.value = prevVal;
   }
 
   function calcularAnalisis() {
+    if (!root.isConnected) return;
     const diasCob = Math.max(1, parseInt(cobEl.value, 10) || 15);
     const provSel = provEl.value;
     const q = normalizarTexto(busqEl.value);
@@ -353,7 +369,7 @@ export async function mount(root, state) {
     root.querySelector("#cntTabMantener").textContent = String(mantener.length);
     root.querySelector("#cntTabSinMov").textContent = String(sin_movimiento.length);
 
-    const ambitoTxt = provSel ? `del proveedor <strong>${provSel}</strong>` : "de todos los proveedores";
+    const ambitoTxt = provSel ? `del proveedor <strong>${escaparHtml(provSel)}</strong>` : "de todos los proveedores";
     root.querySelector("#txtExplicacionSug").innerHTML =
       notasValidas30d === 0
         ? `Aún no hay ventas válidas registradas en los últimos 30 días. Cuando factures notas en Caja, aquí verás automáticamente qué reponer y cuánto invertir.`
@@ -362,7 +378,7 @@ export async function mount(root, state) {
           (agotados_planta.length
             ? `, hay <strong>${agotados_planta.length} producto(s) con demanda pero agotados en Planta</strong>`
             : "") +
-          (top1 ? ` y tu producto de mayor rotación es <strong>${top1.codigo}</strong> (${top1.vendidos30d} und vendidas).` : ".");
+          (top1 ? ` y tu producto de mayor rotación es <strong>${escaparHtml(top1.codigo)}</strong> (${top1.vendidos30d} und vendidas).` : ".");
 
     root.querySelector("#kpiGridSug").innerHTML = `
       <div class="bg-white rounded-xl border border-slate-200 p-2.5">
@@ -394,6 +410,7 @@ export async function mount(root, state) {
   }
 
   function renderLista() {
+    if (!root.isConnected) return;
     actualizarTabsUI();
     const items = analisisActual[tabActiva] || [];
 
@@ -416,13 +433,13 @@ export async function mount(root, state) {
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5 flex-wrap">
-              <span class="font-mono-ve text-xs font-extrabold text-slate-950">${it.codigo || it.id}</span>
-              ${it.proveedor ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-900">${it.proveedor}</span>` : ""}
+              <span class="font-mono-ve text-xs font-extrabold text-slate-950">${escaparHtml(it.codigo || it.id)}</span>
+              ${it.proveedor ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-900">${escaparHtml(it.proveedor)}</span>` : ""}
               <span class="text-[10px] font-mono-ve font-extrabold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900">Costo: $${it.costoUsd.toFixed(2)}</span>
               ${it.vendidos30d > 0 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Vendidos 30d: ${it.vendidos30d}</span>` : ""}
             </div>
-            <div class="text-xs font-bold text-slate-800 mt-0.5">${it.descripcion || ""}</div>
-            <div class="text-[11px] text-slate-600 mt-1 leading-snug">${it.motivo}</div>
+            <div class="text-xs font-bold text-slate-800 mt-0.5">${escaparHtml(it.descripcion || "")}</div>
+            <div class="text-[11px] text-slate-600 mt-1 leading-snug">${escaparHtml(it.motivo)}</div>
           </div>
 
           <div class="flex flex-wrap items-center gap-2 shrink-0">
@@ -436,6 +453,7 @@ export async function mount(root, state) {
                 <label class="text-[9px] font-extrabold uppercase text-sky-900 block">Planta Real</label>
                 <input
                   type="number"
+                  inputmode="numeric"
                   min="0"
                   value="${it.stockPlanta}"
                   title="Al cambiar este número se guarda en tu catálogo para Caja y Cotizaciones"
@@ -454,6 +472,7 @@ export async function mount(root, state) {
                 <label class="text-[9px] font-extrabold uppercase text-emerald-900 block">Pedir</label>
                 <input
                   type="number"
+                  inputmode="numeric"
                   min="0"
                   value="${it.pedirFinal}"
                   class="inp-cant-pedir w-14 bg-white border border-emerald-400 rounded-md px-1 py-0.5 text-xs font-mono-ve font-extrabold text-center text-emerald-950"
@@ -473,6 +492,7 @@ export async function mount(root, state) {
   }
 
   function recalcularYRenderizar() {
+    if (!root.isConnected) return;
     calcularAnalisis();
     renderLista();
   }
@@ -520,6 +540,7 @@ export async function mount(root, state) {
 
       const prod = catalogo.find((p) => p.id === pid);
       if (prod) prod.stockPlanta = nuevoStockPlanta;
+      state.parchearStockCatalogo?.([{ id: pid, stockPlanta: nuevoStockPlanta }]);
 
       // Recalcula sin pisar una cantidad manual salvo si superaba la nueva Planta real
       if (cantPedirManual.has(pid) && soloPlantaEl.checked && cantPedirManual.get(pid) > nuevoStockPlanta) {
@@ -598,19 +619,51 @@ export async function mount(root, state) {
   });
   busqEl.addEventListener("input", recalcularYRenderizar);
   soloPlantaEl.addEventListener("change", recalcularYRenderizar);
-  root.querySelector("#btnRecargarSug").addEventListener("click", cargarDatos);
+  btnRecargarEl.addEventListener("click", () => cargarDatos(true));
 
-  async function cargarDatos() {
-    const [snapCat, snapNotas] = await Promise.all([
-      getDocs(refs.catalogo()),
-      getDocs(refs.notasEntrega())
-    ]);
-    catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
-    notas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
-    cantPedirManual.clear();
-    poblarProveedores();
-    recalcularYRenderizar();
+  async function cargarDatos(forzar = false) {
+    if (cargando) return;
+    cargando = true;
+    btnRecargarEl.disabled = true;
+    btnRecargarEl.textContent = "↻ ...";
+
+    try {
+      const hace31Dias = Date.now() - DIAS_31_MS;
+      const [listaCat, snapNotas] = await Promise.all([
+        typeof state.obtenerCatalogo === "function"
+          ? state.obtenerCatalogo({ forzar })
+          : getDocs(refs.catalogo()).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        getDocs(query(refs.notasEntrega(), where("creadoTs", ">=", hace31Dias)))
+      ]);
+
+      if (!root.isConnected) return;
+
+      catalogo = listaCat;
+      notas = snapNotas.docs.map((d) => ({ id: d.id, ...d.data() }));
+      cantPedirManual.clear();
+      poblarProveedores();
+      recalcularYRenderizar();
+    } catch (err) {
+      if (!root.isConnected) return;
+      root.querySelector("#txtExplicacionSug").textContent = "Error al cargar ventas e inventario.";
+      listaEl.innerHTML = `
+        <div class="ve-card text-center py-10 space-y-3">
+          <div class="text-xs font-extrabold text-rose-700">No se pudo calcular el pedido sugerido.</div>
+          <div class="text-[11px] text-slate-500">${escaparHtml(err?.message || "Verifica tu conexión e intenta de nuevo.")}</div>
+          <button id="btnReintentarSug" type="button" class="px-4 py-2 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">
+            ↻ Reintentar
+          </button>
+        </div>
+      `;
+      listaEl.querySelector("#btnReintentarSug")?.addEventListener("click", () => cargarDatos(true));
+    } finally {
+      cargando = false;
+      if (root.isConnected) {
+        btnRecargarEl.disabled = false;
+        btnRecargarEl.textContent = "↻ Actualizar";
+      }
+    }
   }
 
-  await cargarDatos();
+  await cargarDatos(false);
 }
