@@ -9,10 +9,12 @@ import {
   where,
   writeBatch,
   normalizarIdVE,
-  serverTimestamp
+  serverTimestamp,
+  obtenerFechaLocalIso
 } from "../core/db.js";
 
 const DIAS_90_MS = 90 * 24 * 60 * 60 * 1000;
+const LOTE_BATCH_MAX = 400;
 
 const METODOS_PAGO = [
   "Efectivo USD",
@@ -90,11 +92,23 @@ function inicioRangoTs(filtro, ahora = Date.now()) {
   return 0;
 }
 
+async function commitOperacionesEnLotes(operaciones) {
+  for (let i = 0; i < operaciones.length; i += LOTE_BATCH_MAX) {
+    const slice = operaciones.slice(i, i + LOTE_BATCH_MAX);
+    const batch = writeBatch(db);
+    for (const op of slice) {
+      if (op.merge) batch.set(op.ref, op.data, { merge: true });
+      else batch.set(op.ref, op.data);
+    }
+    await batch.commit();
+  }
+}
+
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
 
   root.innerHTML = `
-    <div class="space-y-5 max-w-6xl mx-auto">
+    <div id="analiticaWrap" class="space-y-5 max-w-6xl mx-auto">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-extrabold text-slate-900">Analítica & Cierre de Caja</h1>
@@ -259,6 +273,7 @@ export async function mount(root, state) {
     </div>
   `;
 
+  const wrapEl = root.querySelector("#analiticaWrap");
   let rangoActual = "jornada";
   let archivoCompletoCargado = false;
   let todasNotas = [];
@@ -268,6 +283,7 @@ export async function mount(root, state) {
   const gastoMontoEl = root.querySelector("#gastoMonto");
   const gastoMotivoEl = root.querySelector("#gastoMotivo");
   const gastoMetodoEl = root.querySelector("#gastoMetodo");
+  const btnGuardarGasto = root.querySelector("#btnGuardarGasto");
 
   gastoMontoEl.addEventListener("focus", () => fijarCursorAlFinal(gastoMontoEl));
   gastoMontoEl.addEventListener("click", () => fijarCursorAlFinal(gastoMontoEl));
@@ -282,32 +298,42 @@ export async function mount(root, state) {
     }
   });
 
-  root.querySelector("#btnGuardarGasto").addEventListener("click", async () => {
+  btnGuardarGasto.addEventListener("click", async () => {
     const monto = parseFloat(gastoMontoEl.value || "0");
     const motivo = gastoMotivoEl.value.trim();
     const metodo = gastoMetodoEl.value;
     if (monto <= 0) return alert("Ingresa un monto mayor a $0.00.");
     if (!motivo) return alert("Escribe el motivo o concepto de la salida.");
 
-    const now = Date.now();
-    const gastoId = `GAS-${now}`;
-    await setDoc(doc(refs.gastosCaja(), gastoId), {
-      id: gastoId,
-      montoUsd: Number(monto.toFixed(2)),
-      metodo,
-      motivo,
-      cierreId: null,
-      creadoTs: now,
-      fechaIso: new Date(now).toISOString().slice(0, 10),
-      fechaHoraTxt: formatearFechaHora(now),
-      usuario: state.sesion?.usuario || "Administrador",
-      creadoEn: serverTimestamp()
-    });
+    btnGuardarGasto.disabled = true;
+    btnGuardarGasto.textContent = "Guardando...";
 
-    gastoMontoEl.value = "0.00";
-    gastoMotivoEl.value = "";
-    root.querySelector("#panelNuevoGasto").classList.add("hidden");
-    await cargarDatos(archivoCompletoCargado);
+    try {
+      const now = Date.now();
+      const gastoId = `GAS-${now}`;
+      await setDoc(doc(refs.gastosCaja(), gastoId), {
+        id: gastoId,
+        montoUsd: Number(monto.toFixed(2)),
+        metodo,
+        motivo,
+        cierreId: null,
+        creadoTs: now,
+        fechaIso: obtenerFechaLocalIso(now),
+        fechaHoraTxt: formatearFechaHora(now),
+        usuario: state.sesion?.usuario || "Administrador",
+        creadoEn: serverTimestamp()
+      });
+
+      gastoMontoEl.value = "0.00";
+      gastoMotivoEl.value = "";
+      root.querySelector("#panelNuevoGasto").classList.add("hidden");
+      await cargarDatos(archivoCompletoCargado);
+    } catch (err) {
+      alert("Error al guardar la salida: " + err.message);
+    } finally {
+      btnGuardarGasto.disabled = false;
+      btnGuardarGasto.textContent = "Guardar Salida";
+    }
   });
 
   function filtrarNotasPorRango(notasRaw) {
@@ -374,7 +400,10 @@ export async function mount(root, state) {
 
     for (const n of notasRango) {
       if (Array.isArray(n.pagos)) {
-        for (const p of n.pagos) sumar(p.metodo, p.montoUsd);
+        for (const p of n.pagos) {
+          if (p.usandoSaldoFavor || p.metodo === "Saldo a Favor") continue;
+          sumar(p.metodo, p.montoUsd);
+        }
       }
     }
     for (const a of abonosRango) {
@@ -387,6 +416,7 @@ export async function mount(root, state) {
   }
 
   function pintarAnalitica() {
+    if (!wrapEl.isConnected) return;
     const ahora = Date.now();
     const tasas = getTasaActiva(state);
     const notasAbiertas = todasNotas.filter((n) => !n.anulada && !n.cierreId);
@@ -405,7 +435,11 @@ export async function mount(root, state) {
     const ventasUsd = notasRango.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
     const utilidadUsd = notasRango.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
     const pagosNotasRangoUsd = notasRango.reduce(
-      (acc, n) => acc + (Array.isArray(n.pagos) ? n.pagos.reduce((s, p) => s + Number(p.montoUsd || 0), 0) : 0),
+      (acc, n) => acc + (
+        Array.isArray(n.pagos)
+          ? n.pagos.reduce((s, p) => (p.usandoSaldoFavor || p.metodo === "Saldo a Favor" ? s : s + Number(p.montoUsd || 0)), 0)
+          : 0
+      ),
       0
     );
     const abonosEfectivoCajaUsd = abonosRango
@@ -615,7 +649,11 @@ export async function mount(root, state) {
     const totalVentas = abiertas.reduce((acc, n) => acc + Number(n.totalUsd || 0), 0);
     const totalUtilidad = abiertas.reduce((acc, n) => acc + Number(n.utilidadUsd || 0), 0);
     const pagosVentas = abiertas.reduce(
-      (acc, n) => acc + (Array.isArray(n.pagos) ? n.pagos.reduce((s, p) => s + Number(p.montoUsd || 0), 0) : 0),
+      (acc, n) => acc + (
+        Array.isArray(n.pagos)
+          ? n.pagos.reduce((s, p) => (p.usandoSaldoFavor || p.metodo === "Saldo a Favor" ? s : s + Number(p.montoUsd || 0)), 0)
+          : 0
+      ),
       0
     );
     const totalAbonos = abonosAbiertos
@@ -634,54 +672,83 @@ export async function mount(root, state) {
 
     try {
       const now = Date.now();
-      const cierreId = `CIERRE-${new Date(now).toISOString().slice(0, 10)}-${String(now).slice(-4)}`;
+      const fechaHoyIso = obtenerFechaLocalIso(now);
+      const cierreId = `CIERRE-${fechaHoyIso}-${String(now).slice(-4)}`;
       const fechaHoraTxt = formatearFechaHora(now);
+      const nuevaJornadaId = obtenerFechaLocalIso(now + 86400000);
 
-      const batch = writeBatch(db);
-      batch.set(doc(refs.cierresCaja(), cierreId), {
-        cierreId,
-        fechaIso: new Date(now).toISOString().slice(0, 10),
-        fechaHoraTxt,
-        cerradoTs: now,
-        cantidadNotas: abiertas.length,
-        cantidadAbonos: abonosAbiertos.length,
-        cantidadGastos: gastosAbiertos.length,
-        totalVentasUsd: Number(totalVentas.toFixed(2)),
-        totalAbonosUsd: Number(totalAbonos.toFixed(2)),
-        totalGastosUsd: Number(totalGastos.toFixed(2)),
-        netoCajaUsd: netoCaja,
-        totalUtilidadUsd: Number(totalUtilidad.toFixed(2)),
-        desgloseMetodos: desglose,
-        usuario: state.sesion?.usuario || "Administrador",
-        creadoEn: serverTimestamp()
-      });
+      const operaciones = [];
 
-      for (const n of abiertas) {
-        batch.set(doc(refs.notasEntrega(), n.id), { cierreId, cerradoEnTs: now }, { merge: true });
-      }
-
-      // Sellar cierreId en abonos abiertos y apagar bandera tieneAbonosSinCerrar
+      // Combinar notas abiertas y notas con abonos abiertos para no duplicar escrituras al mismo doc
       const notasConAbonosAbiertos = new Set(abonosAbiertos.map((a) => a.notaId));
-      for (const notaId of notasConAbonosAbiertos) {
+      const idsNotasAActualizar = new Set([
+        ...abiertas.map((n) => n.id),
+        ...notasConAbonosAbiertos
+      ]);
+
+      for (const notaId of idsNotasAActualizar) {
         const nota = todasNotas.find((x) => x.id === notaId);
-        if (!nota || !Array.isArray(nota.abonos)) continue;
-        const abonosSellados = nota.abonos.map((ab) => (
-          ab.cierreId === null || ab.cierreId === undefined ? { ...ab, cierreId } : ab
-        ));
-        batch.set(doc(refs.notasEntrega(), notaId), {
-          abonos: abonosSellados,
-          tieneAbonosSinCerrar: false
-        }, { merge: true });
+        if (!nota) continue;
+        const patch = {};
+
+        if (!nota.cierreId && !nota.anulada) {
+          patch.cierreId = cierreId;
+          patch.cerradoEnTs = now;
+        }
+        if (notasConAbonosAbiertos.has(notaId) && Array.isArray(nota.abonos)) {
+          patch.abonos = nota.abonos.map((ab) => (
+            ab.cierreId === null || ab.cierreId === undefined ? { ...ab, cierreId } : ab
+          ));
+          patch.tieneAbonosSinCerrar = false;
+        }
+
+        if (Object.keys(patch).length) {
+          operaciones.push({
+            ref: doc(refs.notasEntrega(), notaId),
+            data: patch,
+            merge: true
+          });
+        }
       }
 
       for (const g of gastosAbiertos) {
-        batch.set(doc(refs.gastosCaja(), g.id), { cierreId, cerradoEnTs: now }, { merge: true });
+        operaciones.push({
+          ref: doc(refs.gastosCaja(), g.id),
+          data: { cierreId, cerradoEnTs: now },
+          merge: true
+        });
       }
 
-      const nuevaJornadaId = new Date(now + 86400000).toISOString().slice(0, 10);
-      batch.set(refs.empresaRef, { jornadaActivaId: nuevaJornadaId }, { merge: true });
+      // Registro del cierre y avance de jornada al final
+      operaciones.push({
+        ref: doc(refs.cierresCaja(), cierreId),
+        data: {
+          cierreId,
+          fechaIso: fechaHoyIso,
+          fechaHoraTxt,
+          cerradoTs: now,
+          cantidadNotas: abiertas.length,
+          cantidadAbonos: abonosAbiertos.length,
+          cantidadGastos: gastosAbiertos.length,
+          totalVentasUsd: Number(totalVentas.toFixed(2)),
+          totalAbonosUsd: Number(totalAbonos.toFixed(2)),
+          totalGastosUsd: Number(totalGastos.toFixed(2)),
+          netoCajaUsd: netoCaja,
+          totalUtilidadUsd: Number(totalUtilidad.toFixed(2)),
+          desgloseMetodos: desglose,
+          usuario: state.sesion?.usuario || "Administrador",
+          creadoEn: serverTimestamp()
+        },
+        merge: false
+      });
 
-      await batch.commit();
+      operaciones.push({
+        ref: refs.empresaRef,
+        data: { jornadaActivaId: nuevaJornadaId },
+        merge: true
+      });
+
+      await commitOperacionesEnLotes(operaciones);
       if (state.empresa) state.empresa.jornadaActivaId = nuevaJornadaId;
 
       await cargarDatos(archivoCompletoCargado);
@@ -692,6 +759,15 @@ export async function mount(root, state) {
       btn.disabled = false;
     }
   });
+
+  const onTasaChanged = () => {
+    if (!wrapEl.isConnected) {
+      window.removeEventListener("ve-tasa-changed", onTasaChanged);
+      return;
+    }
+    pintarAnalitica();
+  };
+  window.addEventListener("ve-tasa-changed", onTasaChanged);
 
   async function cargarDatos(cargarTodo = false) {
     const hace90Dias = Date.now() - DIAS_90_MS;
@@ -711,21 +787,27 @@ export async function mount(root, state) {
         .sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
       archivoCompletoCargado = true;
     } else {
-      // Ventana rápida: últimos 3 meses + deudas activas + jornada abierta + abonos sin cerrar
-      const [snapRecientes, snapDeudas, snapAbiertas, snapAbonosPend, snapGastos] = await Promise.all([
+      // Ventana rápida: últimos 3 meses + deudas activas + jornada abierta + abonos sin cerrar + gastos abiertos
+      const [snapRecientes, snapDeudas, snapAbiertas, snapAbonosPend, snapGastosRec, snapGastosAbiertos] = await Promise.all([
         getDocs(query(refs.notasEntrega(), where("creadoTs", ">=", hace90Dias))),
         getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0))),
         getDocs(query(refs.notasEntrega(), where("cierreId", "==", null))),
         getDocs(query(refs.notasEntrega(), where("tieneAbonosSinCerrar", "==", true))),
-        getDocs(query(refs.gastosCaja(), where("creadoTs", ">=", hace90Dias)))
+        getDocs(query(refs.gastosCaja(), where("creadoTs", ">=", hace90Dias))),
+        getDocs(query(refs.gastosCaja(), where("cierreId", "==", null)))
       ]);
+
       const mapaNotas = new Map();
       for (const s of [snapRecientes, snapDeudas, snapAbiertas, snapAbonosPend]) {
         s.forEach((d) => mapaNotas.set(d.id, { id: d.id, ...d.data() }));
       }
       todasNotas = Array.from(mapaNotas.values());
-      todosGastos = snapGastos.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
+
+      const mapaGastos = new Map();
+      for (const s of [snapGastosRec, snapGastosAbiertos]) {
+        s.forEach((d) => mapaGastos.set(d.id, { id: d.id, ...d.data() }));
+      }
+      todosGastos = Array.from(mapaGastos.values())
         .sort((a, b) => (b.creadoTs || 0) - (a.creadoTs || 0));
     }
 
