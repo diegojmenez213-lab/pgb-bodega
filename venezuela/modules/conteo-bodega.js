@@ -43,7 +43,7 @@ export async function mount(root, state) {
             <button id="btnReiniciarMarcas" type="button" class="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-extrabold cursor-pointer">
               ↻ Nuevo ciclo
             </button>
-            <button id="btnRecargarConteo" type="button" class="px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-xs font-bold cursor-pointer" title="Recargar inventario">
+            <button id="btnRecargarConteo" type="button" class="px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-xs font-bold cursor-pointer" title="Sincronizar con servidor">
               ↻
             </button>
           </div>
@@ -289,7 +289,7 @@ export async function mount(root, state) {
   }
 
   function render() {
-    if (!wrapEl.isConnected) return;
+    if (!wrapEl.isConnected || !root.isConnected) return;
     renderChipsYSelectProveedores();
     actualizarBarraProgreso();
 
@@ -339,6 +339,7 @@ export async function mount(root, state) {
   }
 
   function actualizarTrasGuardarItem(prod, rowEl) {
+    if (!root.isConnected) return;
     renderChipsYSelectProveedores();
     actualizarBarraProgreso();
 
@@ -375,7 +376,6 @@ export async function mount(root, state) {
           wrapVerMas.remove();
         }
 
-        // Si en la vista actual se vaciaron las filas visibles pero aún quedan ocultas por paginación, destapamos el siguiente bloque
         if (visiblesDom === 0 && restantes > 0) {
           render();
           return;
@@ -426,11 +426,15 @@ export async function mount(root, state) {
       prod.ultimoConteoFechaIso = fechaIso;
       borradoresStock.delete(prod.id);
 
+      state.parchearStockCatalogo?.([{ id: prod.id, stockAlmacen: cant }]);
+
       actualizarTrasGuardarItem(prod, rowEl);
     } catch (err) {
       alert("Error guardando conteo: " + err.message);
-      establecerBloqueoFila(rowEl, false);
-      if (btnEl) btnEl.textContent = textoOriginal;
+      if (root.isConnected) {
+        establecerBloqueoFila(rowEl, false);
+        if (btnEl) btnEl.textContent = textoOriginal;
+      }
     } finally {
       guardandoIds.delete(prodId);
     }
@@ -466,7 +470,7 @@ export async function mount(root, state) {
 
   listaEl.addEventListener("click", async (e) => {
     if (e.target.closest("#btnReintentarCarga")) {
-      await cargarConteo(true);
+      await cargarConteo(true, true);
       return;
     }
 
@@ -578,32 +582,43 @@ export async function mount(root, state) {
       render();
       alert("Error al reiniciar ciclo: " + err.message);
     } finally {
-      btn.disabled = false;
-      btn.textContent = "↻ Nuevo ciclo";
+      if (root.isConnected) {
+        btn.disabled = false;
+        btn.textContent = "↻ Nuevo ciclo";
+      }
     }
   });
 
-  async function cargarConteo(limpiarBorradores = false) {
+  async function cargarConteo(forzar = false, limpiarBorradores = false) {
     if (cargando) return;
     cargando = true;
     btnRecargarEl.disabled = true;
     btnRecargarEl.textContent = "...";
 
     try {
-      const [snapCat, snapProv] = await Promise.all([
-        getDocs(refs.catalogo()),
-        getDocs(refs.proveedores())
+      const [listaCat, listaProv] = await Promise.all([
+        typeof state.obtenerCatalogo === "function"
+          ? state.obtenerCatalogo({ forzar })
+          : getDocs(refs.catalogo()).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        typeof state.obtenerProveedores === "function"
+          ? state.obtenerProveedores({ forzar })
+          : getDocs(refs.proveedores()).then((s) =>
+              s.docs.map((d) => ({ id: d.id, ...d.data() }))
+                .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"))
+            )
       ]);
-      productos = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
-      proveedores = snapProv.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
+
+      if (!root.isConnected) return;
+
+      productos = listaCat;
+      proveedores = listaProv;
 
       if (limpiarBorradores) {
         borradoresStock.clear();
       }
       render();
     } catch (err) {
+      if (!root.isConnected) return;
       root.querySelector("#subConteo").textContent = "Error al cargar inventario";
       listaEl.innerHTML = `
         <div class="ve-card text-center py-10 space-y-3">
@@ -616,13 +631,15 @@ export async function mount(root, state) {
       `;
     } finally {
       cargando = false;
-      btnRecargarEl.disabled = false;
-      btnRecargarEl.textContent = "↻";
+      if (root.isConnected) {
+        btnRecargarEl.disabled = false;
+        btnRecargarEl.textContent = "↻";
+      }
     }
   }
 
   busqEl.addEventListener("input", render);
-  btnRecargarEl.addEventListener("click", () => cargarConteo(true));
+  btnRecargarEl.addEventListener("click", () => cargarConteo(true, true));
 
-  await cargarConteo(false);
+  await cargarConteo(false, false);
 }
