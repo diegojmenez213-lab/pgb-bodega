@@ -6,10 +6,14 @@ import {
   getDocs,
   setDoc,
   deleteDoc,
+  query,
+  where,
   writeBatch,
   normalizarIdVE,
   serverTimestamp
 } from "../core/db.js";
+
+const LOTE_BATCH_MAX = 400;
 
 export async function mount(root, state) {
   const refs = getTenantRefs(state.sesion.tenantId);
@@ -99,6 +103,7 @@ export async function mount(root, state) {
     let total = 0;
     let cantidadNotas = 0;
     for (const n of notasCache) {
+      if (n.anulada) continue;
       const cliDoc = normalizarIdVE(n.cliente?.documento || "");
       if (cliDoc !== docId) continue;
       const saldo = Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0);
@@ -107,7 +112,7 @@ export async function mount(root, state) {
         cantidadNotas++;
       }
     }
-    return { total, cantidadNotas };
+    return { total: Number(total.toFixed(2)), cantidadNotas };
   }
 
   tarifaEl.addEventListener("change", () => {
@@ -123,7 +128,7 @@ export async function mount(root, state) {
     root.querySelector("#cliTel").value = cli?.telefono || "";
     root.querySelector("#cliDir").value = cli?.direccion || "";
     tarifaEl.value = cli?.tarifa || "detal";
-    root.querySelector("#cliFactor").value = cli?.factorPersonalizado || fMayor;
+    root.querySelector("#cliFactor").value = cli?.factorPersonalizado || cli?.ultimoMultiplicador || fMayor;
     wrapEsp.classList.toggle("hidden", tarifaEl.value !== "especial");
     form.classList.remove("hidden");
   }
@@ -138,9 +143,10 @@ export async function mount(root, state) {
     if (!docId || !nombre) return alert("Completa Cédula/RIF y Nombre.");
 
     const tarifa = tarifaEl.value;
-    const factorPersonalizado = tarifa === "especial"
+    const factorBase = tarifa === "especial"
       ? Math.max(1, Number(root.querySelector("#cliFactor").value) || fMayor)
       : (tarifa === "mayor" ? fMayor : fDetal);
+    const factorRedondeado = Number(factorBase.toFixed(2));
 
     const btn = root.querySelector("#btnGuardarCli");
     btn.disabled = true;
@@ -153,20 +159,31 @@ export async function mount(root, state) {
         telefono: root.querySelector("#cliTel").value.trim(),
         direccion: root.querySelector("#cliDir").value.trim(),
         tarifa,
-        factorPersonalizado,
+        factorPersonalizado: factorRedondeado,
+        ultimoMultiplicador: factorRedondeado,
         actualizadoEn: serverTimestamp()
       }, { merge: true });
 
-      // Si editamos un cliente con deuda activa, sincronizamos el nombre en sus notas abiertas
+      // Si editamos un cliente con deuda activa, sincronizamos el nombre en sus notas abiertas válidas
       const notasDeudor = notasCache.filter(
-        (n) => normalizarIdVE(n.cliente?.documento || "") === docId && Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0) > 0.01
+        (n) =>
+          !n.anulada &&
+          normalizarIdVE(n.cliente?.documento || "") === docId &&
+          Number(n.saldoPendienteUsd ?? (n.esCredito ? n.totalUsd : 0) ?? 0) > 0.01
       );
       if (notasDeudor.length) {
-        const batch = writeBatch(db);
-        for (const n of notasDeudor) {
-          batch.set(doc(refs.notasEntrega(), n.id), { cliente: { ...(n.cliente || {}), documento: docId, nombre } }, { merge: true });
+        for (let i = 0; i < notasDeudor.length; i += LOTE_BATCH_MAX) {
+          const slice = notasDeudor.slice(i, i + LOTE_BATCH_MAX);
+          const batch = writeBatch(db);
+          for (const n of slice) {
+            batch.set(
+              doc(refs.notasEntrega(), n.id),
+              { cliente: { ...(n.cliente || {}), documento: docId, nombre } },
+              { merge: true }
+            );
+          }
+          await batch.commit();
         }
-        await batch.commit();
       }
 
       form.classList.add("hidden");
@@ -193,8 +210,12 @@ export async function mount(root, state) {
 
     listaEl.innerHTML = filtrados.map((c) => {
       const deuda = obtenerDeudaCliente(c.id);
+      const saldoFavor = Number(c.saldoAFavorUsd || 0);
+      const limiteCred = Number(c.limiteCreditoUsd || 0);
+      const multActual = Number(c.ultimoMultiplicador || c.factorPersonalizado || 0);
+
       return `
-        <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-id="${c.id}">
+        <div class="ve-card p-3.5 flex flex-wrap items-center justify-between gap-2" data-id="${encodeURIComponent(c.id)}">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-mono-ve text-xs font-extrabold text-slate-900">${c.id}</span>
@@ -202,11 +223,21 @@ export async function mount(root, state) {
               <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
                 c.tarifa === "especial" ? "bg-amber-100 text-amber-800" : c.tarifa === "mayor" ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-600"
               }">
-                ${c.tarifa === "especial" ? `Especial (×${c.factorPersonalizado})` : c.tarifa === "mayor" ? "Mayor" : "Detal"}
+                ${c.tarifa === "especial" ? `Especial (×${multActual || fMayor})` : c.tarifa === "mayor" ? "Mayor" : "Detal"}
               </span>
               ${deuda.total > 0.01 ? `
                 <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
                   Debe $${deuda.total.toFixed(2)} (${deuda.cantidadNotas} ${deuda.cantidadNotas === 1 ? "nota" : "notas"})
+                </span>
+              ` : ""}
+              ${saldoFavor > 0.01 ? `
+                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  A favor $${saldoFavor.toFixed(2)}
+                </span>
+              ` : ""}
+              ${limiteCred > 0 ? `
+                <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900">
+                  Tope $${limiteCred.toFixed(2)}
                 </span>
               ` : ""}
             </div>
@@ -226,7 +257,7 @@ export async function mount(root, state) {
   listaEl.addEventListener("click", async (e) => {
     const card = e.target.closest("[data-id]");
     if (!card) return;
-    const id = card.dataset.id;
+    const id = decodeURIComponent(card.dataset.id || "");
     const cli = clientes.find((c) => c.id === id);
 
     if (e.target.closest(".btn-edit") && cli) {
@@ -243,7 +274,10 @@ export async function mount(root, state) {
   });
 
   async function cargarDatos() {
-    const [snapCli, snapNotas] = await Promise.all([getDocs(refs.clientes()), getDocs(refs.notasEntrega())]);
+    const [snapCli, snapNotas] = await Promise.all([
+      getDocs(refs.clientes()),
+      getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0)))
+    ]);
     clientes = snapCli.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
