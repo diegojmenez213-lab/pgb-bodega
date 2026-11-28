@@ -230,7 +230,7 @@ export async function mount(root, state) {
               </button>
             </div>
             <div id="posResultados" class="space-y-1.5 max-h-80 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos con stock...</div>
+              <div class="text-xs text-slate-400 text-center py-6">Sincronizando catálogo...</div>
             </div>
           </div>
         </div>
@@ -389,6 +389,7 @@ export async function mount(root, state) {
   }
 
   function refrescarAvisoExcesoAlmacen() {
+    if (!root.isConnected) return;
     const box = root.querySelector("#avisoExcesoAlmacen");
     const txt = root.querySelector("#txtAvisoExcesoAlmacen");
     const mensajes = [];
@@ -518,6 +519,7 @@ export async function mount(root, state) {
   });
 
   function actualizarFolioUI() {
+    if (!root.isConnected) return;
     root.querySelector("#nextFolioTxt").textContent = String(ultimoFolio + 1).padStart(5, "0");
   }
 
@@ -569,6 +571,7 @@ export async function mount(root, state) {
   }
 
   function refrescarEstadoClienteActual() {
+    if (!root.isConnected) return;
     const docId = normalizarIdVE(docEl.value);
     if (!docId || docId.length < 5 || docId === "V-00000000") {
       alertaBox.classList.add("hidden");
@@ -701,6 +704,7 @@ export async function mount(root, state) {
   });
 
   function renderTotalesYRestante() {
+    if (!root.isConnected) return;
     const total = totalVenta();
     const descuento = montoDescuentoFavorActual();
     const objetivo = montoObjetivoHoy();
@@ -828,6 +832,7 @@ export async function mount(root, state) {
   });
 
   function renderPagos() {
+    if (!root.isConnected) return;
     const objetivo = montoObjetivoHoy();
     if (!esCredito && pagos.length === 1 && pagos[0].auto !== false) {
       pagos[0].montoUsd = Number(objetivo.toFixed(2));
@@ -879,6 +884,7 @@ export async function mount(root, state) {
   }
 
   function renderCarrito() {
+    if (!root.isConnected) return;
     const totalUnds = carrito.reduce((acc, it) => acc + Number(it.cantidad || 0), 0);
     root.querySelector("#posCantItemsBadge").textContent = String(totalUnds);
     refrescarAvisoExcesoAlmacen();
@@ -927,6 +933,7 @@ export async function mount(root, state) {
   }
 
   function renderBusqueda() {
+    if (!root.isConnected) return;
     const q = busqEl.value.trim();
     if (!q && !busqAbierta) {
       resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos con stock...</div>`;
@@ -1310,8 +1317,8 @@ export async function mount(root, state) {
       const jornadaId = state.empresa?.jornadaActivaId || fechaHoyLocal;
       const cotIdAEliminar = cotizacionOrigenId;
 
-      const { nuevoNum } = await runTransaction(db, async (tx) => {
-        // 1. TODAS las lecturas primero (regla estricta de Firestore)
+      const { nuevoNum, cambiosStock } = await runTransaction(db, async (tx) => {
+        // 1. TODAS las lecturas primero
         const empSnap = await tx.get(refs.empresaRef);
         const actual = Number(empSnap.data()?.correlativos?.notaEntregaActual || 0);
         const sigNum = actual + 1;
@@ -1390,27 +1397,34 @@ export async function mount(root, state) {
           );
         }
 
+        const stockActualizado = [];
         for (const [pid, delta] of deltasPorProd.entries()) {
           const pData = prodSnaps.get(pid)?.data() || {};
           const updateProd = { ultimaVentaTs: now };
+          const patchLocal = { id: pid };
           if (delta.almacen > 0) {
-            const curAlm = Number(pData.stockAlmacen || 0);
-            updateProd.stockAlmacen = Math.max(0, curAlm - delta.almacen);
+            const nuevoAlm = Math.max(0, Number(pData.stockAlmacen || 0) - delta.almacen);
+            updateProd.stockAlmacen = nuevoAlm;
+            patchLocal.stockAlmacen = nuevoAlm;
           }
           if (delta.planta > 0) {
-            const curPla = Number(pData.stockPlanta || 0);
-            updateProd.stockPlanta = Math.max(0, curPla - delta.planta);
+            const nuevoPla = Math.max(0, Number(pData.stockPlanta || 0) - delta.planta);
+            updateProd.stockPlanta = nuevoPla;
             updateProd.pedidosPlantaCount = increment(delta.planta);
+            patchLocal.stockPlanta = nuevoPla;
           }
           tx.set(doc(refs.catalogo(), pid), updateProd, { merge: true });
+          stockActualizado.push(patchLocal);
         }
 
         if (cotIdAEliminar) {
           tx.delete(doc(refs.cotizaciones(), cotIdAEliminar));
         }
 
-        return { folio: sigFolio, nuevoNum: sigNum };
+        return { folio: sigFolio, nuevoNum: sigNum, cambiosStock: stockActualizado };
       });
+
+      state.parchearStockCatalogo?.(cambiosStock);
 
       if (docCli !== "V-00000000") {
         const cliEx = clientes.find((c) => c.id === docCli);
@@ -1444,8 +1458,10 @@ export async function mount(root, state) {
       alert("Error emitiendo Nota de Entrega: " + err.message);
     } finally {
       emitiendo = false;
-      btn.disabled = false;
-      btn.textContent = "Confirmar Venta y Ver Notas (F9)";
+      if (root.isConnected) {
+        btn.disabled = false;
+        btn.textContent = "Confirmar Venta y Ver Notas (F9)";
+      }
     }
   }
 
@@ -1455,7 +1471,7 @@ export async function mount(root, state) {
     window.removeEventListener("keydown", window.__vePosKeyHandler);
   }
   window.__vePosKeyHandler = (e) => {
-    if (state.rutaActual !== "caja-pos") return;
+    if (state.rutaActual !== "caja-pos" || !root.isConnected) return;
     if (e.key === "F1") { e.preventDefault(); busqEl.focus(); }
     else if (e.key === "F2") { e.preventDefault(); docEl.focus(); }
     else if (e.key === "F4") {
@@ -1472,7 +1488,7 @@ export async function mount(root, state) {
     window.removeEventListener("ve-tasa-changed", window.__vePosTasaHandler);
   }
   window.__vePosTasaHandler = () => {
-    if (state.rutaActual !== "caja-pos") return;
+    if (state.rutaActual !== "caja-pos" || !root.isConnected) return;
     refrescarEstadoClienteActual();
     renderTotalesYRestante();
   };
@@ -1484,14 +1500,21 @@ export async function mount(root, state) {
   });
 
   actualizarFolioUI();
-  const [snapCat, snapCli, snapDeudas] = await Promise.all([
-    getDocs(refs.catalogo()),
+  const [listaCat, snapCli, snapDeudas] = await Promise.all([
+    typeof state.obtenerCatalogo === "function"
+      ? state.obtenerCatalogo()
+      : getDocs(refs.catalogo()).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
     getDocs(refs.clientes()),
     getDocs(query(refs.notasEntrega(), where("saldoPendienteUsd", ">", 0)))
   ]);
-  catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  if (!root.isConnected) return;
+
+  catalogo = listaCat;
   clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
   deudasActivas = snapDeudas.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos con stock...</div>`;
 
   if (state.cotizacionPendiente) {
     const cot = state.cotizacionPendiente;
