@@ -5,7 +5,6 @@ import {
   doc,
   getDocs,
   setDoc,
-  deleteDoc,
   writeBatch,
   serverTimestamp,
   obtenerFechaLocalIso
@@ -425,14 +424,9 @@ export async function mount(root, state) {
       </div>
 
       <div id="panelCambiosPlanta" class="hidden ve-card border-sky-200 bg-sky-50/40 space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Últimas Novedades de Planta por Proveedor</h2>
-            <p id="metaUltimaAct" class="text-[11px] text-sky-800 font-semibold"></p>
-          </div>
-          <button id="btnLimpiarNovedades" type="button" class="px-2.5 py-1 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-extrabold cursor-pointer">
-            ✕ Limpiar este reporte
-          </button>
+        <div>
+          <h2 class="text-xs font-extrabold uppercase tracking-wider text-sky-950">Últimas Novedades de Planta por Proveedor</h2>
+          <p id="metaUltimaAct" class="text-[11px] text-sky-800 font-semibold"></p>
         </div>
 
         <div id="tabsReportesProv" class="flex flex-wrap gap-1.5"></div>
@@ -1033,16 +1027,6 @@ export async function mount(root, state) {
       progWrap.classList.add("hidden");
       alert("Error actualizando Excel: " + err.message);
     }
-  });
-
-  root.querySelector("#btnLimpiarNovedades").addEventListener("click", async () => {
-    if (!provReporteActivo) return;
-    const rep = reportesPorProv.get(provReporteActivo);
-    if (!confirm(`¿Borrar el reporte de novedades de ${rep?.proveedor || provReporteActivo}?`)) return;
-    await deleteDoc(doc(refs.historialNovedades(), `prov_${provReporteActivo}`));
-    reportesPorProv.delete(provReporteActivo);
-    provReporteActivo = null;
-    renderPanelCambios();
   });
 
   async function cargarCatalogo() {
