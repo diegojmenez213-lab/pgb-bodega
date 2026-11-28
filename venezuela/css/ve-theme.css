@@ -1,19 +1,28 @@
 /* venezuela/css/ve-theme.css — Estilo limpio tipo Tecnoshop (PC estructurado / Móvil ágil) */
 :root {
-  --bg-app: #f8fafc;
+  --ve-primario: #0f172a;
+  --ve-acento: #059669;
+  --ve-fondo: #f8fafc;
+  --ve-borde: #e2e8f0;
+
+  --bg-app: var(--ve-fondo);
   --bg-card: #ffffff;
-  --border-soft: #e2e8f0;
+  --border-soft: var(--ve-borde);
   --text-main: #0f172a;
   --text-muted: #64748b;
-  --accent-navy: #0f172a;
+  --accent-navy: var(--ve-primario);
   --accent-red: #dc2626;
-  --accent-green: #059669;
+  --accent-green: var(--ve-acento);
+
   --sidebar-w: 248px;
   --topbar-h: 64px;
   --bottom-nav-h: 64px;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
 
 body {
   margin: 0;
@@ -21,14 +30,27 @@ body {
   background: var(--bg-app);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
-.font-mono-ve { font-family: 'JetBrains Mono', monospace; }
+button,
+input[type="button"],
+input[type="submit"],
+.ve-nav-btn,
+.ve-mob-btn,
+.ve-rate-pill {
+  touch-action: manipulation;
+}
+
+.font-mono-ve {
+  font-family: 'JetBrains Mono', monospace;
+}
 
 /* Layout principal */
 .ve-shell {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Barra lateral PC */
@@ -67,7 +89,7 @@ body {
   height: 38px;
   border-radius: 10px;
   background: var(--accent-navy);
-  color: #fff;
+  color: #ffffff;
   font-weight: 800;
   font-size: 14px;
   display: flex;
@@ -116,7 +138,8 @@ body {
   color: var(--text-main);
 }
 
-.ve-nav-btn.active {
+.ve-nav-btn.active,
+.ve-nav-btn.active:hover {
   background: var(--accent-navy);
   color: #ffffff;
 }
@@ -137,6 +160,7 @@ body {
   z-index: 30;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border-soft);
   padding: 10px 20px;
   display: flex;
@@ -151,6 +175,7 @@ body {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .ve-rate-pill {
@@ -164,19 +189,18 @@ body {
   font-size: 12px;
   font-weight: 700;
   color: var(--text-main);
+  cursor: default;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+button.ve-rate-pill {
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
 }
 
-.ve-rate-pill.active-bcv {
-  border-color: var(--accent-navy);
-  background: #f1f5f9;
-}
-
-.ve-rate-pill.next-bcv {
-  border-color: #f59e0b;
-  background: #fffbeb;
-  color: #92400e;
+.ve-rate-pill.hidden {
+  display: none !important;
 }
 
 .ve-rate-label {
@@ -186,10 +210,41 @@ body {
   color: var(--text-muted);
 }
 
+.ve-rate-pill.active-bcv {
+  border-color: var(--accent-navy);
+  background: var(--accent-navy);
+  color: #ffffff;
+}
+
+.ve-rate-pill.active-bcv .ve-rate-label {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.ve-rate-pill.next-bcv {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.ve-rate-pill.next-bcv .ve-rate-label {
+  color: #b45309;
+}
+
+.ve-rate-pill.next-bcv.active-bcv {
+  border-color: var(--accent-navy);
+  background: var(--accent-navy);
+  color: #ffffff;
+}
+
+.ve-rate-pill.next-bcv.active-bcv .ve-rate-label {
+  color: rgba(255, 255, 255, 0.82);
+}
+
 /* Contenido dinámico */
 .ve-content {
   padding: 20px;
   flex: 1;
+  min-width: 0;
 }
 
 .ve-card {
@@ -212,11 +267,31 @@ body {
 
   .ve-main-wrap {
     margin-left: 0;
-    padding-bottom: calc(var(--bottom-nav-h) + 12px);
+    padding-bottom: calc(var(--bottom-nav-h) + 12px + env(safe-area-inset-bottom, 0px));
   }
 
   .ve-topbar {
-    padding: 10px 12px;
+    padding: 8px 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .ve-rates-strip {
+    flex: 1;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding-bottom: 1px;
+  }
+
+  .ve-rates-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ve-rate-pill {
+    padding: 5px 8px;
+    font-size: 11px;
   }
 
   .ve-content {
@@ -230,11 +305,11 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    height: var(--bottom-nav-h);
-    background: #ffffff;
+    min-height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-card);
     border-top: 1px solid var(--border-soft);
     z-index: 50;
-    padding: 4px 6px;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
   }
 
   .ve-mob-btn {
@@ -255,6 +330,7 @@ body {
   .ve-mob-btn.active {
     color: var(--accent-navy);
     background: #f1f5f9;
+    font-weight: 800;
   }
 }
 
@@ -274,9 +350,11 @@ body {
 
 .ve-drawer-sheet {
   width: 100%;
-  background: #ffffff;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-soft);
   border-radius: 20px 20px 0 0;
-  padding: 16px 16px 24px;
-  max-height: 75vh;
+  padding: 16px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  max-height: 78vh;
+  max-height: 78dvh;
   overflow-y: auto;
 }
