@@ -146,13 +146,87 @@
       "carbon-ambar": { p: "#18181b", ps: "#27272a", a: "#d97706", f: "#fafafa", s: "#ffffff", b: "#e4e4e7" }
     };
 
+    const CACHE_TTL_MS = 3 * 60 * 1000;
+    const cacheMem = {
+      catalogo: null,
+      catalogoTs: 0,
+      promesaCatalogo: null,
+      proveedores: null,
+      proveedoresTs: 0,
+      promesaProveedores: null
+    };
+
     const state = {
       sesion: null,
       empresa: null,
       rutaActual: "caja-pos",
       modoTasaBCV: "hoy",
       tasas: { bcvHoy: 0, bcvManana: 0, eur: 0, usdt: 0, actualizado: "" },
-      vencidos30Count: 0
+      vencidos30Count: 0,
+
+      invalidarCacheCatalogo() {
+        cacheMem.catalogo = null;
+        cacheMem.catalogoTs = 0;
+        cacheMem.proveedores = null;
+        cacheMem.proveedoresTs = 0;
+      },
+
+      parchearStockCatalogo(cambios = []) {
+        if (!Array.isArray(cacheMem.catalogo) || !cambios.length) return;
+        const mapa = new Map(cambios.map((c) => [c.id, c]));
+        for (const p of cacheMem.catalogo) {
+          const patch = mapa.get(p.id);
+          if (!patch) continue;
+          if (patch.stockAlmacen !== undefined) p.stockAlmacen = patch.stockAlmacen;
+          if (patch.stockPlanta !== undefined) p.stockPlanta = patch.stockPlanta;
+        }
+      },
+
+      async obtenerCatalogo({ forzar = false } = {}) {
+        const ahora = Date.now();
+        if (!forzar && cacheMem.catalogo && (ahora - cacheMem.catalogoTs) < CACHE_TTL_MS) {
+          return cacheMem.catalogo;
+        }
+        if (!forzar && cacheMem.promesaCatalogo) {
+          return cacheMem.promesaCatalogo;
+        }
+        const refs = getTenantRefs(state.sesion.tenantId);
+        const promesa = getDocs(refs.catalogo())
+          .then((snap) => {
+            cacheMem.catalogo = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            cacheMem.catalogoTs = Date.now();
+            return cacheMem.catalogo;
+          })
+          .finally(() => {
+            if (cacheMem.promesaCatalogo === promesa) cacheMem.promesaCatalogo = null;
+          });
+        cacheMem.promesaCatalogo = promesa;
+        return promesa;
+      },
+
+      async obtenerProveedores({ forzar = false } = {}) {
+        const ahora = Date.now();
+        if (!forzar && cacheMem.proveedores && (ahora - cacheMem.proveedoresTs) < CACHE_TTL_MS) {
+          return cacheMem.proveedores;
+        }
+        if (!forzar && cacheMem.promesaProveedores) {
+          return cacheMem.promesaProveedores;
+        }
+        const refs = getTenantRefs(state.sesion.tenantId);
+        const promesa = getDocs(refs.proveedores())
+          .then((snap) => {
+            cacheMem.proveedores = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() }))
+              .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
+            cacheMem.proveedoresTs = Date.now();
+            return cacheMem.proveedores;
+          })
+          .finally(() => {
+            if (cacheMem.promesaProveedores === promesa) cacheMem.promesaProveedores = null;
+          });
+        cacheMem.promesaProveedores = promesa;
+        return promesa;
+      }
     };
 
     window.NEXUS_VE_STATE = state;
@@ -169,6 +243,16 @@
       "pedido-sugerido": "Pedido Sugerido",
       "configuracion-logos": "Configuración y Personalización"
     };
+
+    let navSeq = 0;
+
+    function escaparHtml(str = "") {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
 
     function aplicarTemaEmpresa(temaId) {
       const t = TEMAS_GUARDADOS[temaId] || TEMAS_GUARDADOS["ejecutivo-oscuro"];
@@ -355,7 +439,15 @@
         drawer.classList.remove("open");
       }
 
-      if (state.rutaActual === "configuracion-logos" && route !== "configuracion-logos") {
+      const rutaAnterior = state.rutaActual;
+      if (
+        (rutaAnterior === "conteo-bodega" || rutaAnterior === "inventario-planta") &&
+        route !== rutaAnterior
+      ) {
+        state.invalidarCacheCatalogo();
+      }
+
+      if (rutaAnterior === "configuracion-logos" && route !== "configuracion-logos") {
         const temaGuardado = (() => {
           try {
             return localStorage.getItem(`nexus_ve_tema_${state.sesion?.tenantId || "default"}`);
@@ -366,6 +458,7 @@
         aplicarTemaEmpresa(temaGuardado || "ejecutivo-oscuro");
       }
 
+      const mySeq = ++navSeq;
       state.rutaActual = route;
       marcarBotonActivo(route);
 
@@ -376,20 +469,50 @@
       }
 
       const root = document.getElementById("veModuleRoot");
-      root.innerHTML = `<div class="ve-card text-center py-10 text-slate-500 text-xs font-bold">Cargando ${NOMBRES_RUTAS[route] || route}...</div>`;
+      const host = document.createElement("div");
+      host.className = "ve-mod-host";
+      host.innerHTML = `<div class="ve-card text-center py-10 text-slate-500 text-xs font-bold">Cargando ${NOMBRES_RUTAS[route] || route}...</div>`;
+      root.replaceChildren(host);
 
+      let mod;
       try {
-        const mod = await import(`./modules/${route}.js`);
-        if (typeof mod.mount === "function") await mod.mount(root, state);
-        else if (typeof mod.default === "function") await mod.default(root, state);
+        mod = await import(`./modules/${route}.js`);
       } catch (err) {
-        root.innerHTML = `
-          <div class="ve-card max-w-xl mx-auto text-center space-y-2 py-10">
-            <div class="text-xs font-extrabold uppercase tracking-wider text-slate-400">Módulo pendiente</div>
+        if (mySeq !== navSeq) return;
+        console.error(`Error importando módulo ${route}:`, err);
+        host.innerHTML = `
+          <div class="ve-card max-w-xl mx-auto text-center space-y-3 py-10">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-rose-500">Error de conexión</div>
             <h2 class="text-lg font-extrabold text-slate-900">${NOMBRES_RUTAS[route] || route}</h2>
-            <p class="text-xs text-slate-500">Falta crear <span class="font-mono-ve">venezuela/modules/${route}.js</span>.</p>
+            <p class="text-xs text-slate-500">No se pudo descargar el módulo. Verifica tu señal e intenta nuevamente.</p>
+            <button type="button" id="btnReintentarMod" class="px-4 py-2 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">
+              ↻ Reintentar
+            </button>
           </div>
         `;
+        host.querySelector("#btnReintentarMod")?.addEventListener("click", () => abrirModulo(route, { pushHistory: false }));
+        return;
+      }
+
+      if (mySeq !== navSeq) return;
+
+      try {
+        if (typeof mod.mount === "function") await mod.mount(host, state);
+        else if (typeof mod.default === "function") await mod.default(host, state);
+      } catch (err) {
+        if (mySeq !== navSeq) return;
+        console.error(`Error ejecutando módulo ${route}:`, err);
+        host.innerHTML = `
+          <div class="ve-card max-w-xl mx-auto text-center space-y-3 py-10">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-amber-600">No se pudo sincronizar</div>
+            <h2 class="text-lg font-extrabold text-slate-900">${NOMBRES_RUTAS[route] || route}</h2>
+            <p class="text-xs text-slate-500">${escaparHtml(err?.message || "La carga tardó demasiado o hubo un corte de red.")}</p>
+            <button type="button" id="btnReintentarMod" class="px-4 py-2 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">
+              ↻ Reintentar
+            </button>
+          </div>
+        `;
+        host.querySelector("#btnReintentarMod")?.addEventListener("click", () => abrirModulo(route, { pushHistory: false }));
       }
     }
 
