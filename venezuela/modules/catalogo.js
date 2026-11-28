@@ -187,7 +187,6 @@ function crearIndiceExistentes(productosExistentes) {
     let metodoGanador = "";
 
     for (const cand of candidatos) {
-      // Si ambos tienen código explícito y distinto, no mezclar productos diferentes
       const ckCand = normalizarCodigoClave(cand.codigo || "");
       if (!itemExcel.sinCodigo && ck && ckCand && ck !== ckCand) continue;
 
@@ -365,7 +364,7 @@ export async function mount(root, state) {
             <button id="btnAbrirPanelExcel" type="button" class="hidden px-4 py-2 rounded-xl bg-sky-900 hover:bg-sky-800 text-white text-xs font-extrabold cursor-pointer">
               ↑ Actualizar Excel Planta
             </button>
-            <button id="btnRecargarCat" type="button" class="px-2.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold cursor-pointer">
+            <button id="btnRecargarCat" type="button" class="px-2.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold cursor-pointer" title="Sincronizar con servidor">
               ↻
             </button>
           </div>
@@ -471,11 +470,13 @@ export async function mount(root, state) {
   let provReporteActivo = null;
   let origen = "almacen";
   let proveedorActivoSubida = "";
+  let cargando = false;
 
   const tabAlm = root.querySelector("#tabAlmacen");
   const tabPla = root.querySelector("#tabPlanta");
   const tituloInv = root.querySelector("#tituloInv");
   const btnAbrirExcel = root.querySelector("#btnAbrirPanelExcel");
+  const btnRecargar = root.querySelector("#btnRecargarCat");
   const panelProv = root.querySelector("#panelSelectorProveedor");
   const inpProv = root.querySelector("#inpProveedorExcel");
   const sugProv = root.querySelector("#sugerenciasProv");
@@ -693,16 +694,19 @@ export async function mount(root, state) {
   });
 
   function poblarFiltros() {
+    const catActual = catEl.value;
+    const provActual = provFilterEl.value;
+
     const cats = Array.from(new Set(productos.map((p) => p.categoria || "SIN CATEGORÍA"))).sort((a, b) => a.localeCompare(b, "es"));
     catEl.innerHTML = `<option value="">Todas las Categorías (${cats.length})</option>` +
-      cats.map((c) => `<option value="${c}">${c}</option>`).join("");
+      cats.map((c) => `<option value="${c}" ${c === catActual ? "selected" : ""}>${c}</option>`).join("");
 
     const provs = Array.from(new Set([
       ...proveedores.map((pr) => pr.nombre),
       ...productos.map((p) => p.proveedor).filter(Boolean)
     ])).sort((a, b) => a.localeCompare(b, "es"));
     provFilterEl.innerHTML = `<option value="">Todos los Proveedores (${provs.length})</option>` +
-      provs.map((pr) => `<option value="${pr}">${pr}</option>`).join("");
+      provs.map((pr) => `<option value="${pr}" ${pr === provActual ? "selected" : ""}>${pr}</option>`).join("");
   }
 
   function obtenerFiltrados() {
@@ -761,6 +765,7 @@ export async function mount(root, state) {
   }
 
   function render() {
+    if (!root.isConnected) return;
     actualizarTabsUI();
     renderPanelCambios();
 
@@ -1022,35 +1027,70 @@ export async function mount(root, state) {
           : `¡Planta actualizada para ${provNombre}!\n• Nuevos en Almacén (en 0): ${nuevos.length}\n• Subieron de precio costo: ${subieronPrecio.length}\n• No había y ahora sí en Planta: ${llegaron.length}\n• Había y ya no hay en Planta: ${agotados.length}` +
             (crucesInteligentes > 0 ? `\n• Cruces inteligentes: ${crucesInteligentes}` : "")
       );
-      await cargarCatalogo();
+      state.invalidarCacheCatalogo?.();
+      await cargarCatalogo(true);
     } catch (err) {
       progWrap.classList.add("hidden");
       alert("Error actualizando Excel: " + err.message);
     }
   });
 
-  async function cargarCatalogo() {
-    const [snapCat, snapNov, snapProv] = await Promise.all([
-      getDocs(refs.catalogo()),
-      getDocs(refs.historialNovedades()),
-      getDocs(refs.proveedores())
-    ]);
-    productos = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
-    proveedores = snapProv.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+  async function cargarCatalogo(forzar = false) {
+    if (cargando) return;
+    cargando = true;
+    btnRecargar.disabled = true;
+    btnRecargar.textContent = "...";
 
-    reportesPorProv = new Map();
-    snapNov.docs.forEach((d) => {
-      if (d.id.startsWith("prov_")) {
-        const data = d.data();
-        const pid = data.proveedorId || d.id.replace(/^prov_/, "");
-        reportesPorProv.set(pid, { ...data, proveedorId: pid });
+    try {
+      const [listaCat, snapNov, listaProv] = await Promise.all([
+        typeof state.obtenerCatalogo === "function"
+          ? state.obtenerCatalogo({ forzar })
+          : getDocs(refs.catalogo()).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        getDocs(refs.historialNovedades()),
+        typeof state.obtenerProveedores === "function"
+          ? state.obtenerProveedores({ forzar })
+          : getDocs(refs.proveedores()).then((s) =>
+              s.docs.map((d) => ({ id: d.id, ...d.data() }))
+                .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"))
+            )
+      ]);
+
+      if (!root.isConnected) return;
+
+      productos = listaCat;
+      proveedores = listaProv;
+
+      reportesPorProv = new Map();
+      snapNov.docs.forEach((d) => {
+        if (d.id.startsWith("prov_")) {
+          const data = d.data();
+          const pid = data.proveedorId || d.id.replace(/^prov_/, "");
+          reportesPorProv.set(pid, { ...data, proveedorId: pid });
+        }
+      });
+
+      poblarFiltros();
+      render();
+    } catch (err) {
+      if (!root.isConnected) return;
+      root.querySelector("#subResumenCat").textContent = "Error al sincronizar inventario";
+      contEl.innerHTML = `
+        <div class="ve-card text-center py-10 space-y-3">
+          <div class="text-xs font-extrabold text-rose-700">No se pudo cargar el inventario.</div>
+          <div class="text-[11px] text-slate-500">${err?.message || "Verifica tu conexión e intenta de nuevo."}</div>
+          <button type="button" id="btnReintentarCat" class="px-4 py-2 rounded-xl bg-slate-950 text-white text-xs font-extrabold cursor-pointer">
+            ↻ Reintentar
+          </button>
+        </div>
+      `;
+      contEl.querySelector("#btnReintentarCat")?.addEventListener("click", () => cargarCatalogo(true));
+    } finally {
+      cargando = false;
+      if (root.isConnected) {
+        btnRecargar.disabled = false;
+        btnRecargar.textContent = "↻";
       }
-    });
-
-    poblarFiltros();
-    render();
+    }
   }
 
   tabAlm.addEventListener("click", () => { origen = "almacen"; render(); });
@@ -1066,7 +1106,7 @@ export async function mount(root, state) {
   });
   catEl.addEventListener("change", render);
   soloStockEl.addEventListener("change", render);
-  root.querySelector("#btnRecargarCat").addEventListener("click", cargarCatalogo);
+  btnRecargar.addEventListener("click", () => cargarCatalogo(true));
 
-  await cargarCatalogo();
+  await cargarCatalogo(false);
 }
