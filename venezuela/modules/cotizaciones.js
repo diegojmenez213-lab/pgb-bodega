@@ -134,7 +134,7 @@ export async function mount(root, state) {
               </button>
             </div>
             <div id="cotResultados" class="space-y-1.5 max-h-72 overflow-y-auto">
-              <div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos...</div>
+              <div class="text-xs text-slate-400 text-center py-6">Sincronizando catálogo...</div>
             </div>
           </div>
         </div>
@@ -200,6 +200,7 @@ export async function mount(root, state) {
   const cartEl = root.querySelector("#cotCarrito");
 
   function actualizarFolioUI() {
+    if (!root.isConnected) return;
     root.querySelector("#nextCotFolioTxt").textContent = String(ultimoFolioCot + 1).padStart(5, "0");
   }
 
@@ -357,6 +358,7 @@ export async function mount(root, state) {
   });
 
   function renderTotales() {
+    if (!root.isConnected) return;
     const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precioUsd, 0);
     const tasas = getTasaActiva(state);
     root.querySelector("#cotTotalUsd").textContent = `$${total.toFixed(2)}`;
@@ -367,6 +369,7 @@ export async function mount(root, state) {
   }
 
   function renderCarrito() {
+    if (!root.isConnected) return;
     if (!carrito.length) {
       cartEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Sin productos en la cotización.</div>`;
     } else {
@@ -398,6 +401,7 @@ export async function mount(root, state) {
   }
 
   function renderBusqueda() {
+    if (!root.isConnected) return;
     const q = busqEl.value.trim();
     if (!q && !busqAbierta) {
       resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos...</div>`;
@@ -607,12 +611,15 @@ export async function mount(root, state) {
       alert("Error guardando cotización: " + err.message);
     } finally {
       guardando = false;
-      btn.disabled = false;
-      btn.textContent = "Guardar Cotización y Generar PDF";
+      if (root.isConnected) {
+        btn.disabled = false;
+        btn.textContent = "Guardar Cotización y Generar PDF";
+      }
     }
   });
 
   function renderListaCotizaciones() {
+    if (!root.isConnected) return;
     const q = root.querySelector("#busqCotGuardadas").value.trim().toLowerCase();
     const cont = root.querySelector("#listaCotizaciones");
 
@@ -681,13 +688,14 @@ export async function mount(root, state) {
     window.removeEventListener("ve-tasa-changed", window.__veCotTasaHandler);
   }
   window.__veCotTasaHandler = () => {
-    if (state.rutaActual !== "cotizaciones") return;
+    if (state.rutaActual !== "cotizaciones" || !root.isConnected) return;
     renderTotales();
   };
   window.addEventListener("ve-tasa-changed", window.__veCotTasaHandler);
 
   async function cargarCotizaciones() {
     const snap = await getDocs(refs.cotizaciones());
+    if (!root.isConnected) return;
     cotizaciones = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => Number(b.creadoTs || 0) - Number(a.creadoTs || 0));
@@ -695,12 +703,23 @@ export async function mount(root, state) {
   }
 
   actualizarFolioUI();
-  const [snapCat, snapCli] = await Promise.all([
-    getDocs(refs.catalogo()),
-    getDocs(refs.clientes())
+  const [listaCat, snapCli, snapCot] = await Promise.all([
+    typeof state.obtenerCatalogo === "function"
+      ? state.obtenerCatalogo()
+      : getDocs(refs.catalogo()).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    getDocs(refs.clientes()),
+    getDocs(refs.cotizaciones())
   ]);
-  catalogo = snapCat.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  if (!root.isConnected) return;
+
+  catalogo = listaCat;
   clientes = snapCli.docs.map((d) => ({ id: d.id, ...d.data() }));
-  await cargarCotizaciones();
+  cotizaciones = snapCot.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => Number(b.creadoTs || 0) - Number(a.creadoTs || 0));
+
+  resEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-6">Escribe o toca "Disponibles" para agregar repuestos...</div>`;
+  renderListaCotizaciones();
   renderCarrito();
 }
