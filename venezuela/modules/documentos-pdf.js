@@ -1,4 +1,5 @@
 // venezuela/modules/documentos-pdf.js
+import { obtenerFechaLocalIso } from "../core/db.js";
 
 function fmtNum(n) {
   return Number(n || 0).toLocaleString("es-VE", {
@@ -13,6 +14,18 @@ function escaparHtml(str = "") {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function formatearFechaVE(fechaInput = "", fallbackTs = 0) {
+  const raw = String(fechaInput || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split("-");
+    return `${d}/${m}/${y}`;
+  }
+  if (raw) return raw;
+  const iso = obtenerFechaLocalIso(fallbackTs || Date.now());
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 function obtenerLogoDocumento(empresa = {}) {
@@ -31,9 +44,10 @@ function construirFilasTotales(totalUsd, monedas = ["USD", "BS"], tasas = {}) {
   const bcv = Number(tasas.bcvActiva || tasas.bcvHoy || 0);
   const eur = Number(tasas.eur || 0);
   const usdt = Number(tasas.usdt || 0);
+  const listaMonedas = Array.isArray(monedas) && monedas.length ? monedas : ["USD", "BS"];
   const filas = [];
 
-  if (monedas.includes("USD")) {
+  if (listaMonedas.includes("USD")) {
     filas.push(`
       <tr class="tot-row tot-main">
         <td>TOTAL USD</td>
@@ -41,7 +55,7 @@ function construirFilasTotales(totalUsd, monedas = ["USD", "BS"], tasas = {}) {
       </tr>
     `);
   }
-  if (monedas.includes("BS") && bcv > 0) {
+  if (listaMonedas.includes("BS") && bcv > 0) {
     filas.push(`
       <tr class="tot-row">
         <td>TOTAL Bs. (BCV ${bcv.toFixed(2)})</td>
@@ -49,7 +63,7 @@ function construirFilasTotales(totalUsd, monedas = ["USD", "BS"], tasas = {}) {
       </tr>
     `);
   }
-  if (monedas.includes("USDT")) {
+  if (listaMonedas.includes("USDT")) {
     const valUsdt = bcv > 0 && usdt > 0 ? (usd * bcv) / usdt : usd;
     filas.push(`
       <tr class="tot-row">
@@ -58,7 +72,7 @@ function construirFilasTotales(totalUsd, monedas = ["USD", "BS"], tasas = {}) {
       </tr>
     `);
   }
-  if (monedas.includes("EUR") && bcv > 0 && eur > 0) {
+  if (listaMonedas.includes("EUR") && bcv > 0 && eur > 0) {
     filas.push(`
       <tr class="tot-row">
         <td>TOTAL EUR (BCV ${eur.toFixed(2)})</td>
@@ -118,10 +132,11 @@ export function imprimirDocumentoCarta({
   tasas = {},
   pagos = [],
   fecha = "",
-  observaciones = ""
+  observaciones = "",
+  anulada = false
 } = {}) {
   const logo = obtenerLogoDocumento(empresa);
-  const fechaTxt = fecha || new Date().toLocaleDateString("es-VE");
+  const fechaTxt = formatearFechaVE(fecha);
   const nombreEmp = escaparHtml(empresa.nombre || "MI EMPRESA");
   const rifEmp = escaparHtml(empresa.rif || "");
   const dirEmp = escaparHtml(empresa.direccion || "");
@@ -131,7 +146,7 @@ export function imprimirDocumentoCarta({
   const nomCli = escaparHtml(cliente.nombre || "Consumidor Final");
   const docCli = escaparHtml(cliente.documento || "V-00000000");
 
-  const filasItems = items.map((it) => {
+  const filasItems = (items || []).map((it) => {
     const cant = Number(it.cantidad || 1);
     const pUnit = Number(it.precioUsd || 0);
     const sub = cant * pUnit;
@@ -243,6 +258,18 @@ export function imprimirDocumentoCarta({
           font-size: 11px;
           color: #475569;
           margin-top: 4px;
+        }
+        .badge-anulada {
+          display: inline-block;
+          margin-top: 6px;
+          padding: 2px 8px;
+          border-radius: 4px;
+          background: #fee2e2;
+          color: #b91c1c;
+          border: 1px solid #fca5a5;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
         }
         .cliente-box {
           margin-top: 12px;
@@ -372,6 +399,7 @@ export function imprimirDocumentoCarta({
             <div class="doc-type">${escaparHtml(tipo)}</div>
             <div class="doc-folio">N° ${escaparHtml(folio)}</div>
             <div class="doc-fecha">Fecha: ${escaparHtml(fechaTxt)}</div>
+            ${anulada ? `<div class="badge-anulada">ANULADA</div>` : ""}
           </div>
         </div>
 
@@ -425,10 +453,11 @@ export function imprimirTicket80mm({
   tasas = {},
   pagos = [],
   fecha = "",
-  observaciones = ""
+  observaciones = "",
+  anulada = false
 } = {}) {
   const logo = obtenerLogoDocumento(empresa);
-  const fechaTxt = fecha || new Date().toLocaleDateString("es-VE");
+  const fechaTxt = formatearFechaVE(fecha);
 
   const html = `
     <!DOCTYPE html>
@@ -470,11 +499,12 @@ export function imprimirTicket80mm({
       </div>
       <hr />
       <div class="row"><span class="bold">${escaparHtml(tipo)}</span><span class="bold">#${escaparHtml(folio)}</span></div>
+      ${anulada ? `<div class="center bold">*** DOCUMENTO ANULADO ***</div>` : ""}
       <div>Fecha: ${escaparHtml(fechaTxt)}</div>
       <div>Cliente: ${escaparHtml(cliente.nombre || "Consumidor Final")}</div>
       <div>Doc: ${escaparHtml(cliente.documento || "V-00000000")}</div>
       <hr />
-      ${items.map((it) => `
+      ${(items || []).map((it) => `
         <div class="item">
           <div class="bold">${escaparHtml(it.codigo || "")} - ${escaparHtml(it.descripcion || "")}</div>
           <div class="row">
@@ -500,4 +530,62 @@ export function imprimirTicket80mm({
   `;
 
   abrirVentanaImpresion(html, `Ticket #${folio}`);
+}
+
+export function abrirDocumentoPDF(tipoDoc, registro = {}, state = {}) {
+  const esCotizacion = String(tipoDoc || "").toLowerCase() === "cotizacion";
+  const tasasBase = state?.tasas || {};
+  const bcvActual =
+    state?.modoTasaBCV === "manana" && Number(tasasBase.bcvManana || 0) > 0
+      ? Number(tasasBase.bcvManana)
+      : Number(tasasBase.bcvHoy || 0);
+  const bcvDoc = Number(registro.tasaBcvUsada || 0) > 0 ? Number(registro.tasaBcvUsada) : bcvActual;
+
+  const tasasDoc = {
+    ...tasasBase,
+    bcvActiva: bcvDoc,
+    bcvHoy: bcvDoc
+  };
+
+  const fechaDoc = formatearFechaVE(registro.fechaIso || "", registro.creadoTs || 0);
+  const obsPartes = [];
+
+  if (registro.anulada) {
+    obsPartes.push("DOCUMENTO ANULADO.");
+  }
+
+  if (esCotizacion) {
+    obsPartes.push("Presupuesto referencial sujeto a disponibilidad de inventario y tasa BCV vigente.");
+  } else {
+    const descFavor = Number(registro.saldoFavorAplicadoUsd || 0);
+    const vuelto = Number(registro.vueltoEntregadoUsd || 0);
+    const sobrepago = Number(registro.sobrepagoUsd || 0);
+    const saldoPend = Number(registro.saldoPendienteUsd || 0);
+
+    if (descFavor > 0.01) obsPartes.push(`Saldo a favor descontado: -$${descFavor.toFixed(2)}.`);
+    if (vuelto > 0.01) obsPartes.push(`Vuelto entregado: $${vuelto.toFixed(2)}.`);
+    if (sobrepago > 0.01) obsPartes.push(`Acreditado a saldo a favor: +$${sobrepago.toFixed(2)}.`);
+
+    if (!registro.anulada && (registro.esCredito || saldoPend > 0.01)) {
+      const plazo = Number(registro.diasCredito || 15);
+      obsPartes.push(`Crédito (${plazo} días) • Saldo pendiente: $${saldoPend.toFixed(2)}.`);
+    } else if (!registro.anulada && Array.isArray(registro.abonos) && registro.abonos.length) {
+      obsPartes.push("Nota saldada.");
+    }
+  }
+
+  imprimirDocumentoCarta({
+    tipo: esCotizacion ? "COTIZACIÓN" : "NOTA DE ENTREGA",
+    folio: registro.folio || registro.id || "00001",
+    empresa: state?.empresa || {},
+    cliente: registro.cliente || { documento: "V-00000000", nombre: "Consumidor Final" },
+    items: registro.items || [],
+    totalUsd: Number(registro.totalUsd || 0),
+    monedas: Array.isArray(registro.monedas) && registro.monedas.length ? registro.monedas : ["USD", "BS"],
+    tasas: tasasDoc,
+    pagos: esCotizacion ? [] : (registro.pagos || []),
+    fecha: fechaDoc,
+    observaciones: obsPartes.join(" "),
+    anulada: Boolean(registro.anulada)
+  });
 }
